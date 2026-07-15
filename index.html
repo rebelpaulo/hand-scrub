@@ -666,6 +666,7 @@ let anyHand = false;            // qualquer mão visível (tempo ou som)
 let fistActive = false, rollAnchor = 0, volAnchor = 0.6; // knob de volume
 let swipeHist = [];             // trajetória do pulso p/ deteção de swipe
 let lastSwipeAt = 0;            // cooldown do swipe
+let lastPalmAt = 0;             // último frame com palma aberta (graça)
 let grabbing = false, anchorX = 0, anchorTime = 0;   // drag mode
 let lastFrameTime = 0;
 
@@ -757,10 +758,13 @@ function isFist(lm, handSize) {
   for (const t of [8, 12, 16, 20]) if (dist(lm[t], lm[0]) / handSize < 1.3) curled++;
   return curled >= 3;
 }
-function isOpenPalm(lm, handSize) {
-  // mão toda aberta: as 4 pontas bem esticadas (longe do pulso)
+function isOpenPalm(lm) {
+  // dedo esticado = ponta mais longe do pulso do que a articulação PIP.
+  // (limiar absoluto falhava no mindinho, que é curto — o swipe nunca disparava)
   let extended = 0;
-  for (const t of [8, 12, 16, 20]) if (dist(lm[t], lm[0]) / handSize > 1.6) extended++;
+  for (const [tip, pip] of [[8, 6], [12, 10], [16, 14], [20, 18]]) {
+    if (dist(lm[tip], lm[0]) > dist(lm[pip], lm[0]) * 1.1) extended++;
+  }
   return extended >= 4;
 }
 function trackSwipe(lm) {
@@ -768,18 +772,18 @@ function trackSwipe(lm) {
   // tempo é suspenso, senão o swipe atirava o vídeo novo logo para o fim
   const t = performance.now(), x = lm[0].x;
   swipeHist.push({ t, x });
-  while (swipeHist.length && t - swipeHist[0].t > 250) swipeHist.shift();
+  while (swipeHist.length && t - swipeHist[0].t > 350) swipeHist.shift();
   if (swipeHist.length < 3) return "idle";
   const dx = x - swipeHist[0].x;
   const v = dx / Math.max((t - swipeHist[0].t) / 1000, 0.01); // fração da imagem / s
   if (t - lastSwipeAt < 900) return "moving"; // cooldown pós-swipe também segura o tempo
-  if (Math.abs(v) > 1.6 && Math.abs(dx) > 0.18) {
+  if (Math.abs(v) > 1.1 && Math.abs(dx) > 0.14) {
     lastSwipeAt = t; swipeHist = [];
     // preview espelhada: mão para a ESQUERDA do utilizador → x da imagem sobe → próxima cena
     selectScene((activeScene + (v > 0 ? 1 : SCENES.length - 1)) % SCENES.length);
     return "fired";
   }
-  return Math.abs(v) > 0.8 ? "moving" : "idle";
+  return Math.abs(v) > 0.6 ? "moving" : "idle";
 }
 
 function processHands(res) {
@@ -842,10 +846,14 @@ function processHands(res) {
   const handSize = dist(lm[0], lm[9]) || 0.0001;
   // palma toda aberta na mão do tempo + movimento lateral rápido = trocar de vídeo
   let swipeState = "idle";
-  if (isOpenPalm(lm, handSize)) swipeState = trackSwipe(lm); else swipeHist = [];
+  const palmOpen = isOpenPalm(lm);
+  if (palmOpen) { lastPalmAt = performance.now(); swipeState = trackSwipe(lm); }
+  else if (performance.now() - lastPalmAt > 150) swipeHist = []; // graça p/ frames perdidos em movimento rápido
+  else if (swipeHist.length) swipeState = "moving"; // em graça com trajetória viva: não retomar o scrub
   const pinch = dist(lm[4], lm[8]) / handSize;   // ~0.15 fechado · ~1.3 aberto
   const mode = $("mode").value;
-  pillHand.className = "pill on"; $("handState").textContent = "mão ok";
+  pillHand.className = "pill on";
+  $("handState").textContent = palmOpen ? "✋ swipe" : "mão ok"; // feedback em direto da deteção
 
   // linha entre polegar e indicador
   octx.beginPath(); octx.moveTo(lm[4].x * W, lm[4].y * H); octx.lineTo(lm[8].x * W, lm[8].y * H);
