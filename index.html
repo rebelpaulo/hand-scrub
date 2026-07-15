@@ -407,9 +407,14 @@ function renderTrim() {
   const a = trimIn / d * 100, b = (trimOut || d) / d * 100;
   $("trimRange").style.left = a + "%"; $("trimRange").style.width = (b - a) + "%";
   $("trimInH").style.left = a + "%"; $("trimOutH").style.left = b + "%";
-  for (const [el, val] of [[$("trimInH"), trimIn], [$("trimOutH"), trimOut || d]]) {
-    el.setAttribute("aria-valuemin", "0");
-    el.setAttribute("aria-valuemax", d.toFixed(1));
+  const ms = minSpan();
+  const bounds = [
+    [$("trimInH"), trimIn, 0, (trimOut || d) - ms],
+    [$("trimOutH"), trimOut || d, trimIn + ms, d],
+  ];
+  for (const [el, val, lo, hi] of bounds) {
+    el.setAttribute("aria-valuemin", lo.toFixed(1));
+    el.setAttribute("aria-valuemax", hi.toFixed(1));
     el.setAttribute("aria-valuenow", val.toFixed(1));
   }
   $("trimLabel").textContent = trimIn.toFixed(1) + "s → " + (trimOut || d).toFixed(1) + "s";
@@ -609,6 +614,7 @@ let anyHand = false;            // qualquer mão visível (tempo ou punho)
 let timeHandPos = null;         // latch: posição do pulso da mão do tempo
 let fistHandPos = null;         // latch: posição do pulso do punho (volume)
 let fistActive = false, rollAnchor = 0, volAnchor = 0.6; // knob de volume
+let fistSeenAt = 0;             // último frame com punho visível (graça p/ oclusão)
 let grabbing = false, anchorX = 0, anchorTime = 0;   // drag mode
 let lastFrameTime = 0, lastShownTime = 0;
 
@@ -730,13 +736,18 @@ function processHands(res) {
   }
   if (!timeLm) {
     for (const h of hands) {
+      // nunca promover uma mão colada ao latch do punho (mesmo que um frame a
+      // classifique como aberta) — era o role-swap que o latch quer impedir
+      if (fistHandPos && d2(h, fistHandPos) < 0.09) continue;
       const hs = dist(h[0], h[9]) || 0.0001;
       if (!isFist(h, hs)) { timeLm = h; break; }
     }
   }
   fistLm = hands.find(h => h !== timeLm && isFist(h, dist(h[0], h[9]) || 0.0001)) || null;
   if (timeLm) timeHandPos = { x: timeLm[0].x, y: timeLm[0].y };
-  fistHandPos = fistLm ? { x: fistLm[0].x, y: fistLm[0].y } : null;
+  const nowMs = performance.now();
+  if (fistLm) { fistHandPos = { x: fistLm[0].x, y: fistLm[0].y }; fistSeenAt = nowMs; }
+  else if (nowMs - fistSeenAt > 1000) fistHandPos = null; // período de graça p/ oclusões
   anyHand = hands.length > 0;
   if (!anyHand) { timeHandPos = null; fistHandPos = null; }
 
