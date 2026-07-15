@@ -34,9 +34,13 @@ in-browser mais fiável/rápido e mais recomendado.
 - **Papéis fixos por mão** (handedness): a mão direita controla o tempo, a
   esquerda o som — troca nas definições ("Trocar mãos").
 - **🎵 Música na mão do som**: punho fechado roda como um botão de volume
-  (Gymnopédie No.1, Kevin MacLeod, CC BY 3.0); **palma toda aberta + swipe
-  horizontal** troca de vídeo (próximo/anterior). Tempo e som funcionam em
+  (Gymnopédie No.1, Kevin MacLeod, CC BY 3.0). Tempo e som funcionam em
   simultâneo.
+- **Swipe na mão do tempo**: palma toda aberta + movimento horizontal rápido
+  troca de vídeo (próximo/anterior).
+- **☁️ Persistência na cloud (Supabase)**: os cortes e a cena ativa gravam-se
+  na tabela `hand_config` (projeto ROTDUBAY) — abre a app noutro dispositivo
+  e o setup vem da cloud (prioridade: link `#cfg` > cloud > localStorage).
 - **Auto-reset**: sem mãos à frente da câmara, o vídeo rebobina lentamente
   para o início do corte (pronto para o próximo visitante).
 - **🔗 Partilhar setup**: o botão 🔗 copia um link com os cortes e a cena
