@@ -28,18 +28,27 @@ in-browser mais fiável/rápido e mais recomendado.
   desabrochar em time-lapse — e **upload dos teus vídeos** (múltiplos, locais,
   nunca saem do browser). Dica: para máxima fluidez re-codifica os teus clips
   com `ffmpeg -i in.mp4 -c:v libx264 -x264-params keyint=1 -an out.mp4`.
+- **✂️ Trim por cena**: define início/fim (ex.: só dos 4s aos 8s) com pegas
+  arrastáveis e preview em direto; o gesto, o play e o auto-reset ficam
+  confinados ao intervalo. Guardado por cena.
+- **🎵 Música com a outra mão**: fecha o punho e roda-o como um botão de
+  volume — sobe e desce a música (Gymnopédie No.1, Kevin MacLeod, CC BY 3.0).
+  A mão aberta controla o tempo; o punho controla o som; funcionam em
+  simultâneo.
 - **Auto-reset**: sem mãos à frente da câmara, o vídeo rebobina lentamente
-  para o início (pronto para o próximo visitante).
+  para o início do corte (pronto para o próximo visitante).
 - **Som**: whoosh sintetizado (WebAudio) proporcional à velocidade da viagem
   no tempo.
 - UI esconde-se após 4 s de inatividade · **F** = ecrã inteiro · **Espaço** =
   play/pause.
 
 ## Correr localmente
-A câmara exige `localhost` ou HTTPS:
+A câmara exige `localhost` ou HTTPS. Usa um servidor com suporte de **Range
+requests** (o `python3 -m http.server` NÃO tem — o Chrome marca os vídeos como
+não-seekable e o scrub fica preso em 0s):
 
 ```bash
-python3 -m http.server 8777
+npx serve -l 8777
 # abrir http://localhost:8777
 ```
 

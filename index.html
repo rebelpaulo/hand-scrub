@@ -142,6 +142,35 @@
   .set .val { color: var(--text); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
   .set input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
 
+  /* ---------- trim editor ---------- */
+  #trimPanel {
+    position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%);
+    width: min(640px, calc(100vw - 32px)); z-index: 65;
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+    display: none; flex-direction: column; gap: 12px;
+  }
+  #trimPanel.open { display: flex; }
+  .trim-head { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); }
+  .trim-head b { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .trim-strip {
+    position: relative; height: 34px; border-radius: 9px;
+    background: #151a24; border: 1px solid var(--line);
+  }
+  .trim-range {
+    position: absolute; top: 0; bottom: 0; border-radius: 8px;
+    background: linear-gradient(90deg, #818cf866, #5eead466);
+    border: 1px solid var(--accent);
+  }
+  .trim-handle {
+    position: absolute; top: -5px; bottom: -5px; width: 14px;
+    transform: translateX(-50%); border-radius: 6px; cursor: ew-resize;
+    background: var(--accent-2); border: 2px solid #fff3; touch-action: none;
+    box-shadow: 0 4px 10px #0008; z-index: 2;
+  }
+  .trim-handle.out { background: var(--accent); }
+  .trim-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
   #toast {
     position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
     background: var(--panel); border: 1px solid var(--line); border-radius: 99px;
@@ -153,6 +182,7 @@
 </head>
 <body>
   <video id="player" muted playsinline preload="auto"></video>
+  <audio id="music" loop preload="auto" src="media/music.mp3"></audio>
   <div id="progress"></div>
 
   <!-- draggable hand-tracking preview -->
@@ -169,6 +199,7 @@
       <div class="hud">
         <span class="pill" id="pillHand"><span class="led"></span><b id="handState">—</b></span>
         <span class="pill" id="pillOpen"><span class="led"></span><b id="openVal">—</b></span>
+        <span class="pill" id="pillVol"><span class="led"></span><b id="volVal">🎵 —</b></span>
       </div>
       <div id="pipResize" title="Redimensionar"></div>
     </div>
@@ -178,9 +209,10 @@
   <!-- start screen -->
   <div id="startOverlay">
     <h1>✋ Pinch Scrub</h1>
-    <p><b>Abre os dedos</b> (polegar + indicador) e o vídeo anda para a frente —
-       quanto mais abres, mais depressa. <b>Fecha-os</b> e o tempo recua.
-       A meio, o tempo pára. O foguetão descola na tua mão.</p>
+    <p>A abertura dos dedos é a linha do tempo: <b>fechados = início</b> do vídeo,
+       <b>abertos ao máximo = fim</b> — abre e fecha e o vídeo percorre esse
+       caminho contigo. Com a outra mão, <b>fecha o punho e roda-o</b> 🎵
+       para subir ou descer a música.</p>
     <button class="btn primary" id="startBtn">Ativar câmara</button>
     <div class="err" id="startErr"></div>
   </div>
@@ -193,6 +225,7 @@
       <option value="aperture">✌️ Abrir/Fechar</option>
       <option value="drag">🤏 Arrastar</option>
     </select>
+    <button class="btn" id="trimBtn" title="Trim da cena">✂️</button>
     <button class="btn" id="playBtn" title="Reproduzir/Pausar">▶</button>
     <button class="btn" id="fsBtn" title="Ecrã inteiro (F)">⛶</button>
     <button class="btn" id="gearBtn" title="Definições">⚙</button>
@@ -205,7 +238,7 @@
         <input type="range" id="smooth" min="0.05" max="0.5" step="0.01" value="0.18"><span class="val" id="smoothVal">0.18</span>
       </div>
     </div>
-    <div class="set"><span>Velocidade máx / sensibilidade</span>
+    <div class="set"><span>Sensibilidade (arrastar)</span>
       <div style="display:flex;align-items:center;gap:8px">
         <input type="range" id="sens" min="0.5" max="4" step="0.1" value="1.6"><span class="val" id="sensVal">1.6×</span>
       </div>
@@ -217,6 +250,22 @@
     </div>
     <div class="set"><span>Auto-reset sem mãos</span><input type="checkbox" id="autoReset" checked></div>
     <div class="set"><span>Som (whoosh ao viajar no tempo)</span><input type="checkbox" id="soundOn" checked></div>
+    <div class="set"><span>Música (punho fechado roda o volume)</span><input type="checkbox" id="musicOn" checked></div>
+    <div style="font-size:10.5px;color:var(--muted)">🎵 Gymnopédie No.1 — Kevin MacLeod (CC BY 3.0)</div>
+  </div>
+
+  <!-- editor de trim -->
+  <div id="trimPanel">
+    <div class="trim-head"><span>✂️ Trim da cena — arrasta as pegas</span><b id="trimLabel">—</b></div>
+    <div class="trim-strip" id="trimStrip">
+      <div class="trim-range" id="trimRange"></div>
+      <div class="trim-handle" id="trimInH" title="Início"></div>
+      <div class="trim-handle out" id="trimOutH" title="Fim"></div>
+    </div>
+    <div class="trim-actions">
+      <button class="btn" id="trimReset">Repor</button>
+      <button class="btn" id="trimClose">Fechar</button>
+    </div>
   </div>
 
   <div id="toast"></div>
@@ -299,13 +348,92 @@ smooth.oninput = () => $("smoothVal").textContent = (+smooth.value).toFixed(2);
 sens.oninput = () => $("sensVal").textContent = (+sens.value).toFixed(1) + "×";
 thresh.oninput = () => $("threshVal").textContent = (+thresh.value).toFixed(2);
 
-/* progress bar */
+/* progress bar (dentro do intervalo de trim) */
 function syncProgress() {
   const d = player.duration || 0;
-  $("progress").style.width = (d ? (player.currentTime / d) * 100 : 0) + "%";
+  const a = trimIn, b = trimOut || d, span = Math.max(0.001, b - a);
+  $("progress").style.width = (d ? Math.min(1, Math.max(0, (player.currentTime - a) / span)) * 100 : 0) + "%";
   requestAnimationFrame(syncProgress);
 }
 requestAnimationFrame(syncProgress);
+
+/* ================= música (volume por rotação do punho) ================= */
+const music = $("music");
+let musicVol = 0.6;
+music.volume = musicVol;
+$("musicOn").addEventListener("change", () => {
+  if ($("musicOn").checked && running) music.play().catch(() => { /* autoplay */ });
+  else music.pause();
+});
+
+/* ================= trim editor ================= */
+let trimIn = 0, trimOut = 0; // trimOut=0 → até ao fim (definido no loadedmetadata)
+let trims = {};
+try { trims = JSON.parse(localStorage.getItem("scene-trims") || "{}"); } catch { trims = {}; }
+function trimKey() { return SCENES[activeScene].name + "|" + (player.duration || 0).toFixed(1); }
+function saveTrim() {
+  trims[trimKey()] = { in: trimIn, out: trimOut };
+  try { localStorage.setItem("scene-trims", JSON.stringify(trims)); } catch { /* opcional */ }
+}
+player.addEventListener("timeupdate", () => {
+  // garante o loop dentro do trim também sem a câmara ativa
+  const end = trimOut || player.duration || 0;
+  if (!player.paused && end && player.currentTime >= end - 0.05) player.currentTime = trimIn;
+});
+player.addEventListener("loadedmetadata", () => {
+  const t = trims[trimKey()];
+  trimIn = t ? Math.min(Math.max(0, t.in), player.duration) : 0;
+  trimOut = t ? Math.min(Math.max(trimIn + 0.5, t.out), player.duration) : player.duration;
+  displayedTime = targetTime = trimIn;
+  player.currentTime = trimIn;
+  renderTrim();
+});
+const trimPanel = $("trimPanel"), trimStrip = $("trimStrip");
+$("trimBtn").onclick = () => { trimPanel.classList.toggle("open"); renderTrim(); };
+$("trimClose").onclick = () => trimPanel.classList.remove("open");
+$("trimReset").onclick = () => {
+  trimIn = 0; trimOut = player.duration || 0;
+  saveTrim(); renderTrim(); toast("Trim reposto");
+};
+function renderTrim() {
+  const d = player.duration || 0;
+  if (!d) { $("trimLabel").textContent = "—"; return; }
+  const a = trimIn / d * 100, b = (trimOut || d) / d * 100;
+  $("trimRange").style.left = a + "%"; $("trimRange").style.width = (b - a) + "%";
+  $("trimInH").style.left = a + "%"; $("trimOutH").style.left = b + "%";
+  $("trimLabel").textContent = trimIn.toFixed(1) + "s → " + (trimOut || d).toFixed(1) + "s";
+}
+function bindTrimHandle(h, isIn) {
+  h.addEventListener("pointerdown", e => {
+    e.stopPropagation();
+    try { h.setPointerCapture(e.pointerId); } catch { /* ponteiro já inativo */ }
+    const move = ev => {
+      const d = player.duration || 0; if (!d) return;
+      const r = trimStrip.getBoundingClientRect();
+      const t = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * d;
+      if (isIn) trimIn = Math.min(Math.max(0, t), (trimOut || d) - 0.5);
+      else trimOut = Math.max(Math.min(d, t), trimIn + 0.5);
+      // preview em direto do ponto de corte (seek all-intra é instantâneo)
+      player.pause();
+      player.currentTime = isIn ? trimIn : trimOut;
+      displayedTime = targetTime = player.currentTime;
+      renderTrim();
+    };
+    const up = ev => {
+      h.removeEventListener("pointermove", move);
+      h.removeEventListener("pointerup", up);
+      h.removeEventListener("pointercancel", up);
+      if (h.hasPointerCapture?.(ev.pointerId)) h.releasePointerCapture(ev.pointerId);
+      displayedTime = targetTime = trimIn; player.currentTime = trimIn; // volta ao início do corte
+      saveTrim(); renderTrim();
+    };
+    h.addEventListener("pointermove", move);
+    h.addEventListener("pointerup", up);
+    h.addEventListener("pointercancel", up);
+  });
+}
+bindTrimHandle($("trimInH"), true);
+bindTrimHandle($("trimOutH"), false);
 
 /* ================= draggable PiP ================= */
 const pip = $("pip");
@@ -446,8 +574,9 @@ let fpsEMA = 0, lastT = performance.now(), lastCamFrameAt = performance.now();
 // control state
 let displayedTime = 0;          // smoothed time we render
 let targetTime = 0;             // where the gesture wants us
-let gestureSpeed = 0;           // ×tempo-real (modo abrir/fechar)
-let handVisible = false;
+let handVisible = false;        // mão de controlo do tempo visível
+let anyHand = false;            // qualquer mão visível (tempo ou punho)
+let fistActive = false, rollAnchor = 0, volAnchor = 0.6; // knob de volume
 let grabbing = false, anchorX = 0, anchorTime = 0;   // drag mode
 let lastFrameTime = 0, lastShownTime = 0;
 
@@ -459,7 +588,7 @@ async function initModel() {
       modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
       delegate: "GPU"
     },
-    runningMode: "VIDEO", numHands: 1
+    runningMode: "VIDEO", numHands: 2
   });
 }
 
@@ -479,8 +608,9 @@ $("startBtn").onclick = async () => {
     toast("✌️ Abre e fecha os dedos");
     lastFrameTime = performance.now(); lastCamFrameAt = lastFrameTime;
     stream.getVideoTracks()[0]?.addEventListener("ended", () => {
-      handVisible = false; grabbing = false; gestureSpeed = 0;
+      handVisible = false; anyHand = false; grabbing = false; fistActive = false;
     });
+    if ($("musicOn").checked) music.play().catch(() => { /* autoplay bloqueado */ });
     document.addEventListener("visibilitychange", () => { lastFrameTime = performance.now(); });
     loop();
   } catch (e) {
@@ -499,9 +629,9 @@ function loop() {
     const res = landmarker.detectForVideo(cam, now);
     processHands(res);
     lastCamFrameAt = now;
-  } else if (now - lastCamFrameAt > 1500 && handVisible) {
+  } else if (now - lastCamFrameAt > 1500 && (handVisible || anyHand)) {
     // câmara congelada/terminada: solta o gesto para não fazer scrub eterno
-    handVisible = false; grabbing = false; gestureSpeed = 0;
+    handVisible = false; anyHand = false; grabbing = false; fistActive = false;
   }
   applyTime(now);
   const dt = now - lastT; lastT = now;
@@ -510,24 +640,8 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
-function processHands(res) {
-  octx.clearRect(0, 0, overlay.width, overlay.height);
-  const hands = res.landmarks || [];
-  const pillHand = $("pillHand"), pillOpen = $("pillOpen");
-
-  if (!hands.length) {
-    handVisible = false; grabbing = false; gestureSpeed = 0;
-    $("handState").textContent = "sem mão"; $("openVal").textContent = "—";
-    pillHand.className = "pill"; pillOpen.className = "pill";
-    return;
-  }
-  handVisible = true;
-  if (!player.paused) player.pause(); // o gesto assume o controlo do tempo
-  const lm = hands[0];
-  const W = overlay.width, H = overlay.height;
-
-  // skeleton
-  octx.lineWidth = 4; octx.strokeStyle = "rgba(129,140,248,.85)";
+function drawHand(lm, W, H, stroke) {
+  octx.lineWidth = 4; octx.strokeStyle = stroke;
   for (const [a, b] of CONNECTIONS) {
     octx.beginPath(); octx.moveTo(lm[a].x * W, lm[a].y * H); octx.lineTo(lm[b].x * W, lm[b].y * H); octx.stroke();
   }
@@ -536,6 +650,62 @@ function processHands(res) {
     octx.beginPath(); octx.arc(lm[i].x * W, lm[i].y * H, tip ? 9 : 5, 0, Math.PI * 2);
     octx.fillStyle = tip ? "#5eead4" : "#e6e9f2"; octx.fill();
   }
+}
+function isFist(lm, handSize) {
+  // punho fechado: pelo menos 3 das 4 pontas dos dedos enroladas junto ao pulso
+  let curled = 0;
+  for (const t of [8, 12, 16, 20]) if (dist(lm[t], lm[0]) / handSize < 1.3) curled++;
+  return curled >= 3;
+}
+
+function processHands(res) {
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  const hands = res.landmarks || [];
+  const pillHand = $("pillHand"), pillOpen = $("pillOpen");
+  const W = overlay.width, H = overlay.height;
+
+  // classifica cada mão: punho fechado = volume da música · mão aberta = tempo
+  let timeLm = null, fistLm = null;
+  for (const h of hands) {
+    const hs = dist(h[0], h[9]) || 0.0001;
+    if (isFist(h, hs)) { if (!fistLm) fistLm = h; }
+    else if (!timeLm) timeLm = h;
+  }
+  anyHand = hands.length > 0;
+
+  // ---- punho: roda para subir/descer a música ----
+  if (fistLm && $("musicOn").checked) {
+    drawHand(fistLm, W, H, "rgba(250,204,21,.85)");
+    const roll = Math.atan2(fistLm[17].y - fistLm[5].y, fistLm[17].x - fistLm[5].x);
+    if (!fistActive) { fistActive = true; rollAnchor = roll; volAnchor = musicVol; }
+    let dAng = roll - rollAnchor;
+    while (dAng > Math.PI) dAng -= 2 * Math.PI;
+    while (dAng < -Math.PI) dAng += 2 * Math.PI;
+    musicVol = Math.min(1, Math.max(0, volAnchor + dAng / (Math.PI * 0.8)));
+    music.volume = musicVol;
+    $("pillVol").className = "pill hot";
+    // anel de volume à volta do punho
+    const cx = (fistLm[0].x + fistLm[9].x) / 2 * W, cy = (fistLm[0].y + fistLm[9].y) / 2 * H;
+    octx.beginPath(); octx.arc(cx, cy, 34, -Math.PI / 2, -Math.PI / 2 + musicVol * Math.PI * 2);
+    octx.lineWidth = 5; octx.strokeStyle = "rgba(250,204,21,.95)"; octx.stroke();
+  } else {
+    fistActive = false;
+    $("pillVol").className = $("musicOn").checked ? "pill on" : "pill";
+  }
+  $("volVal").textContent = "🎵 " + Math.round(musicVol * 100) + "%";
+
+  // ---- mão do tempo ----
+  if (!timeLm) {
+    handVisible = false; grabbing = false;
+    $("handState").textContent = anyHand ? "punho 🎵" : "sem mão";
+    $("openVal").textContent = "—";
+    pillHand.className = anyHand ? "pill on" : "pill"; pillOpen.className = "pill";
+    return;
+  }
+  handVisible = true;
+  if (!player.paused) player.pause(); // o gesto assume o controlo do tempo
+  const lm = timeLm;
+  drawHand(lm, W, H, "rgba(129,140,248,.85)");
 
   const handSize = dist(lm[0], lm[9]) || 0.0001;
   const pinch = dist(lm[4], lm[8]) / handSize;   // ~0.15 fechado · ~1.3 aberto
@@ -547,23 +717,18 @@ function processHands(res) {
   octx.lineWidth = 3;
 
   if (mode === "aperture") {
-    // velocidade, não posição: abrir além da zona morta avança, fechar recua
+    // posição direta: dedos fechados = início do corte, abertos ao máximo = fim
+    // (a abertura É a linha do tempo; a suavização faz o glide entre frames)
     const openness = Math.min(1, Math.max(0, (pinch - 0.30) / (1.10 - 0.30)));
-    const DEAD_LO = 0.40, DEAD_HI = 0.60;
-    if (openness > DEAD_HI) gestureSpeed = Math.pow((openness - DEAD_HI) / (1 - DEAD_HI), 1.4) * +sens.value;
-    else if (openness < DEAD_LO) gestureSpeed = -Math.pow((DEAD_LO - openness) / DEAD_LO, 1.4) * +sens.value;
-    else gestureSpeed = 0;
-    $("openVal").textContent = gestureSpeed > 0 ? "▶▶ " + gestureSpeed.toFixed(1) + "×"
-      : gestureSpeed < 0 ? "◀◀ " + (-gestureSpeed).toFixed(1) + "×" : "⏸";
-    pillOpen.className = gestureSpeed !== 0 ? "pill hot" : "pill on";
+    const tEnd = trimOut || player.duration || 0;
+    targetTime = trimIn + openness * (tEnd - trimIn);
+    $("openVal").textContent = (openness * 100).toFixed(0) + "%";
+    pillOpen.className = "pill hot";
     octx.strokeStyle = `rgba(94,234,212,${0.35 + openness * 0.6})`; octx.stroke();
-    // arco proporcional à velocidade (direção pela cor)
-    const mag = Math.min(1, Math.abs(gestureSpeed) / +sens.value);
+    // arco = fração do caminho percorrido
     const cx = (lm[4].x + lm[8].x) / 2 * W, cy = (lm[4].y + lm[8].y) / 2 * H;
-    octx.beginPath(); octx.arc(cx, cy, 18 + openness * 26, -Math.PI / 2, -Math.PI / 2 + mag * Math.PI * 2);
-    octx.lineWidth = 4;
-    octx.strokeStyle = gestureSpeed >= 0 ? "rgba(94,234,212,.9)" : "rgba(251,113,133,.9)";
-    octx.stroke();
+    octx.beginPath(); octx.arc(cx, cy, 18 + openness * 26, -Math.PI / 2, -Math.PI / 2 + openness * Math.PI * 2);
+    octx.lineWidth = 4; octx.strokeStyle = "rgba(94,234,212,.9)"; octx.stroke();
   } else {
     // drag mode (v1): pinch agarra, arrastar horizontal faz scrub
     const isPinch = pinch < +thresh.value;
@@ -592,23 +757,25 @@ function applyTime(now) {
   const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
   lastFrameTime = now;
   if (!dur) return;
+  const tEnd = trimOut || dur;
   if (!player.paused) {
-    // reprodução normal: sincroniza o estado do gesto e silencia o whoosh
+    // reprodução normal: faz loop dentro do trim e sincroniza o estado do gesto
+    if (player.currentTime >= tEnd - 0.05 || player.currentTime < trimIn) player.currentTime = trimIn;
     displayedTime = targetTime = player.currentTime;
     lastShownTime = player.currentTime;
     whoosh(0);
     return;
   }
-  if (handVisible && $("mode").value === "aperture") {
-    targetTime += gestureSpeed * dt; // integra a velocidade do gesto
-  } else if (!handVisible) {
+  if (!anyHand) {
     if ($("autoReset").checked) {
-      targetTime = Math.max(0, targetTime - dt * dur * 0.10); // rebobina suave
+      targetTime = Math.max(trimIn, targetTime - dt * dur * 0.10); // rebobina suave até ao início do corte
     } else {
       targetTime = displayedTime;
     }
+  } else if (!handVisible) {
+    targetTime = displayedTime; // só punho presente (a ajustar música): segura o tempo
   }
-  targetTime = Math.min(dur, Math.max(0, targetTime));
+  targetTime = Math.min(tEnd, Math.max(trimIn, targetTime));
   displayedTime += (targetTime - displayedTime) * +smooth.value;
   // só emite um novo seek quando o anterior terminou — evita fila de seeks (soluços)
   if (!player.seeking && Math.abs(displayedTime - player.currentTime) > 0.005) {
