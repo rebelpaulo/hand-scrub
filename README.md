@@ -15,14 +15,19 @@ in-browser mais fiável/rápido e mais recomendado.
 - **Vídeo em fullscreen**, preview do hand-tracking numa **janela flutuante
   arrastável** (posição memorizada).
 - **Dois modos de controlo**:
-  - ✌️ **Abrir/Fechar** (scrollytelling): a abertura polegar–indicador mapeia
-    diretamente para a posição no tempo, com suavização.
+  - ✌️ **Abrir/Fechar** (por omissão): a abertura polegar–indicador controla a
+    **velocidade** — abrir além do neutro avança (quanto mais aberto, mais
+    depressa), fechar recua, ao meio o tempo pára.
   - 🤏 **Arrastar**: pinch agarra a timeline, arrastar a mão faz scrub
     (como um drag de rato).
-- **Biblioteca de cenas** com presets de domínio público (Wikimedia Commons):
+- **Scrub fluido frame-a-frame**: os presets estão re-codificados **all-intra**
+  (todos os frames são keyframes, H.264) e servidos localmente — o seek é
+  instantâneo em qualquer direção, sem saltos entre keyframes.
+- **Biblioteca de cenas** (originais de domínio público, Wikimedia Commons):
   🚀 descolagem de Falcon 9 · ☢️ teste nuclear Baker Shot · 🌹🌼 flores a
-  desabrochar em time-lapse · 🐰 Big Buck Bunny — e **upload dos teus vídeos**
-  (múltiplos, locais, nunca saem do browser).
+  desabrochar em time-lapse — e **upload dos teus vídeos** (múltiplos, locais,
+  nunca saem do browser). Dica: para máxima fluidez re-codifica os teus clips
+  com `ffmpeg -i in.mp4 -c:v libx264 -x264-params keyint=1 -an out.mp4`.
 - **Auto-reset**: sem mãos à frente da câmara, o vídeo rebobina lentamente
   para o início (pronto para o próximo visitante).
 - **Som**: whoosh sintetizado (WebAudio) proporcional à velocidade da viagem
@@ -40,3 +45,5 @@ python3 -m http.server 8777
 
 ## Ficheiros
 - `index.html` — a app inteira (self-contained, sem build).
+- `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
+  domínio público).

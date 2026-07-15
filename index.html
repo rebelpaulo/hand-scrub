@@ -47,6 +47,26 @@
     border-bottom: 1px solid var(--line);
   }
   #pip .pip-h .fps { color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .pip-x {
+    appearance: none; border: none; background: none; color: var(--muted);
+    font-size: 13px; cursor: pointer; padding: 2px 4px; line-height: 1;
+  }
+  .pip-x:hover { color: var(--hot); }
+  #pipResize {
+    position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; z-index: 3;
+    cursor: nwse-resize; touch-action: none;
+    background: linear-gradient(135deg, transparent 50%, #8b95a8aa 50%);
+    border-bottom-right-radius: 4px;
+  }
+  #pipReopen {
+    position: fixed; right: 18px; bottom: 64px; z-index: 50;
+    width: 48px; height: 48px; border-radius: 50%; font-size: 22px;
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); color: var(--text); cursor: pointer;
+    box-shadow: 0 12px 30px -12px #000; transition: .15s;
+  }
+  #pipReopen:hover { border-color: var(--accent); transform: scale(1.06); }
+  #pipReopen[hidden] { display: none; }
   #pip .view { position: relative; aspect-ratio: 4/3; background: #05070a; }
   video#cam, canvas#overlay {
     position: absolute; inset: 0; width: 100%; height: 100%;
@@ -137,7 +157,12 @@
 
   <!-- draggable hand-tracking preview -->
   <div id="pip" hidden>
-    <div class="pip-h"><span>✋ Camera tracking</span><span class="fps" id="fps">— fps</span></div>
+    <div class="pip-h"><span>✋ Camera tracking</span>
+      <span style="display:flex;align-items:center;gap:8px">
+        <span class="fps" id="fps">— fps</span>
+        <button class="pip-x" id="pipClose" title="Fechar preview">✕</button>
+      </span>
+    </div>
     <div class="view">
       <video id="cam" playsinline muted></video>
       <canvas id="overlay"></canvas>
@@ -145,14 +170,17 @@
         <span class="pill" id="pillHand"><span class="led"></span><b id="handState">—</b></span>
         <span class="pill" id="pillOpen"><span class="led"></span><b id="openVal">—</b></span>
       </div>
+      <div id="pipResize" title="Redimensionar"></div>
     </div>
   </div>
+  <button id="pipReopen" title="Mostrar preview" hidden>✋</button>
 
   <!-- start screen -->
   <div id="startOverlay">
     <h1>✋ Pinch Scrub</h1>
-    <p><b>Abre os dedos</b> (polegar + indicador) e o vídeo avança.
-       <b>Fecha-os</b> e o tempo anda para trás. O foguetão descola na tua mão.</p>
+    <p><b>Abre os dedos</b> (polegar + indicador) e o vídeo anda para a frente —
+       quanto mais abres, mais depressa. <b>Fecha-os</b> e o tempo recua.
+       A meio, o tempo pára. O foguetão descola na tua mão.</p>
     <button class="btn primary" id="startBtn">Ativar câmara</button>
     <div class="err" id="startErr"></div>
   </div>
@@ -177,7 +205,7 @@
         <input type="range" id="smooth" min="0.05" max="0.5" step="0.01" value="0.18"><span class="val" id="smoothVal">0.18</span>
       </div>
     </div>
-    <div class="set"><span>Sensibilidade (arrastar)</span>
+    <div class="set"><span>Velocidade máx / sensibilidade</span>
       <div style="display:flex;align-items:center;gap:8px">
         <input type="range" id="sens" min="0.5" max="4" step="0.1" value="1.6"><span class="val" id="sensVal">1.6×</span>
       </div>
@@ -201,13 +229,13 @@ const $ = id => document.getElementById(id);
 const player = $("player"), cam = $("cam"), overlay = $("overlay"), octx = overlay.getContext("2d");
 
 /* ================= scenes ================= */
-const WM = "https://upload.wikimedia.org/wikipedia/commons/transcoded";
+// Presets locais re-codificados all-intra (todos os frames são keyframes):
+// o seek é instantâneo em qualquer direção → scrub fluido frame a frame.
 const SCENES = [
-  { name: "🚀 Foguetão", src: `${WM}/6/61/Falcon_9_-_Starlink_10-53_Launch_%281009147%29.webm/Falcon_9_-_Starlink_10-53_Launch_%281009147%29.webm.480p.vp9.webm` },
-  { name: "☢️ Bomba atómica", src: `${WM}/f/fa/Baker_Shot.ogv/Baker_Shot.ogv.480p.vp9.webm` },
-  { name: "🌹 Rosa", src: `${WM}/e/ea/Time-lapse_of_opening_red_rose_isolated_on_black_background.Blooming_red_roses_flower_buds.webm/Time-lapse_of_opening_red_rose_isolated_on_black_background.Blooming_red_roses_flower_buds.webm.1080p.vp9.webm` },
-  { name: "🌼 Peónia", src: `${WM}/b/b4/Time_lapse_of_Peony_flower_blooming.webm/Time_lapse_of_Peony_flower_blooming.webm.480p.vp9.webm` },
-  { name: "🐰 Bunny", src: "https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files/big_buck_bunny.mp4" },
+  { name: "🚀 Foguetão", src: "media/rocket.mp4" },
+  { name: "☢️ Bomba atómica", src: "media/bomb.mp4" },
+  { name: "🌹 Rosa", src: "media/rose.mp4" },
+  { name: "🌼 Peónia", src: "media/peony.mp4" },
 ];
 let activeScene = 0;
 
@@ -281,14 +309,9 @@ requestAnimationFrame(syncProgress);
 
 /* ================= draggable PiP ================= */
 const pip = $("pip");
+let pipClosed = false;
 (() => {
-  try {
-    const saved = localStorage.getItem("pip-pos");
-    if (saved) {
-      const { x, y } = JSON.parse(saved);
-      placePip(x, y);
-    }
-  } catch { /* persistência é opcional */ }
+  const reopen = $("pipReopen"), closeBtn = $("pipClose"), handle = $("pipResize");
   function placePip(x, y) {
     const w = pip.offsetWidth || 280, h = pip.offsetHeight || 240;
     x = Math.min(Math.max(0, x), Math.max(0, window.innerWidth - w));
@@ -296,8 +319,41 @@ const pip = $("pip");
     pip.style.left = x + "px"; pip.style.top = y + "px";
     pip.style.right = "auto"; pip.style.bottom = "auto";
   }
+  function saveState() {
+    const r = pip.getBoundingClientRect();
+    try {
+      localStorage.setItem("pip-state", JSON.stringify({ x: r.left, y: r.top, w: pip.offsetWidth, closed: pipClosed }));
+    } catch { /* persistência é opcional */ }
+  }
+  try {
+    const saved = localStorage.getItem("pip-state");
+    if (saved) {
+      const { x, y, w, closed } = JSON.parse(saved);
+      if (w) pip.style.width = Math.min(Math.max(200, w), window.innerWidth - 24) + "px";
+      if (typeof x === "number") placePip(x, y);
+      pipClosed = !!closed;
+    }
+  } catch { /* persistência é opcional */ }
+
+  // fechar / reabrir (a câmara continua a seguir a mão com o preview fechado)
+  closeBtn.addEventListener("click", e => {
+    e.stopPropagation();
+    pipClosed = true; saveState(); // guarda a geometria ANTES de esconder (senão mede 0×0)
+    pip.hidden = true; reopen.hidden = false;
+  });
+  reopen.addEventListener("click", () => {
+    pipClosed = false; pip.hidden = false; reopen.hidden = true; saveState();
+  });
+  // aplica estado fechado guardado quando a câmara arrancar
+  pip.applySavedVisibility = () => {
+    pip.hidden = pipClosed; reopen.hidden = !pipClosed;
+    if (!pipClosed) { const r = pip.getBoundingClientRect(); placePip(r.left, r.top); }
+  };
+
+  // arrastar (ignora cliques nos controlos e na pega de resize)
   let sx, sy, ox, oy, dragging = false;
   pip.addEventListener("pointerdown", e => {
+    if (e.target.closest(".pip-x, #pipResize")) return;
     dragging = true; pip.classList.add("dragging");
     try { pip.setPointerCapture(e.pointerId); } catch { /* ponteiro já inativo */ }
     const r = pip.getBoundingClientRect();
@@ -311,13 +367,40 @@ const pip = $("pip");
     if (!dragging) return;
     dragging = false; pip.classList.remove("dragging");
     if (pip.hasPointerCapture?.(e.pointerId)) pip.releasePointerCapture(e.pointerId);
-    const r = pip.getBoundingClientRect();
-    try { localStorage.setItem("pip-pos", JSON.stringify({ x: r.left, y: r.top })); } catch { /* opcional */ }
+    saveState();
   };
   pip.addEventListener("pointerup", endDrag);
   pip.addEventListener("pointercancel", endDrag);
   pip.addEventListener("lostpointercapture", endDrag);
+
+  // redimensionar pela pega (largura; altura segue o aspect-ratio)
+  let rsx, rw, resizing = false;
+  handle.addEventListener("pointerdown", e => {
+    e.stopPropagation();
+    resizing = true; rsx = e.clientX; rw = pip.offsetWidth;
+    try { handle.setPointerCapture(e.pointerId); } catch { /* ponteiro já inativo */ }
+  });
+  handle.addEventListener("pointermove", e => {
+    if (!resizing) return;
+    const w = Math.min(Math.max(200, rw + e.clientX - rsx), window.innerWidth - 24);
+    pip.style.width = w + "px";
+  });
+  const endResize = e => {
+    if (!resizing) return;
+    resizing = false;
+    if (handle.hasPointerCapture?.(e.pointerId)) handle.releasePointerCapture(e.pointerId);
+    const r = pip.getBoundingClientRect();
+    placePip(r.left, r.top); // garante que continua dentro do ecrã
+    saveState();
+  };
+  handle.addEventListener("pointerup", endResize);
+  handle.addEventListener("pointercancel", endResize);
+  handle.addEventListener("lostpointercapture", endResize);
+
   window.addEventListener("resize", () => {
+    if (pip.offsetWidth > window.innerWidth - 24) {
+      pip.style.width = Math.max(200, window.innerWidth - 24) + "px";
+    }
     const r = pip.getBoundingClientRect();
     placePip(r.left, r.top);
   });
@@ -358,11 +441,12 @@ const CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10
   [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
 let landmarker = null, running = false, lastVideoTime = -1;
-let fpsEMA = 0, lastT = performance.now();
+let fpsEMA = 0, lastT = performance.now(), lastCamFrameAt = performance.now();
 
 // control state
 let displayedTime = 0;          // smoothed time we render
 let targetTime = 0;             // where the gesture wants us
+let gestureSpeed = 0;           // ×tempo-real (modo abrir/fechar)
 let handVisible = false;
 let grabbing = false, anchorX = 0, anchorTime = 0;   // drag mode
 let lastFrameTime = 0, lastShownTime = 0;
@@ -391,9 +475,13 @@ $("startBtn").onclick = async () => {
     overlay.width = cam.videoWidth; overlay.height = cam.videoHeight;
     running = true;
     $("startOverlay").remove();
-    pip.hidden = false; $("bar").hidden = false;
+    pip.applySavedVisibility(); $("bar").hidden = false;
     toast("✌️ Abre e fecha os dedos");
-    lastFrameTime = performance.now();
+    lastFrameTime = performance.now(); lastCamFrameAt = lastFrameTime;
+    stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+      handVisible = false; grabbing = false; gestureSpeed = 0;
+    });
+    document.addEventListener("visibilitychange", () => { lastFrameTime = performance.now(); });
     loop();
   } catch (e) {
     err.textContent = "Erro: " + e.message;
@@ -410,6 +498,10 @@ function loop() {
     lastVideoTime = cam.currentTime;
     const res = landmarker.detectForVideo(cam, now);
     processHands(res);
+    lastCamFrameAt = now;
+  } else if (now - lastCamFrameAt > 1500 && handVisible) {
+    // câmara congelada/terminada: solta o gesto para não fazer scrub eterno
+    handVisible = false; grabbing = false; gestureSpeed = 0;
   }
   applyTime(now);
   const dt = now - lastT; lastT = now;
@@ -424,7 +516,7 @@ function processHands(res) {
   const pillHand = $("pillHand"), pillOpen = $("pillOpen");
 
   if (!hands.length) {
-    handVisible = false; grabbing = false;
+    handVisible = false; grabbing = false; gestureSpeed = 0;
     $("handState").textContent = "sem mão"; $("openVal").textContent = "—";
     pillHand.className = "pill"; pillOpen.className = "pill";
     return;
@@ -455,15 +547,23 @@ function processHands(res) {
   octx.lineWidth = 3;
 
   if (mode === "aperture") {
+    // velocidade, não posição: abrir além da zona morta avança, fechar recua
     const openness = Math.min(1, Math.max(0, (pinch - 0.30) / (1.10 - 0.30)));
-    targetTime = openness * (player.duration || 0);
-    $("openVal").textContent = (openness * 100).toFixed(0) + "%";
-    pillOpen.className = openness > 0.02 ? "pill hot" : "pill on";
+    const DEAD_LO = 0.40, DEAD_HI = 0.60;
+    if (openness > DEAD_HI) gestureSpeed = Math.pow((openness - DEAD_HI) / (1 - DEAD_HI), 1.4) * +sens.value;
+    else if (openness < DEAD_LO) gestureSpeed = -Math.pow((DEAD_LO - openness) / DEAD_LO, 1.4) * +sens.value;
+    else gestureSpeed = 0;
+    $("openVal").textContent = gestureSpeed > 0 ? "▶▶ " + gestureSpeed.toFixed(1) + "×"
+      : gestureSpeed < 0 ? "◀◀ " + (-gestureSpeed).toFixed(1) + "×" : "⏸";
+    pillOpen.className = gestureSpeed !== 0 ? "pill hot" : "pill on";
     octx.strokeStyle = `rgba(94,234,212,${0.35 + openness * 0.6})`; octx.stroke();
-    // arco de abertura
+    // arco proporcional à velocidade (direção pela cor)
+    const mag = Math.min(1, Math.abs(gestureSpeed) / +sens.value);
     const cx = (lm[4].x + lm[8].x) / 2 * W, cy = (lm[4].y + lm[8].y) / 2 * H;
-    octx.beginPath(); octx.arc(cx, cy, 18 + openness * 26, -Math.PI / 2, -Math.PI / 2 + openness * Math.PI * 2);
-    octx.lineWidth = 4; octx.strokeStyle = "rgba(251,113,133,.9)"; octx.stroke();
+    octx.beginPath(); octx.arc(cx, cy, 18 + openness * 26, -Math.PI / 2, -Math.PI / 2 + mag * Math.PI * 2);
+    octx.lineWidth = 4;
+    octx.strokeStyle = gestureSpeed >= 0 ? "rgba(94,234,212,.9)" : "rgba(251,113,133,.9)";
+    octx.stroke();
   } else {
     // drag mode (v1): pinch agarra, arrastar horizontal faz scrub
     const isPinch = pinch < +thresh.value;
@@ -488,7 +588,8 @@ function processHands(res) {
 
 function applyTime(now) {
   const dur = player.duration || 0;
-  const dt = (now - lastFrameTime) / 1000;
+  // clamp: um tab suspenso não pode integrar segundos de gesto num só frame
+  const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
   lastFrameTime = now;
   if (!dur) return;
   if (!player.paused) {
@@ -498,7 +599,9 @@ function applyTime(now) {
     whoosh(0);
     return;
   }
-  if (!handVisible) {
+  if (handVisible && $("mode").value === "aperture") {
+    targetTime += gestureSpeed * dt; // integra a velocidade do gesto
+  } else if (!handVisible) {
     if ($("autoReset").checked) {
       targetTime = Math.max(0, targetTime - dt * dur * 0.10); // rebobina suave
     } else {
@@ -507,7 +610,8 @@ function applyTime(now) {
   }
   targetTime = Math.min(dur, Math.max(0, targetTime));
   displayedTime += (targetTime - displayedTime) * +smooth.value;
-  if (Math.abs(displayedTime - player.currentTime) > 0.01) {
+  // só emite um novo seek quando o anterior terminou — evita fila de seeks (soluços)
+  if (!player.seeking && Math.abs(displayedTime - player.currentTime) > 0.005) {
     player.currentTime = displayedTime;
   }
   // whoosh proporcional à velocidade de viagem no tempo
