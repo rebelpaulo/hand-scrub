@@ -39,9 +39,10 @@ in-browser mais fiável/rápido e mais recomendado.
 - **🎵 Música na mão do som**: punho fechado roda como um botão de volume
   (Gymnopédie No.1, Kevin MacLeod, CC BY 3.0). Tempo e som funcionam em
   simultâneo.
-- **Swipe na mão do som** (backhand slap): palma toda aberta + movimento
-  horizontal rápido troca de vídeo (próximo/anterior). A mão do tempo fica
-  100% dedicada à timeline.
+- **Swipe na mão do som**: varre a mão (não fechada) de um lado ao outro —
+  ≥22% do ecrã em ≤450ms, claramente na horizontal — e troca de vídeo
+  (próximo/anterior). Sem exigência de pose: funciona mesmo com o motion
+  blur do movimento. A mão do tempo fica 100% dedicada à timeline.
 - **☁️ Persistência na cloud (Supabase)**: os cortes e a cena ativa gravam-se
   na tabela `hand_config` (projeto ROTDUBAY) — abre a app noutro dispositivo
   e o setup vem da cloud (prioridade: link `#cfg` > cloud > localStorage).
