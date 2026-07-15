@@ -211,8 +211,8 @@
     <h1>✋ Pinch Scrub</h1>
     <p>Mão direita: a abertura dos dedos é a linha do tempo — <b>fechados =
        início</b>, <b>abertos ao máximo = fim</b>. Mão esquerda: <b>punho
-       fechado roda</b> 🎵 a música; <b>palma aberta + chapada lateral</b>
-       troca de vídeo. Na cena <b>🌊 Moisés</b>: junta as mãos como a rezar e
+       fechado roda</b> 🎵 a música; <b>varre-a de um lado ao outro</b>
+       para trocar de vídeo. Na cena <b>🌊 Moisés</b>: junta as mãos como a rezar e
        <b>afasta-as</b> — as águas separam-se contigo; junta-as e voltam.</p>
     <button class="btn primary" id="startBtn">Ativar câmara</button>
     <div class="err" id="startErr"></div>
@@ -228,7 +228,6 @@
       <option value="drag">🤏 Arrastar</option>
     </select>
     <button class="btn" id="trimBtn" title="Trim da cena">✂️</button>
-    <button class="btn" id="shareBtn" title="Copiar link com os cortes">🔗</button>
     <button class="btn" id="playBtn" title="Reproduzir/Pausar">▶</button>
     <button class="btn" id="fsBtn" title="Ecrã inteiro (F)">⛶</button>
     <button class="btn" id="gearBtn" title="Definições">⚙</button>
@@ -552,18 +551,9 @@ function bindTrimHandle(h, isIn) {
 bindTrimHandle($("trimInH"), true);
 bindTrimHandle($("trimOutH"), false);
 
-/* partilha: cortes + cena ativa embutidos no URL (abre igual noutro dispositivo) */
-$("shareBtn").onclick = async () => {
-  const presetTrims = {};
-  for (const [k, v] of Object.entries(trims)) {
-    if (!k.startsWith("upload:")) presetTrims[k] = { in: +v.in.toFixed(2), out: +v.out.toFixed(2) };
-  }
-  const payload = btoa(JSON.stringify({ t: presetTrims, s: activeScene }));
-  const url = location.origin + location.pathname + "#cfg=" + payload;
-  try { await navigator.clipboard.writeText(url); toast("🔗 Link copiado — os cortes vão com ele"); }
-  catch { prompt("Copia o link:", url); }
-};
 (() => {
+  // (o botão de partilha por link foi removido — a cloud persiste o setup;
+  // links #cfg antigos continuam a ser honrados ao abrir)
   // ao abrir com #cfg=..., os cortes do link têm prioridade sobre o localStorage
   const m = location.hash.match(/#cfg=(.+)/);
   if (!m) return;
@@ -787,39 +777,27 @@ function isFist(lm, handSize) {
   for (const t of [8, 12, 16, 20]) if (dist(lm[t], lm[0]) / handSize < 1.3) curled++;
   return curled >= 3;
 }
-function isOpenPalm(lm) {
-  // dedo esticado = ponta mais longe do pulso do que a articulação PIP.
-  // (limiar absoluto falhava no mindinho, que é curto — o swipe nunca disparava)
-  let extended = 0;
-  for (const [tip, pip] of [[8, 6], [12, 10], [16, 14], [20, 18]]) {
-    if (dist(lm[tip], lm[0]) > dist(lm[pip], lm[0]) * 1.1) extended++;
-  }
-  return extended >= 4;
-}
 function trackSwipe(lm) {
-  // devolve 'idle' | 'moving' | 'fired' — em movimento lateral o controlo do
-  // tempo é suspenso, senão o swipe atirava o vídeo novo logo para o fim
-  const t = performance.now(), x = lm[0].x;
-  swipeHist.push({ t, x });
-  while (swipeHist.length && t - swipeHist[0].t > 350) swipeHist.shift();
-  if (swipeHist.length < 3) return "idle";
-  const dx = x - swipeHist[0].x;
-  const v = dx / Math.max((t - swipeHist[0].t) / 1000, 0.01); // fração da imagem / s
-  if (t - lastSwipeAt < 900) return "moving"; // cooldown pós-swipe também segura o tempo
-  if (Math.abs(v) > 1.1 && Math.abs(dx) > 0.14) {
+  // varrimento deliberado da mão do som (sem exigência de pose — a deteção de
+  // "palma aberta" falhava sempre durante o movimento, por blur): pulso a
+  // atravessar ≥22% do ecrã em ≤450ms, claramente na horizontal
+  const t = performance.now(), x = lm[0].x, y = lm[0].y;
+  swipeHist.push({ t, x, y });
+  while (swipeHist.length && t - swipeHist[0].t > 450) swipeHist.shift();
+  if (swipeHist.length < 4 || t - lastSwipeAt < 1000) return;
+  const dx = x - swipeHist[0].x, dy = y - swipeHist[0].y;
+  if (Math.abs(dx) > 0.22 && Math.abs(dx) > 2 * Math.abs(dy)) {
     lastSwipeAt = t; swipeHist = [];
     // preview espelhada: mão para a ESQUERDA do utilizador → x da imagem sobe → próxima cena
     // (salta cenas secretas/escondidas)
-    const dir = v > 0 ? 1 : -1;
+    const dir = dx > 0 ? 1 : -1;
     let next = activeScene;
     for (let k = 0; k < SCENES.length; k++) {
       next = (next + dir + SCENES.length) % SCENES.length;
       if (!SCENES[next].hidden) break;
     }
     selectScene(next);
-    return "fired";
   }
-  return Math.abs(v) > 0.6 ? "moving" : "idle";
 }
 
 function processHands(res) {
@@ -895,17 +873,15 @@ function processHands(res) {
   } else {
     fistActive = false;
     $("pillVol").className = $("musicOn").checked ? "pill on" : "pill";
-    if (soundLm && isOpenPalm(soundLm)) {
-      // backhand slap: palma aberta na mão do som + movimento lateral rápido
-      lastPalmAt = performance.now();
-      drawHand(soundLm, W, H, "rgba(94,234,212,.7)");
+    if (soundLm) {
+      // qualquer movimento lateral deliberado da mão do som (não-punho) = swipe
+      lastPalmAt = performance.now(); // último frame com a mão do som visível
+      drawHand(soundLm, W, H, "rgba(94,234,212,.6)");
       trackSwipe(soundLm);
-      $("volVal").textContent = "✋ swipe";
-    } else {
-      if (performance.now() - lastPalmAt > 150) swipeHist = []; // graça p/ blur do slap
-      if (soundLm) drawHand(soundLm, W, H, "rgba(152,162,182,.5)");
-      $("volVal").textContent = "🎵 " + Math.round(musicVol * 100) + "%";
+    } else if (performance.now() - lastPalmAt > 200) {
+      swipeHist = []; // graça: o blur do varrimento perde a mão 1-2 frames
     }
+    $("volVal").textContent = "🎵 " + Math.round(musicVol * 100) + "%";
   }
   if (fistLm) $("volVal").textContent = "🎵 " + Math.round(musicVol * 100) + "%";
 

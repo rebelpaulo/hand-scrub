@@ -39,17 +39,18 @@ in-browser mais fiável/rápido e mais recomendado.
 - **🎵 Música na mão do som**: punho fechado roda como um botão de volume
   (Gymnopédie No.1, Kevin MacLeod, CC BY 3.0). Tempo e som funcionam em
   simultâneo.
-- **Swipe na mão do som** (backhand slap): palma toda aberta + movimento
-  horizontal rápido troca de vídeo (próximo/anterior). A mão do tempo fica
-  100% dedicada à timeline.
+- **Swipe na mão do som**: varre a mão (não fechada) de um lado ao outro —
+  ≥22% do ecrã em ≤450ms, claramente na horizontal — e troca de vídeo
+  (próximo/anterior). Sem exigência de pose: funciona mesmo com o motion
+  blur do movimento. A mão do tempo fica 100% dedicada à timeline.
 - **☁️ Persistência na cloud (Supabase)**: os cortes e a cena ativa gravam-se
   na tabela `hand_config` (projeto ROTDUBAY) — abre a app noutro dispositivo
   e o setup vem da cloud (prioridade: link `#cfg` > cloud > localStorage).
 - **Auto-reset**: sem mãos à frente da câmara, o vídeo rebobina lentamente
   para o início do corte (pronto para o próximo visitante).
-- **🔗 Partilhar setup**: o botão 🔗 copia um link com os cortes e a cena
-  ativa embutidos — abre noutro browser/dispositivo e a configuração vem
-  junto (os cortes também ficam no localStorage do dispositivo).
+- Links antigos com `#cfg=` continuam a ser honrados ao abrir (têm
+  prioridade sobre a cloud), mas o botão de partilha foi removido — a
+  base de dados já sincroniza o setup entre dispositivos.
 - UI esconde-se após 4 s de inatividade · **F** = ecrã inteiro · **Espaço** =
   play/pause.
 
