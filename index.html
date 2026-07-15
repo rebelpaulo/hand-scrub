@@ -209,10 +209,10 @@
   <!-- start screen -->
   <div id="startOverlay">
     <h1>✋ Pinch Scrub</h1>
-    <p>A abertura dos dedos é a linha do tempo: <b>fechados = início</b> do vídeo,
-       <b>abertos ao máximo = fim</b> — abre e fecha e o vídeo percorre esse
-       caminho contigo. Com a outra mão, <b>fecha o punho e roda-o</b> 🎵
-       para subir ou descer a música.</p>
+    <p>Mão direita: a abertura dos dedos é a linha do tempo — <b>fechados =
+       início</b>, <b>abertos ao máximo = fim</b>. Mão esquerda: <b>punho
+       fechado roda</b> 🎵 o volume da música; <b>palma toda aberta, swipe</b>
+       para trocar de vídeo. (Podes trocar as mãos nas definições ⚙.)</p>
     <button class="btn primary" id="startBtn">Ativar câmara</button>
     <div class="err" id="startErr"></div>
   </div>
@@ -226,6 +226,7 @@
       <option value="drag">🤏 Arrastar</option>
     </select>
     <button class="btn" id="trimBtn" title="Trim da cena">✂️</button>
+    <button class="btn" id="shareBtn" title="Copiar link com os cortes">🔗</button>
     <button class="btn" id="playBtn" title="Reproduzir/Pausar">▶</button>
     <button class="btn" id="fsBtn" title="Ecrã inteiro (F)">⛶</button>
     <button class="btn" id="gearBtn" title="Definições">⚙</button>
@@ -249,8 +250,8 @@
       </div>
     </div>
     <div class="set"><span>Auto-reset sem mãos</span><input type="checkbox" id="autoReset" checked></div>
-    <div class="set"><span>Som (whoosh ao viajar no tempo)</span><input type="checkbox" id="soundOn" checked></div>
     <div class="set"><span>Música (punho fechado roda o volume)</span><input type="checkbox" id="musicOn" checked></div>
+    <div class="set"><span>Trocar mãos (tempo ↔ som)</span><input type="checkbox" id="swapHands"></div>
     <div style="font-size:10.5px;color:var(--muted)">🎵 Gymnopédie No.1 — Kevin MacLeod (CC BY 3.0)</div>
   </div>
 
@@ -373,6 +374,7 @@ $("musicOn").addEventListener("change", () => {
 
 /* ================= trim editor ================= */
 let trimIn = 0, trimOut = 0; // trimOut=0 → até ao fim (definido no loadedmetadata)
+let pendingScene = 0;        // cena inicial (pode vir do link #cfg)
 let trims = {};
 try { trims = JSON.parse(localStorage.getItem("scene-trims") || "{}"); } catch { trims = {}; }
 function trimKey() { return SCENES[activeScene].id; }
@@ -469,6 +471,28 @@ function bindTrimHandle(h, isIn) {
 }
 bindTrimHandle($("trimInH"), true);
 bindTrimHandle($("trimOutH"), false);
+
+/* partilha: cortes + cena ativa embutidos no URL (abre igual noutro dispositivo) */
+$("shareBtn").onclick = async () => {
+  const presetTrims = {};
+  for (const [k, v] of Object.entries(trims)) {
+    if (!k.startsWith("upload:")) presetTrims[k] = { in: +v.in.toFixed(2), out: +v.out.toFixed(2) };
+  }
+  const payload = btoa(JSON.stringify({ t: presetTrims, s: activeScene }));
+  const url = location.origin + location.pathname + "#cfg=" + payload;
+  try { await navigator.clipboard.writeText(url); toast("🔗 Link copiado — os cortes vão com ele"); }
+  catch { prompt("Copia o link:", url); }
+};
+(() => {
+  // ao abrir com #cfg=..., os cortes do link têm prioridade sobre o localStorage
+  const m = location.hash.match(/#cfg=(.+)/);
+  if (!m) return;
+  try {
+    const cfg = JSON.parse(atob(m[1]));
+    if (cfg.t) { Object.assign(trims, cfg.t); try { localStorage.setItem("scene-trims", JSON.stringify(trims)); } catch { /* opcional */ } }
+    if (typeof cfg.s === "number" && SCENES[cfg.s]) pendingScene = cfg.s;
+  } catch { /* link inválido: ignora */ }
+})();
 
 /* ================= draggable PiP ================= */
 const pip = $("pip");
@@ -569,36 +593,6 @@ let pipClosed = false;
   });
 })();
 
-/* ================= sound: time-travel whoosh ================= */
-let audioCtx = null, noiseGain = null, noiseFilter = null;
-function initAudio() {
-  if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const len = audioCtx.sampleRate * 2;
-  const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-  const src = audioCtx.createBufferSource();
-  src.buffer = buf; src.loop = true;
-  noiseFilter = audioCtx.createBiquadFilter();
-  noiseFilter.type = "bandpass"; noiseFilter.frequency.value = 600; noiseFilter.Q.value = 1.2;
-  noiseGain = audioCtx.createGain(); noiseGain.gain.value = 0;
-  src.connect(noiseFilter).connect(noiseGain).connect(audioCtx.destination);
-  src.start();
-}
-function whoosh(speed) { // speed = |video-seconds per real second|
-  if (!audioCtx) return;
-  const t = audioCtx.currentTime;
-  if (!$("soundOn").checked) {
-    noiseGain.gain.cancelScheduledValues(t);
-    noiseGain.gain.setTargetAtTime(0, t, 0.02);
-    return;
-  }
-  const g = Math.min(0.35, Math.max(0, (speed - 0.15) * 0.12));
-  noiseGain.gain.setTargetAtTime(g, t, 0.08);
-  noiseFilter.frequency.setTargetAtTime(400 + Math.min(2400, speed * 500), t, 0.1);
-}
-
 /* ================= hand tracking ================= */
 const CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
   [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
@@ -610,13 +604,12 @@ let fpsEMA = 0, lastT = performance.now(), lastCamFrameAt = performance.now();
 let displayedTime = 0;          // smoothed time we render
 let targetTime = 0;             // where the gesture wants us
 let handVisible = false;        // mão de controlo do tempo visível
-let anyHand = false;            // qualquer mão visível (tempo ou punho)
-let timeHandPos = null;         // latch: posição do pulso da mão do tempo
-let fistHandPos = null;         // latch: posição do pulso do punho (volume)
+let anyHand = false;            // qualquer mão visível (tempo ou som)
 let fistActive = false, rollAnchor = 0, volAnchor = 0.6; // knob de volume
-let fistSeenAt = 0;             // último frame com punho visível (graça p/ oclusão)
+let swipeHist = [];             // trajetória do pulso p/ deteção de swipe
+let lastSwipeAt = 0;            // cooldown do swipe
 let grabbing = false, anchorX = 0, anchorTime = 0;   // drag mode
-let lastFrameTime = 0, lastShownTime = 0;
+let lastFrameTime = 0;
 
 async function initModel() {
   const fileset = await FilesetResolver.forVisionTasks(
@@ -642,7 +635,6 @@ $("startBtn").onclick = async () => {
         { once: true });
     });
   }
-  try { initAudio(); } catch { $("soundOn").checked = false; } // som é opcional
   try {
     if (!landmarker) await initModel();
     btn.textContent = "A ligar câmara…";
@@ -657,12 +649,8 @@ $("startBtn").onclick = async () => {
     stream.getVideoTracks()[0]?.addEventListener("ended", () => {
       // câmara desligada: pára tudo em vez de deixar música e loop pendurados
       handVisible = false; anyHand = false; grabbing = false; fistActive = false;
-      timeHandPos = null; running = false;
+      running = false;
       music.pause();
-      if (noiseGain && audioCtx) {
-        noiseGain.gain.cancelScheduledValues(audioCtx.currentTime);
-        noiseGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.02);
-      }
       toast("⚠️ Câmara desligada — recarrega a página para retomar");
     });
     document.addEventListener("visibilitychange", () => { lastFrameTime = performance.now(); });
@@ -686,7 +674,6 @@ function loop() {
   } else if (now - lastCamFrameAt > 1500 && (handVisible || anyHand)) {
     // câmara congelada/terminada: solta o gesto para não fazer scrub eterno
     handVisible = false; anyHand = false; grabbing = false; fistActive = false;
-    timeHandPos = null;
   }
   applyTime(now);
   const dt = now - lastT; lastT = now;
@@ -712,6 +699,25 @@ function isFist(lm, handSize) {
   for (const t of [8, 12, 16, 20]) if (dist(lm[t], lm[0]) / handSize < 1.3) curled++;
   return curled >= 3;
 }
+function isOpenPalm(lm, handSize) {
+  // mão toda aberta: as 4 pontas bem esticadas (longe do pulso)
+  let extended = 0;
+  for (const t of [8, 12, 16, 20]) if (dist(lm[t], lm[0]) / handSize > 1.6) extended++;
+  return extended >= 4;
+}
+function trackSwipe(lm) {
+  const t = performance.now(), x = lm[0].x;
+  swipeHist.push({ t, x });
+  while (swipeHist.length && t - swipeHist[0].t > 250) swipeHist.shift();
+  if (swipeHist.length < 3 || t - lastSwipeAt < 900) return;
+  const dx = x - swipeHist[0].x;
+  const v = dx / Math.max((t - swipeHist[0].t) / 1000, 0.01); // fração da imagem / s
+  if (Math.abs(v) > 1.6 && Math.abs(dx) > 0.18) {
+    lastSwipeAt = t; swipeHist = [];
+    // preview espelhada: mão para a ESQUERDA do utilizador → x da imagem sobe → próxima cena
+    selectScene((activeScene + (v > 0 ? 1 : SCENES.length - 1)) % SCENES.length);
+  }
+}
 
 function processHands(res) {
   octx.clearRect(0, 0, overlay.width, overlay.height);
@@ -719,47 +725,30 @@ function processHands(res) {
   const pillHand = $("pillHand"), pillOpen = $("pillOpen");
   const W = overlay.width, H = overlay.height;
 
-  // papel das mãos com latch por proximidade: a mão do tempo MANTÉM o papel
-  // mesmo quando fecha (senão virava punho de volume); o volume é só da outra mão
-  // latch duplo: um candidato só herda o papel do tempo se estiver mais perto
-  // do latch do tempo do que do latch do punho (senão, num cruzamento/oclusão,
-  // o punho era promovido a mão do tempo e largava o volume)
-  let timeLm = null, fistLm = null;
-  const d2 = (h, p) => p ? (h[0].x - p.x) ** 2 + (h[0].y - p.y) ** 2 : Infinity;
-  if (timeHandPos && hands.length) {
-    let best = null, bd = Infinity;
-    for (const h of hands) {
-      const dT = d2(h, timeHandPos);
-      if (dT < bd && dT <= d2(h, fistHandPos)) { bd = dT; best = h; }
-    }
-    if (bd < 0.09) timeLm = best; // ~0.3 em coords normalizadas
-  }
-  if (!timeLm) {
-    for (const h of hands) {
-      // nunca promover uma mão colada ao latch do punho (mesmo que um frame a
-      // classifique como aberta) — era o role-swap que o latch quer impedir
-      if (fistHandPos && d2(h, fistHandPos) < 0.09) continue;
-      const hs = dist(h[0], h[9]) || 0.0001;
-      if (!isFist(h, hs)) { timeLm = h; break; }
-    }
-  }
-  fistLm = hands.find(h => h !== timeLm && isFist(h, dist(h[0], h[9]) || 0.0001)) || null;
-  if (timeLm) timeHandPos = { x: timeLm[0].x, y: timeLm[0].y };
-  const nowMs = performance.now();
-  if (fistLm) { fistHandPos = { x: fistLm[0].x, y: fistLm[0].y }; fistSeenAt = nowMs; }
-  else if (nowMs - fistSeenAt > 1000) fistHandPos = null; // período de graça p/ oclusões
+  // papéis fixos por anatomia (handedness do MediaPipe): uma mão controla o
+  // tempo, a OUTRA controla o som — estável mesmo com as duas fechadas.
+  // "Trocar mãos" nas definições inverte.
+  const hd = res.handednesses || res.handedness || [];
+  const wantTime = $("swapHands").checked ? "Left" : "Right";
+  let timeLm = null, soundLm = null;
+  hands.forEach((h, i) => {
+    const label = hd[i]?.[0]?.categoryName || "";
+    if (label === wantTime) { if (!timeLm) timeLm = h; }
+    else if (!soundLm) soundLm = h;
+  });
+  const fistLm = (soundLm && isFist(soundLm, dist(soundLm[0], soundLm[9]) || 0.0001)) ? soundLm : null;
   anyHand = hands.length > 0;
-  if (!anyHand) { timeHandPos = null; fistHandPos = null; }
 
-  // ---- punho: roda para subir/descer a música ----
+  // ---- mão do som: punho roda o volume · palma aberta faz swipe de cena ----
   if (fistLm && $("musicOn").checked) {
+    swipeHist = [];
     drawHand(fistLm, W, H, "rgba(250,204,21,.85)");
     const roll = Math.atan2(fistLm[17].y - fistLm[5].y, fistLm[17].x - fistLm[5].x);
     if (!fistActive) { fistActive = true; rollAnchor = roll; volAnchor = musicVol; }
     let dAng = roll - rollAnchor;
     while (dAng > Math.PI) dAng -= 2 * Math.PI;
     while (dAng < -Math.PI) dAng += 2 * Math.PI;
-    musicVol = Math.min(1, Math.max(0, volAnchor + dAng / (Math.PI * 0.8)));
+    musicVol = Math.min(1, Math.max(0, volAnchor - dAng / (Math.PI * 0.8))); // direção invertida (pedido)
     music.volume = musicVol;
     $("pillVol").className = "pill hot";
     // anel de volume à volta do punho
@@ -769,6 +758,14 @@ function processHands(res) {
   } else {
     fistActive = false;
     $("pillVol").className = $("musicOn").checked ? "pill on" : "pill";
+    if (soundLm && isOpenPalm(soundLm, dist(soundLm[0], soundLm[9]) || 0.0001)) {
+      // palma toda aberta: swipe horizontal troca de vídeo
+      drawHand(soundLm, W, H, "rgba(94,234,212,.7)");
+      trackSwipe(soundLm);
+    } else {
+      swipeHist = [];
+      if (soundLm) drawHand(soundLm, W, H, "rgba(152,162,182,.5)");
+    }
   }
   $("volVal").textContent = "🎵 " + Math.round(musicVol * 100) + "%";
 
@@ -840,8 +837,6 @@ function applyTime(now) {
     // reprodução normal: faz loop dentro do trim e sincroniza o estado do gesto
     if (player.currentTime >= tEnd - 0.05 || player.currentTime < trimIn) player.currentTime = trimIn;
     displayedTime = targetTime = player.currentTime;
-    lastShownTime = player.currentTime;
-    whoosh(0);
     return;
   }
   if (!anyHand) {
@@ -860,14 +855,11 @@ function applyTime(now) {
   if (!player.seeking && Math.abs(displayedTime - player.currentTime) > 0.005) {
     player.currentTime = displayedTime;
   }
-  // whoosh proporcional à velocidade de viagem no tempo
-  if (dt > 0) whoosh(Math.abs(player.currentTime - lastShownTime) / dt);
-  lastShownTime = player.currentTime;
 }
 
 /* arranque: só depois de TODO o estado do módulo estar inicializado */
 renderChips();
-selectScene(0);
+selectScene(pendingScene);
 </script>
 </body>
 </html>
