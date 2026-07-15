@@ -82,13 +82,13 @@
     display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px);
     background: var(--panel); backdrop-filter: blur(10px);
     border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px;
-    z-index: 60; transition: opacity .4s, transform .4s;
+    z-index: 60; transition: opacity .4s, transform .4s; overflow-x: auto;
   }
   #bar[hidden], #pip[hidden] { display: none; }
   body.ui-hidden #bar { opacity: 0; transform: translateX(-50%) translateY(12px); pointer-events: none; }
   body.ui-hidden { cursor: none; }
 
-  .chips { display: flex; gap: 8px; overflow-x: auto; max-width: 46vw; scrollbar-width: none; }
+  .chips { display: flex; gap: 8px; overflow-x: auto; flex: 1 1 auto; min-width: 0; max-width: 46vw; scrollbar-width: none; }
   .chips::-webkit-scrollbar { display: none; }
   .chip {
     flex: 0 0 auto; border: 1px solid var(--line); background: #151a24;
@@ -260,9 +260,11 @@ $("playBtn").onclick = () => player.paused ? player.play() : player.pause();
 $("fsBtn").onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
 $("gearBtn").onclick = () => $("settings").classList.toggle("open");
 document.addEventListener("keydown", e => {
+  if (e.target.matches("input, select, button, textarea") || e.target.isContentEditable) return;
   if (e.code === "Space") { e.preventDefault(); $("playBtn").onclick(); }
   if (e.key === "f" || e.key === "F") $("fsBtn").onclick();
 });
+$("mode").addEventListener("change", () => { grabbing = false; targetTime = displayedTime; });
 
 const smooth = $("smooth"), sens = $("sens"), thresh = $("thresh");
 smooth.oninput = () => $("smoothVal").textContent = (+smooth.value).toFixed(2);
@@ -280,24 +282,24 @@ requestAnimationFrame(syncProgress);
 /* ================= draggable PiP ================= */
 const pip = $("pip");
 (() => {
-  const saved = localStorage.getItem("pip-pos");
-  if (saved) {
-    try {
+  try {
+    const saved = localStorage.getItem("pip-pos");
+    if (saved) {
       const { x, y } = JSON.parse(saved);
       placePip(x, y);
-    } catch { /* ignore */ }
-  }
+    }
+  } catch { /* persistência é opcional */ }
   function placePip(x, y) {
     const w = pip.offsetWidth || 280, h = pip.offsetHeight || 240;
-    x = Math.min(Math.max(0, x), window.innerWidth - w);
-    y = Math.min(Math.max(0, y), window.innerHeight - h);
+    x = Math.min(Math.max(0, x), Math.max(0, window.innerWidth - w));
+    y = Math.min(Math.max(0, y), Math.max(0, window.innerHeight - h));
     pip.style.left = x + "px"; pip.style.top = y + "px";
     pip.style.right = "auto"; pip.style.bottom = "auto";
   }
   let sx, sy, ox, oy, dragging = false;
   pip.addEventListener("pointerdown", e => {
     dragging = true; pip.classList.add("dragging");
-    pip.setPointerCapture(e.pointerId);
+    try { pip.setPointerCapture(e.pointerId); } catch { /* ponteiro já inativo */ }
     const r = pip.getBoundingClientRect();
     sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
   });
@@ -305,12 +307,16 @@ const pip = $("pip");
     if (!dragging) return;
     placePip(ox + e.clientX - sx, oy + e.clientY - sy);
   });
-  pip.addEventListener("pointerup", e => {
+  const endDrag = e => {
+    if (!dragging) return;
     dragging = false; pip.classList.remove("dragging");
-    pip.releasePointerCapture(e.pointerId);
+    if (pip.hasPointerCapture?.(e.pointerId)) pip.releasePointerCapture(e.pointerId);
     const r = pip.getBoundingClientRect();
-    localStorage.setItem("pip-pos", JSON.stringify({ x: r.left, y: r.top }));
-  });
+    try { localStorage.setItem("pip-pos", JSON.stringify({ x: r.left, y: r.top })); } catch { /* opcional */ }
+  };
+  pip.addEventListener("pointerup", endDrag);
+  pip.addEventListener("pointercancel", endDrag);
+  pip.addEventListener("lostpointercapture", endDrag);
   window.addEventListener("resize", () => {
     const r = pip.getBoundingClientRect();
     placePip(r.left, r.top);
@@ -335,10 +341,16 @@ function initAudio() {
   src.start();
 }
 function whoosh(speed) { // speed = |video-seconds per real second|
-  if (!audioCtx || !$("soundOn").checked) { if (noiseGain) noiseGain.gain.value = 0; return; }
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  if (!$("soundOn").checked) {
+    noiseGain.gain.cancelScheduledValues(t);
+    noiseGain.gain.setTargetAtTime(0, t, 0.02);
+    return;
+  }
   const g = Math.min(0.35, Math.max(0, (speed - 0.15) * 0.12));
-  noiseGain.gain.setTargetAtTime(g, audioCtx.currentTime, 0.08);
-  noiseFilter.frequency.setTargetAtTime(400 + Math.min(2400, speed * 500), audioCtx.currentTime, 0.1);
+  noiseGain.gain.setTargetAtTime(g, t, 0.08);
+  noiseFilter.frequency.setTargetAtTime(400 + Math.min(2400, speed * 500), t, 0.1);
 }
 
 /* ================= hand tracking ================= */
@@ -370,8 +382,8 @@ async function initModel() {
 $("startBtn").onclick = async () => {
   const btn = $("startBtn"), err = $("startErr");
   btn.disabled = true; btn.textContent = "A carregar modelo…";
+  try { initAudio(); } catch { $("soundOn").checked = false; } // som é opcional
   try {
-    initAudio();
     if (!landmarker) await initModel();
     btn.textContent = "A ligar câmara…";
     const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 960, height: 720, facingMode: "user" } });
@@ -418,6 +430,7 @@ function processHands(res) {
     return;
   }
   handVisible = true;
+  if (!player.paused) player.pause(); // o gesto assume o controlo do tempo
   const lm = hands[0];
   const W = overlay.width, H = overlay.height;
 
@@ -475,24 +488,31 @@ function processHands(res) {
 
 function applyTime(now) {
   const dur = player.duration || 0;
+  const dt = (now - lastFrameTime) / 1000;
+  lastFrameTime = now;
   if (!dur) return;
+  if (!player.paused) {
+    // reprodução normal: sincroniza o estado do gesto e silencia o whoosh
+    displayedTime = targetTime = player.currentTime;
+    lastShownTime = player.currentTime;
+    whoosh(0);
+    return;
+  }
   if (!handVisible) {
-    if ($("autoReset").checked && $("mode").value === "aperture") {
-      targetTime = Math.max(0, targetTime - (now - lastFrameTime) / 1000 * dur * 0.10); // rebobina suave
+    if ($("autoReset").checked) {
+      targetTime = Math.max(0, targetTime - dt * dur * 0.10); // rebobina suave
     } else {
       targetTime = displayedTime;
     }
   }
   targetTime = Math.min(dur, Math.max(0, targetTime));
   displayedTime += (targetTime - displayedTime) * +smooth.value;
-  if (player.paused && Math.abs(displayedTime - player.currentTime) > 0.01) {
+  if (Math.abs(displayedTime - player.currentTime) > 0.01) {
     player.currentTime = displayedTime;
   }
   // whoosh proporcional à velocidade de viagem no tempo
-  const dt = (now - lastFrameTime) / 1000;
   if (dt > 0) whoosh(Math.abs(player.currentTime - lastShownTime) / dt);
   lastShownTime = player.currentTime;
-  lastFrameTime = now;
 }
 
 /* arranque: só depois de TODO o estado do módulo estar inicializado */
