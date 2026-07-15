@@ -259,8 +259,8 @@
     <div class="trim-head"><span>✂️ Trim da cena — arrasta as pegas</span><b id="trimLabel">—</b></div>
     <div class="trim-strip" id="trimStrip">
       <div class="trim-range" id="trimRange"></div>
-      <div class="trim-handle" id="trimInH" title="Início"></div>
-      <div class="trim-handle out" id="trimOutH" title="Fim"></div>
+      <div class="trim-handle" id="trimInH" title="Início" tabindex="0" role="slider" aria-label="Início do corte"></div>
+      <div class="trim-handle out" id="trimOutH" title="Fim" tabindex="0" role="slider" aria-label="Fim do corte"></div>
     </div>
     <div class="trim-actions">
       <button class="btn" id="trimReset">Repor</button>
@@ -342,7 +342,7 @@ $("playBtn").onclick = () => player.paused ? player.play() : player.pause();
 $("fsBtn").onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
 $("gearBtn").onclick = () => $("settings").classList.toggle("open");
 document.addEventListener("keydown", e => {
-  if (e.target.matches("input, select, button, textarea") || e.target.isContentEditable) return;
+  if (e.target.matches("input, select, button, textarea, [role='slider']") || e.target.isContentEditable) return;
   if (e.code === "Space") { e.preventDefault(); $("playBtn").onclick(); }
   if (e.key === "f" || e.key === "F") $("fsBtn").onclick();
 });
@@ -407,9 +407,37 @@ function renderTrim() {
   const a = trimIn / d * 100, b = (trimOut || d) / d * 100;
   $("trimRange").style.left = a + "%"; $("trimRange").style.width = (b - a) + "%";
   $("trimInH").style.left = a + "%"; $("trimOutH").style.left = b + "%";
+  const ms = minSpan();
+  const bounds = [
+    [$("trimInH"), trimIn, 0, (trimOut || d) - ms],
+    [$("trimOutH"), trimOut || d, trimIn + ms, d],
+  ];
+  for (const [el, val, lo, hi] of bounds) {
+    el.setAttribute("aria-valuemin", lo.toFixed(1));
+    el.setAttribute("aria-valuemax", hi.toFixed(1));
+    el.setAttribute("aria-valuenow", val.toFixed(1));
+  }
   $("trimLabel").textContent = trimIn.toFixed(1) + "s → " + (trimOut || d).toFixed(1) + "s";
 }
 function bindTrimHandle(h, isIn) {
+  // teclado: setas ±0.1s (Shift ±1s), Home/End para os extremos
+  h.addEventListener("keydown", e => {
+    const d = player.duration || 0; if (!d) return;
+    const step = e.shiftKey ? 1 : 0.1; const ms = minSpan();
+    let t = isIn ? trimIn : trimOut;
+    if (e.key === "ArrowLeft" || e.key === "ArrowDown") t -= step;
+    else if (e.key === "ArrowRight" || e.key === "ArrowUp") t += step;
+    else if (e.key === "Home") t = isIn ? 0 : trimIn + ms;
+    else if (e.key === "End") t = isIn ? (trimOut || d) - ms : d;
+    else return;
+    e.preventDefault(); e.stopPropagation();
+    if (isIn) trimIn = Math.max(0, Math.min(t, (trimOut || d) - ms));
+    else trimOut = Math.min(d, Math.max(t, trimIn + ms));
+    player.pause();
+    player.currentTime = isIn ? trimIn : trimOut;
+    displayedTime = targetTime = player.currentTime;
+    saveTrim(); renderTrim();
+  });
   h.addEventListener("pointerdown", e => {
     e.stopPropagation();
     try { h.setPointerCapture(e.pointerId); } catch { /* ponteiro já inativo */ }
@@ -584,7 +612,9 @@ let targetTime = 0;             // where the gesture wants us
 let handVisible = false;        // mão de controlo do tempo visível
 let anyHand = false;            // qualquer mão visível (tempo ou punho)
 let timeHandPos = null;         // latch: posição do pulso da mão do tempo
+let fistHandPos = null;         // latch: posição do pulso do punho (volume)
 let fistActive = false, rollAnchor = 0, volAnchor = 0.6; // knob de volume
+let fistSeenAt = 0;             // último frame com punho visível (graça p/ oclusão)
 let grabbing = false, anchorX = 0, anchorTime = 0;   // drag mode
 let lastFrameTime = 0, lastShownTime = 0;
 
@@ -691,25 +721,35 @@ function processHands(res) {
 
   // papel das mãos com latch por proximidade: a mão do tempo MANTÉM o papel
   // mesmo quando fecha (senão virava punho de volume); o volume é só da outra mão
+  // latch duplo: um candidato só herda o papel do tempo se estiver mais perto
+  // do latch do tempo do que do latch do punho (senão, num cruzamento/oclusão,
+  // o punho era promovido a mão do tempo e largava o volume)
   let timeLm = null, fistLm = null;
+  const d2 = (h, p) => p ? (h[0].x - p.x) ** 2 + (h[0].y - p.y) ** 2 : Infinity;
   if (timeHandPos && hands.length) {
     let best = null, bd = Infinity;
     for (const h of hands) {
-      const d2 = (h[0].x - timeHandPos.x) ** 2 + (h[0].y - timeHandPos.y) ** 2;
-      if (d2 < bd) { bd = d2; best = h; }
+      const dT = d2(h, timeHandPos);
+      if (dT < bd && dT <= d2(h, fistHandPos)) { bd = dT; best = h; }
     }
     if (bd < 0.09) timeLm = best; // ~0.3 em coords normalizadas
   }
   if (!timeLm) {
     for (const h of hands) {
+      // nunca promover uma mão colada ao latch do punho (mesmo que um frame a
+      // classifique como aberta) — era o role-swap que o latch quer impedir
+      if (fistHandPos && d2(h, fistHandPos) < 0.09) continue;
       const hs = dist(h[0], h[9]) || 0.0001;
       if (!isFist(h, hs)) { timeLm = h; break; }
     }
   }
   fistLm = hands.find(h => h !== timeLm && isFist(h, dist(h[0], h[9]) || 0.0001)) || null;
   if (timeLm) timeHandPos = { x: timeLm[0].x, y: timeLm[0].y };
+  const nowMs = performance.now();
+  if (fistLm) { fistHandPos = { x: fistLm[0].x, y: fistLm[0].y }; fistSeenAt = nowMs; }
+  else if (nowMs - fistSeenAt > 1000) fistHandPos = null; // período de graça p/ oclusões
   anyHand = hands.length > 0;
-  if (!anyHand) timeHandPos = null;
+  if (!anyHand) { timeHandPos = null; fistHandPos = null; }
 
   // ---- punho: roda para subir/descer a música ----
   if (fistLm && $("musicOn").checked) {
@@ -806,7 +846,8 @@ function applyTime(now) {
   }
   if (!anyHand) {
     if ($("autoReset").checked) {
-      targetTime = Math.max(trimIn, targetTime - dt * dur * 0.10); // rebobina suave até ao início do corte
+      const trimSpan = Math.max(0.001, tEnd - trimIn);
+      targetTime = Math.max(trimIn, targetTime - dt * trimSpan * 0.10); // rebobina suave até ao início do corte
     } else {
       targetTime = displayedTime;
     }

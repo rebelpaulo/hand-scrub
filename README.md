@@ -15,9 +15,9 @@ in-browser mais fiável/rápido e mais recomendado.
 - **Vídeo em fullscreen**, preview do hand-tracking numa **janela flutuante
   arrastável** (posição memorizada).
 - **Dois modos de controlo**:
-  - ✌️ **Abrir/Fechar** (por omissão): a abertura polegar–indicador controla a
-    **velocidade** — abrir além do neutro avança (quanto mais aberto, mais
-    depressa), fechar recua, ao meio o tempo pára.
+  - ✌️ **Abrir/Fechar** (por omissão): a abertura polegar–indicador **é a
+    linha do tempo** — dedos fechados = início do corte, abertos ao máximo =
+    fim; abrir e fechar percorre o vídeo, com suavização.
   - 🤏 **Arrastar**: pinch agarra a timeline, arrastar a mão faz scrub
     (como um drag de rato).
 - **Scrub fluido frame-a-frame**: os presets estão re-codificados **all-intra**
