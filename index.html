@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pinch Scrub — Hand-tracked video scrubbing</title>
+<style>
+  :root {
+    --bg: #07080c;
+    --panel: #0f1219;
+    --panel-2: #151a24;
+    --line: #232a38;
+    --text: #eef2f8;
+    --muted: #8b95a8;
+    --accent: #5eead4;
+    --accent-2: #818cf8;
+    --hot: #fb7185;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background:
+      radial-gradient(1200px 700px at 80% -10%, #12172400, #101725 40%, var(--bg) 75%),
+      var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    min-height: 100%;
+    padding: 28px clamp(16px, 4vw, 48px) 60px;
+  }
+  header { max-width: 1240px; margin: 0 auto 22px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 18px var(--accent);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  h1 { font-size: clamp(20px, 3vw, 28px); margin: 0; letter-spacing: -.02em; }
+  .sub { color: var(--muted); font-size: 14px; margin: 6px 0 0; max-width: 720px; line-height: 1.5; }
+  .sub b { color: var(--accent); font-weight: 600; }
+
+  .grid {
+    max-width: 1240px; margin: 0 auto;
+    display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px;
+  }
+  @media (max-width: 920px){ .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--line); border-radius: var(--radius);
+    overflow: hidden; box-shadow: 0 24px 60px -30px #000;
+  }
+  .card-h {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+    font-size: 13px; font-weight: 600; letter-spacing: .01em;
+  }
+  .card-h .tag { color: var(--muted); font-weight: 500; font-size: 12px; }
+
+  /* Video */
+  .stage { position: relative; background: #000; aspect-ratio: 16/9; }
+  video#player { width: 100%; height: 100%; object-fit: contain; display: block; background:#000; }
+  .scrub-wrap { padding: 14px 16px 18px; }
+  .bar { position: relative; height: 8px; border-radius: 99px; background: var(--panel-2); border:1px solid var(--line); cursor: pointer; }
+  .bar .fill { position:absolute; inset:0 auto 0 0; width:0%; border-radius:99px;
+    background: linear-gradient(90deg, var(--accent-2), var(--accent)); }
+  .bar .knob { position:absolute; top:50%; left:0%; width:16px; height:16px; border-radius:50%;
+    transform: translate(-50%,-50%); background:#fff; box-shadow:0 0 0 4px #ffffff22, 0 4px 10px #000; }
+  .times { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; margin-top:10px; font-variant-numeric: tabular-nums; }
+
+  /* Camera */
+  .cam { position: relative; aspect-ratio: 4/3; background:#05070a; }
+  video#cam { position:absolute; inset:0; width:100%; height:100%; object-fit: cover; transform: scaleX(-1); }
+  canvas#overlay { position:absolute; inset:0; width:100%; height:100%; transform: scaleX(-1); }
+  .cam-hud { position:absolute; left:12px; top:12px; display:flex; gap:8px; flex-wrap:wrap; z-index:3; }
+  .pill { background:#0a0d14cc; backdrop-filter: blur(6px); border:1px solid var(--line);
+    border-radius:99px; padding:6px 11px; font-size:12px; color:var(--muted); display:flex; align-items:center; gap:7px; }
+  .pill b { color: var(--text); font-weight:600; font-variant-numeric: tabular-nums; }
+  .pill .led { width:8px; height:8px; border-radius:50%; background:#3a4256; }
+  .pill.on .led { background: var(--accent); box-shadow:0 0 10px var(--accent); }
+  .pill.grab .led { background: var(--hot); box-shadow:0 0 10px var(--hot); }
+
+  .controls { padding: 16px; display:flex; flex-direction:column; gap:14px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  button, .filebtn {
+    appearance:none; border:1px solid var(--line); background: var(--panel-2); color:var(--text);
+    padding:10px 14px; border-radius:11px; font-size:13px; font-weight:600; cursor:pointer;
+    transition:.15s; display:inline-flex; align-items:center; gap:8px;
+  }
+  button:hover, .filebtn:hover { border-color: var(--accent); color:#fff; transform: translateY(-1px); }
+  button.primary { background: linear-gradient(180deg, var(--accent-2), #6d78e6); border-color:#6d78e6; color:#fff; }
+  button:disabled { opacity:.45; cursor:not-allowed; transform:none; }
+  input[type=file]{ display:none; }
+
+  .setting { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:13px; color:var(--muted); }
+  .setting input[type=range]{ width:150px; accent-color: var(--accent); }
+  .setting .val { color: var(--text); font-variant-numeric: tabular-nums; min-width:42px; text-align:right; }
+
+  .guide { font-size:12.5px; color:var(--muted); line-height:1.6; border-top:1px solid var(--line); padding-top:12px; }
+  .guide b { color: var(--accent); }
+  kbd { background: var(--panel-2); border:1px solid var(--line); border-bottom-width:2px; border-radius:6px; padding:1px 6px; font-size:11px; color:var(--text); }
+  .status { font-size:12px; color:var(--muted); min-height:16px; }
+  .status.err { color: var(--hot); }
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>Pinch Scrub</h1>
+    </div>
+    <p class="sub">Hand tracking by <b>Google MediaPipe</b> (21-point HandLandmarker, in-browser).
+      <b>Pinch</b> your thumb + index to grab the timeline, then <b>drag left/right</b> to scrub the video
+      backward/forward — just like dragging with a mouse. Open your fingers to release.</p>
+  </header>
+
+  <div class="grid">
+    <!-- VIDEO -->
+    <section class="card">
+      <div class="card-h"><span>▶ Video</span><span class="tag" id="videoName">sample clip</span></div>
+      <div class="stage">
+        <video id="player" playsinline crossorigin="anonymous"
+          src="https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files/big_buck_bunny.mp4"></video>
+      </div>
+      <div class="scrub-wrap">
+        <div class="bar" id="bar">
+          <div class="fill" id="fill"></div>
+          <div class="knob" id="knob"></div>
+        </div>
+        <div class="times"><span id="tCur">0:00</span><span id="tDur">0:00</span></div>
+      </div>
+    </section>
+
+    <!-- CAMERA + CONTROLS -->
+    <section class="card">
+      <div class="card-h"><span>✋ Camera tracking</span><span class="tag" id="fps">— fps</span></div>
+      <div class="cam">
+        <video id="cam" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="cam-hud">
+          <span class="pill" id="pillHand"><span class="led"></span>hand <b id="handState">—</b></span>
+          <span class="pill" id="pillPinch"><span class="led"></span>pinch <b id="pinchVal">—</b></span>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="row">
+          <button class="primary" id="startBtn">Start camera</button>
+          <button id="playBtn" disabled>Play / Pause</button>
+          <label class="filebtn">Load video…<input type="file" id="fileInput" accept="video/*"></label>
+        </div>
+        <div class="setting">
+          <span>Scrub sensitivity</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="range" id="sens" min="0.5" max="4" step="0.1" value="1.6">
+            <span class="val" id="sensVal">1.6×</span>
+          </div>
+        </div>
+        <div class="setting">
+          <span>Pinch threshold</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="range" id="thresh" min="0.15" max="0.7" step="0.01" value="0.35">
+            <span class="val" id="threshVal">0.35</span>
+          </div>
+        </div>
+        <div class="status" id="status">Click <b>Start camera</b> to begin.</div>
+        <div class="guide">
+          <b>Pinch</b> (thumb + index touch) = grab the scrubber ·
+          move hand <b>→ right</b> = forward · <b>← left</b> = backward · open hand = release.
+          Keyboard: <kbd>Space</kbd> play/pause.
+        </div>
+      </div>
+    </section>
+  </div>
+
+<script type="module">
+import { FilesetResolver, HandLandmarker }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const $ = id => document.getElementById(id);
+const player = $("player"), cam = $("cam"), overlay = $("overlay"), octx = overlay.getContext("2d");
+const startBtn = $("startBtn"), playBtn = $("playBtn"), fileInput = $("fileInput");
+const status = $("status");
+
+let landmarker = null, running = false, lastVideoTime = -1;
+let fpsEMA = 0, lastT = performance.now();
+
+// --- scrub state ---
+let grabbing = false;
+let anchorX = 0;        // normalized pinch-mid x at grab start
+let anchorTime = 0;     // player.currentTime at grab start
+const sens = $("sens"), thresh = $("thresh");
+sens.oninput = () => $("sensVal").textContent = (+sens.value).toFixed(1) + "×";
+thresh.oninput = () => $("threshVal").textContent = (+thresh.value).toFixed(2);
+
+// HandLandmarker connections (MediaPipe hand topology)
+const CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+function fmt(t){ if(!isFinite(t)) return "0:00"; t=Math.max(0,t|0); const m=t/60|0, s=t%60; return m+":"+String(s).padStart(2,"0"); }
+
+// ---- timeline UI ----
+const bar=$("bar"), fill=$("fill"), knob=$("knob");
+function syncBar(){
+  const d=player.duration||0, c=player.currentTime||0, p=d?c/d:0;
+  fill.style.width=(p*100)+"%"; knob.style.left=(p*100)+"%";
+  $("tCur").textContent=fmt(c); $("tDur").textContent=fmt(d);
+  requestAnimationFrame(syncBar);
+}
+requestAnimationFrame(syncBar);
+bar.addEventListener("pointerdown", e=>{
+  const r=bar.getBoundingClientRect();
+  const seek=x=>{ if(player.duration) player.currentTime=Math.min(1,Math.max(0,(x-r.left)/r.width))*player.duration; };
+  seek(e.clientX);
+  const mv=ev=>seek(ev.clientX); const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);};
+  document.addEventListener("pointermove",mv); document.addEventListener("pointerup",up);
+});
+
+// ---- video controls ----
+playBtn.onclick=()=> player.paused?player.play():player.pause();
+document.addEventListener("keydown",e=>{ if(e.code==="Space"){e.preventDefault(); playBtn.onclick();}});
+fileInput.onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  player.src=URL.createObjectURL(f); $("videoName").textContent=f.name; player.load();
+};
+
+// ---- init model ----
+async function initModel(){
+  status.textContent="Loading MediaPipe hand model…";
+  const fileset=await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  landmarker=await HandLandmarker.createFromOptions(fileset,{
+    baseOptions:{ modelAssetPath:
+      "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate:"GPU" },
+    runningMode:"VIDEO", numHands:1
+  });
+}
+
+async function startCamera(){
+  startBtn.disabled=true; startBtn.textContent="Starting…";
+  try{
+    if(!landmarker) await initModel();
+    const stream=await navigator.mediaDevices.getUserMedia({video:{width:960,height:720,facingMode:"user"}});
+    cam.srcObject=stream; await cam.play();
+    overlay.width=cam.videoWidth; overlay.height=cam.videoHeight;
+    running=true; playBtn.disabled=false;
+    status.innerHTML="Tracking live — <b>pinch to grab</b> the timeline.";
+    startBtn.textContent="Camera on"; startBtn.classList.remove("primary");
+    loop();
+  }catch(err){
+    status.className="status err"; status.textContent="Error: "+err.message;
+    startBtn.disabled=false; startBtn.textContent="Start camera";
+  }
+}
+startBtn.onclick=startCamera;
+
+function loop(){
+  if(!running) return;
+  const now=performance.now();
+  if(cam.currentTime!==lastVideoTime){
+    lastVideoTime=cam.currentTime;
+    const res=landmarker.detectForVideo(cam, now);
+    draw(res);
+  }
+  const dt=now-lastT; lastT=now; const fps=1000/dt;
+  fpsEMA=fpsEMA?fpsEMA*0.9+fps*0.1:fps;
+  $("fps").textContent=fpsEMA.toFixed(0)+" fps";
+  requestAnimationFrame(loop);
+}
+
+function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y, dz=(a.z||0)-(b.z||0); return Math.hypot(dx,dy,dz); }
+
+function draw(res){
+  octx.clearRect(0,0,overlay.width,overlay.height);
+  const hands=res.landmarks||[];
+  const pillHand=$("pillHand"), pillPinch=$("pillPinch");
+
+  if(!hands.length){
+    $("handState").textContent="none"; $("pinchVal").textContent="—";
+    pillHand.className="pill"; pillPinch.className="pill";
+    if(grabbing) releaseGrab();
+    return;
+  }
+  const lm=hands[0];
+  const W=overlay.width, H=overlay.height;
+
+  // draw skeleton
+  octx.lineWidth=4; octx.strokeStyle="rgba(129,140,248,.85)";
+  for(const [a,b] of CONNECTIONS){
+    octx.beginPath(); octx.moveTo(lm[a].x*W, lm[a].y*H); octx.lineTo(lm[b].x*W, lm[b].y*H); octx.stroke();
+  }
+  for(let i=0;i<lm.length;i++){
+    const tip=(i===4||i===8);
+    octx.beginPath(); octx.arc(lm[i].x*W, lm[i].y*H, tip?9:5, 0, Math.PI*2);
+    octx.fillStyle=tip?"#5eead4":"#e6e9f2"; octx.fill();
+  }
+
+  // pinch metric: thumb tip(4) vs index tip(8), normalized by hand size (wrist0 -> middle_mcp9)
+  const handSize=dist(lm[0],lm[9])||0.0001;
+  const pinch=dist(lm[4],lm[8])/handSize;      // ~0.1 closed, ~1+ open
+  $("pinchVal").textContent=pinch.toFixed(2);
+  pillHand.className="pill on"; $("handState").textContent="tracked";
+
+  const midX=(lm[4].x+lm[8].x)/2;              // 0..1, note: cam is mirrored via CSS
+
+  // line between the two pinch fingers
+  octx.beginPath(); octx.moveTo(lm[4].x*W,lm[4].y*H); octx.lineTo(lm[8].x*W,lm[8].y*H);
+  octx.lineWidth=3; octx.strokeStyle=pinch<+thresh.value?"rgba(251,113,133,.95)":"rgba(94,234,212,.5)"; octx.stroke();
+
+  const isPinch=pinch < +thresh.value;
+  if(isPinch){
+    pillPinch.className="pill grab";
+    if(!grabbing){ grabbing=true; anchorX=midX; anchorTime=player.currentTime||0; }
+    // mirrored preview: moving hand to your right lowers landmark x → invert so right = forward
+    const deltaX=(anchorX - midX);             // >0 when hand moves right (screen)
+    const span=(player.duration||0) * (+sens.value);
+    let t=anchorTime + deltaX*span;
+    t=Math.min(player.duration||0, Math.max(0,t));
+    player.currentTime=t;
+    // grab indicator ring
+    octx.beginPath(); octx.arc(midX*W,(lm[4].y+lm[8].y)/2*H, 26,0,Math.PI*2);
+    octx.lineWidth=3; octx.strokeStyle="rgba(251,113,133,.9)"; octx.stroke();
+  }else{
+    pillPinch.className="pill on";
+    if(grabbing) releaseGrab();
+  }
+}
+function releaseGrab(){ grabbing=false; }
+</script>
+</body>
+</html>
