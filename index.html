@@ -210,9 +210,9 @@
   <div id="startOverlay">
     <h1>✋ Pinch Scrub</h1>
     <p>Mão direita: a abertura dos dedos é a linha do tempo — <b>fechados =
-       início</b>, <b>abertos ao máximo = fim</b>. Mão esquerda: <b>punho
-       fechado roda</b> 🎵 o volume da música; <b>palma toda aberta, swipe</b>
-       para trocar de vídeo. (Podes trocar as mãos nas definições ⚙.)</p>
+       início</b>, <b>abertos ao máximo = fim</b>; <b>palma toda aberta +
+       swipe</b> troca de vídeo. Mão esquerda: <b>punho fechado roda</b> 🎵
+       o volume da música. (Podes trocar as mãos nas definições ⚙.)</p>
     <button class="btn primary" id="startBtn">Ativar câmara</button>
     <div class="err" id="startErr"></div>
   </div>
@@ -310,6 +310,7 @@ function selectScene(i) {
   player.currentTime = 0;
   renderChips();
   toast(SCENES[i].name);
+  cloudSave(); // cena ativa também persiste
 }
 $("fileInput").onchange = e => {
   const files = [...e.target.files];
@@ -381,6 +382,7 @@ function trimKey() { return SCENES[activeScene].id; }
 function saveTrim() {
   trims[trimKey()] = { in: trimIn, out: trimOut };
   try { localStorage.setItem("scene-trims", JSON.stringify(trims)); } catch { /* opcional */ }
+  cloudSave();
 }
 player.addEventListener("timeupdate", () => {
   // garante o loop dentro do trim também sem a câmara ativa
@@ -388,14 +390,57 @@ player.addEventListener("timeupdate", () => {
   if (!player.paused && end && player.currentTime >= end - 0.05) player.currentTime = trimIn;
 });
 function minSpan() { return Math.min(0.5, player.duration || 0.5); }
-player.addEventListener("loadedmetadata", () => {
-  const t = trims[trimKey()], d = player.duration, ms = minSpan();
+function applyTrimsToCurrentScene() {
+  const d = player.duration;
+  if (!d) return;
+  const t = trims[trimKey()], ms = minSpan();
   trimIn = t ? Math.min(Math.max(0, t.in), Math.max(0, d - ms)) : 0;
   trimOut = t ? Math.min(Math.max(trimIn + ms, t.out), d) : d;
   displayedTime = targetTime = trimIn;
-  player.currentTime = trimIn;
+  if (player.paused) player.currentTime = trimIn;
   renderTrim();
-});
+}
+player.addEventListener("loadedmetadata", applyTrimsToCurrentScene);
+
+/* ===== sincronização na cloud (Supabase · tabela hand_config) =====
+   Os cortes + cena ativa persistem entre dispositivos. Prioridade no arranque:
+   link #cfg > cloud > localStorage. Chave anon é pública por design (RLS). */
+const SB_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
+const SB_HDRS = { apikey: SB_KEY, Authorization: "Bearer " + SB_KEY, "Content-Type": "application/json" };
+const CFG_ID = "default";
+let cloudSaveT = 0, hasLinkCfg = false;
+async function cloudLoad() {
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/hand_config?id=eq.${CFG_ID}&select=data`, { headers: SB_HDRS });
+    if (!r.ok) return;
+    const cfg = (await r.json())[0]?.data;
+    if (!cfg || hasLinkCfg) return; // um link #cfg explícito ganha à cloud
+    if (cfg.t) {
+      for (const k of Object.keys(trims)) if (!k.startsWith("upload:")) delete trims[k];
+      Object.assign(trims, cfg.t);
+      try { localStorage.setItem("scene-trims", JSON.stringify(trims)); } catch { /* opcional */ }
+      applyTrimsToCurrentScene();
+    }
+    if (typeof cfg.s === "number" && SCENES[cfg.s] && cfg.s !== activeScene) selectScene(cfg.s);
+  } catch { /* offline: localStorage chega */ }
+}
+function cloudSave() {
+  clearTimeout(cloudSaveT);
+  cloudSaveT = setTimeout(async () => {
+    const presetTrims = {};
+    for (const [k, v] of Object.entries(trims)) {
+      if (!k.startsWith("upload:")) presetTrims[k] = { in: +v.in.toFixed(2), out: +v.out.toFixed(2) };
+    }
+    try {
+      await fetch(`${SB_URL}/rest/v1/hand_config`, {
+        method: "POST",
+        headers: { ...SB_HDRS, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify([{ id: CFG_ID, data: { t: presetTrims, s: activeScene }, updated_at: new Date().toISOString() }]),
+      });
+    } catch { /* offline: fica no localStorage */ }
+  }, 1200);
+}
 const trimPanel = $("trimPanel"), trimStrip = $("trimStrip");
 $("trimBtn").onclick = () => { trimPanel.classList.toggle("open"); renderTrim(); };
 $("trimClose").onclick = () => trimPanel.classList.remove("open");
@@ -497,6 +542,7 @@ $("shareBtn").onclick = async () => {
       try { localStorage.setItem("scene-trims", JSON.stringify(trims)); } catch { /* opcional */ }
     }
     if (typeof cfg.s === "number" && SCENES[cfg.s]) pendingScene = cfg.s;
+    hasLinkCfg = true;
   } catch { /* link inválido: ignora */ }
 })();
 
@@ -766,20 +812,13 @@ function processHands(res) {
   } else {
     fistActive = false;
     $("pillVol").className = $("musicOn").checked ? "pill on" : "pill";
-    if (soundLm && isOpenPalm(soundLm, dist(soundLm[0], soundLm[9]) || 0.0001)) {
-      // palma toda aberta: swipe horizontal troca de vídeo
-      drawHand(soundLm, W, H, "rgba(94,234,212,.7)");
-      trackSwipe(soundLm);
-    } else {
-      swipeHist = [];
-      if (soundLm) drawHand(soundLm, W, H, "rgba(152,162,182,.5)");
-    }
+    if (soundLm) drawHand(soundLm, W, H, "rgba(152,162,182,.5)");
   }
   $("volVal").textContent = "🎵 " + Math.round(musicVol * 100) + "%";
 
   // ---- mão do tempo ----
   if (!timeLm) {
-    handVisible = false; grabbing = false;
+    handVisible = false; grabbing = false; swipeHist = [];
     $("handState").textContent = anyHand ? "punho 🎵" : "sem mão";
     $("openVal").textContent = "—";
     pillHand.className = anyHand ? "pill on" : "pill"; pillOpen.className = "pill";
@@ -791,6 +830,8 @@ function processHands(res) {
   drawHand(lm, W, H, "rgba(129,140,248,.85)");
 
   const handSize = dist(lm[0], lm[9]) || 0.0001;
+  // palma toda aberta na mão do tempo + movimento lateral rápido = trocar de vídeo
+  if (isOpenPalm(lm, handSize)) trackSwipe(lm); else swipeHist = [];
   const pinch = dist(lm[4], lm[8]) / handSize;   // ~0.15 fechado · ~1.3 aberto
   const mode = $("mode").value;
   pillHand.className = "pill on"; $("handState").textContent = "mão ok";
@@ -868,6 +909,7 @@ function applyTime(now) {
 /* arranque: só depois de TODO o estado do módulo estar inicializado */
 renderChips();
 selectScene(pendingScene);
+cloudLoad();
 </script>
 </body>
 </html>
