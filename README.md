@@ -1,30 +1,42 @@
-# Pinch Scrub — hand-tracked video scrubbing
+# Pinch Scrub — instalação interativa de vídeo por gestos ✋
 
-Webcam hand tracking that lets you **pinch (thumb + index) to grab a video's
-timeline and drag left/right to scrub** — just like dragging with a mouse.
+Controla o tempo de um vídeo com a mão, via webcam:
+**abre o polegar + indicador → o vídeo avança · fecha-os → rebobina.**
+Um foguetão descola na tua mão; fecha os dedos e ele volta à plataforma.
 
-## Hand-tracking engine
-**Google MediaPipe — `HandLandmarker` (Tasks Vision)**. It's the most
-reliable, fastest, and most widely recommended in-browser hand tracker:
-21 3D landmarks per hand, real-time (20–30+ fps), runs 100% client-side
-(GPU/WASM), no backend. Loaded from the jsDelivr CDN — nothing to install.
+Demo: https://hand-scrub.vercel.app
 
-## Run
-Camera needs `localhost` or HTTPS. From this folder:
+## Hand tracking
+**Google MediaPipe `HandLandmarker`** (Tasks Vision) — 21 landmarks 3D por mão,
+tempo real, 100% no browser (GPU/WASM), carregado por CDN. É o tracker
+in-browser mais fiável/rápido e mais recomendado.
+
+## Funcionalidades
+- **Vídeo em fullscreen**, preview do hand-tracking numa **janela flutuante
+  arrastável** (posição memorizada).
+- **Dois modos de controlo**:
+  - ✌️ **Abrir/Fechar** (scrollytelling): a abertura polegar–indicador mapeia
+    diretamente para a posição no tempo, com suavização.
+  - 🤏 **Arrastar**: pinch agarra a timeline, arrastar a mão faz scrub
+    (como um drag de rato).
+- **Biblioteca de cenas** com presets de domínio público (Wikimedia Commons):
+  🚀 descolagem de Falcon 9 · ☢️ teste nuclear Baker Shot · 🌹🌼 flores a
+  desabrochar em time-lapse · 🐰 Big Buck Bunny — e **upload dos teus vídeos**
+  (múltiplos, locais, nunca saem do browser).
+- **Auto-reset**: sem mãos à frente da câmara, o vídeo rebobina lentamente
+  para o início (pronto para o próximo visitante).
+- **Som**: whoosh sintetizado (WebAudio) proporcional à velocidade da viagem
+  no tempo.
+- UI esconde-se após 4 s de inatividade · **F** = ecrã inteiro · **Espaço** =
+  play/pause.
+
+## Correr localmente
+A câmara exige `localhost` ou HTTPS:
 
 ```bash
 python3 -m http.server 8777
-# open http://localhost:8777
+# abrir http://localhost:8777
 ```
 
-1. Click **Start camera** and allow webcam access.
-2. **Pinch** thumb + index together → grabs the scrubber (marker turns red).
-3. Move your hand **right = forward**, **left = backward**.
-4. **Open your fingers** to release.
-
-- **Load video…** to use your own clip; **Space** = play/pause.
-- **Scrub sensitivity** = how much timeline a full drag covers.
-- **Pinch threshold** = how closed the fingers must be to grab.
-
-## Files
-- `index.html` — the whole app (self-contained, no build step).
+## Ficheiros
+- `index.html` — a app inteira (self-contained, sem build).

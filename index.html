@@ -1,177 +1,197 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Pinch Scrub — Hand-tracked video scrubbing</title>
+<title>Pinch Scrub — instalação interativa de vídeo por gestos</title>
 <style>
   :root {
-    --bg: #07080c;
-    --panel: #0f1219;
-    --panel-2: #151a24;
-    --line: #232a38;
+    --panel: #0f1219cc;
+    --line: #2a3245;
     --text: #eef2f8;
-    --muted: #8b95a8;
+    --muted: #98a2b6;
     --accent: #5eead4;
     --accent-2: #818cf8;
     --hot: #fb7185;
-    --radius: 16px;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body {
-    background:
-      radial-gradient(1200px 700px at 80% -10%, #12172400, #101725 40%, var(--bg) 75%),
-      var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
-    min-height: 100%;
-    padding: 28px clamp(16px, 4vw, 48px) 60px;
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: var(--text); }
+
+  /* ---------- fullscreen video ---------- */
+  video#player {
+    position: fixed; inset: 0; width: 100vw; height: 100vh;
+    object-fit: cover; background: #000;
   }
-  header { max-width: 1240px; margin: 0 auto 22px; }
-  .brand { display: flex; align-items: center; gap: 12px; }
-  .dot {
-    width: 12px; height: 12px; border-radius: 50%;
-    background: var(--accent); box-shadow: 0 0 18px var(--accent);
-    animation: pulse 2.4s ease-in-out infinite;
+
+  /* thin global progress bar */
+  #progress {
+    position: fixed; left: 0; bottom: 0; height: 5px; width: 0%;
+    background: linear-gradient(90deg, var(--accent-2), var(--accent));
+    box-shadow: 0 0 12px var(--accent); z-index: 40; transition: width .08s linear;
+    pointer-events: none;
   }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-  h1 { font-size: clamp(20px, 3vw, 28px); margin: 0; letter-spacing: -.02em; }
-  .sub { color: var(--muted); font-size: 14px; margin: 6px 0 0; max-width: 720px; line-height: 1.5; }
-  .sub b { color: var(--accent); font-weight: 600; }
 
-  .grid {
-    max-width: 1240px; margin: 0 auto;
-    display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px;
+  /* ---------- draggable PiP ---------- */
+  #pip {
+    position: fixed; right: 18px; bottom: 64px; width: 280px; z-index: 50;
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    box-shadow: 0 20px 50px -18px #000; cursor: grab; user-select: none;
+    touch-action: none;
   }
-  @media (max-width: 920px){ .grid { grid-template-columns: 1fr; } }
-
-  .card {
-    background: linear-gradient(180deg, var(--panel), var(--panel-2));
-    border: 1px solid var(--line); border-radius: var(--radius);
-    overflow: hidden; box-shadow: 0 24px 60px -30px #000;
+  #pip.dragging { cursor: grabbing; opacity: .92; }
+  #pip .pip-h {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 7px 11px; font-size: 12px; font-weight: 600;
+    border-bottom: 1px solid var(--line);
   }
-  .card-h {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 16px; border-bottom: 1px solid var(--line);
-    font-size: 13px; font-weight: 600; letter-spacing: .01em;
+  #pip .pip-h .fps { color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+  #pip .view { position: relative; aspect-ratio: 4/3; background: #05070a; }
+  video#cam, canvas#overlay {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; transform: scaleX(-1);
   }
-  .card-h .tag { color: var(--muted); font-weight: 500; font-size: 12px; }
-
-  /* Video */
-  .stage { position: relative; background: #000; aspect-ratio: 16/9; }
-  video#player { width: 100%; height: 100%; object-fit: contain; display: block; background:#000; }
-  .scrub-wrap { padding: 14px 16px 18px; }
-  .bar { position: relative; height: 8px; border-radius: 99px; background: var(--panel-2); border:1px solid var(--line); cursor: pointer; }
-  .bar .fill { position:absolute; inset:0 auto 0 0; width:0%; border-radius:99px;
-    background: linear-gradient(90deg, var(--accent-2), var(--accent)); }
-  .bar .knob { position:absolute; top:50%; left:0%; width:16px; height:16px; border-radius:50%;
-    transform: translate(-50%,-50%); background:#fff; box-shadow:0 0 0 4px #ffffff22, 0 4px 10px #000; }
-  .times { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; margin-top:10px; font-variant-numeric: tabular-nums; }
-
-  /* Camera */
-  .cam { position: relative; aspect-ratio: 4/3; background:#05070a; }
-  video#cam { position:absolute; inset:0; width:100%; height:100%; object-fit: cover; transform: scaleX(-1); }
-  canvas#overlay { position:absolute; inset:0; width:100%; height:100%; transform: scaleX(-1); }
-  .cam-hud { position:absolute; left:12px; top:12px; display:flex; gap:8px; flex-wrap:wrap; z-index:3; }
-  .pill { background:#0a0d14cc; backdrop-filter: blur(6px); border:1px solid var(--line);
-    border-radius:99px; padding:6px 11px; font-size:12px; color:var(--muted); display:flex; align-items:center; gap:7px; }
-  .pill b { color: var(--text); font-weight:600; font-variant-numeric: tabular-nums; }
-  .pill .led { width:8px; height:8px; border-radius:50%; background:#3a4256; }
-  .pill.on .led { background: var(--accent); box-shadow:0 0 10px var(--accent); }
-  .pill.grab .led { background: var(--hot); box-shadow:0 0 10px var(--hot); }
-
-  .controls { padding: 16px; display:flex; flex-direction:column; gap:14px; }
-  .row { display:flex; gap:10px; flex-wrap:wrap; }
-  button, .filebtn {
-    appearance:none; border:1px solid var(--line); background: var(--panel-2); color:var(--text);
-    padding:10px 14px; border-radius:11px; font-size:13px; font-weight:600; cursor:pointer;
-    transition:.15s; display:inline-flex; align-items:center; gap:8px;
+  #pip .hud {
+    position: absolute; left: 8px; top: 8px; display: flex; gap: 6px; z-index: 2;
   }
-  button:hover, .filebtn:hover { border-color: var(--accent); color:#fff; transform: translateY(-1px); }
-  button.primary { background: linear-gradient(180deg, var(--accent-2), #6d78e6); border-color:#6d78e6; color:#fff; }
-  button:disabled { opacity:.45; cursor:not-allowed; transform:none; }
-  input[type=file]{ display:none; }
+  .pill {
+    background: #0a0d14cc; border: 1px solid var(--line); border-radius: 99px;
+    padding: 3px 9px; font-size: 11px; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .pill b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .pill .led { width: 7px; height: 7px; border-radius: 50%; background: #3a4256; }
+  .pill.on .led { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .pill.hot .led { background: var(--hot); box-shadow: 0 0 8px var(--hot); }
 
-  .setting { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:13px; color:var(--muted); }
-  .setting input[type=range]{ width:150px; accent-color: var(--accent); }
-  .setting .val { color: var(--text); font-variant-numeric: tabular-nums; min-width:42px; text-align:right; }
+  /* ---------- start overlay ---------- */
+  #startOverlay {
+    position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px;
+    background: radial-gradient(900px 600px at 50% 30%, #131a2a, #05070acc);
+  }
+  #startOverlay h1 { font-size: clamp(26px, 5vw, 44px); margin: 0; letter-spacing: -.02em; }
+  #startOverlay p { color: var(--muted); max-width: 560px; text-align: center; line-height: 1.6; margin: 0; padding: 0 20px; }
+  #startOverlay p b { color: var(--accent); }
+  #startOverlay .err { color: var(--hot); min-height: 18px; font-size: 13px; }
 
-  .guide { font-size:12.5px; color:var(--muted); line-height:1.6; border-top:1px solid var(--line); padding-top:12px; }
-  .guide b { color: var(--accent); }
-  kbd { background: var(--panel-2); border:1px solid var(--line); border-bottom-width:2px; border-radius:6px; padding:1px 6px; font-size:11px; color:var(--text); }
-  .status { font-size:12px; color:var(--muted); min-height:16px; }
-  .status.err { color: var(--hot); }
+  /* ---------- bottom control bar ---------- */
+  #bar {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px);
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px;
+    z-index: 60; transition: opacity .4s, transform .4s;
+  }
+  #bar[hidden], #pip[hidden] { display: none; }
+  body.ui-hidden #bar { opacity: 0; transform: translateX(-50%) translateY(12px); pointer-events: none; }
+  body.ui-hidden { cursor: none; }
+
+  .chips { display: flex; gap: 8px; overflow-x: auto; max-width: 46vw; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip {
+    flex: 0 0 auto; border: 1px solid var(--line); background: #151a24;
+    color: var(--text); border-radius: 11px; padding: 8px 12px; font-size: 13px;
+    font-weight: 600; cursor: pointer; transition: .15s; white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .chip.active { background: linear-gradient(180deg, var(--accent-2), #6d78e6); border-color: #6d78e6; color: #fff; }
+
+  .btn {
+    appearance: none; border: 1px solid var(--line); background: #151a24; color: var(--text);
+    padding: 8px 12px; border-radius: 11px; font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: .15s; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .btn.primary { background: linear-gradient(180deg, var(--accent-2), #6d78e6); border-color: #6d78e6; color: #fff; font-size: 15px; padding: 12px 22px; }
+  input[type="file"] { display: none; }
+
+  select.btn { padding-right: 8px; }
+
+  /* ---------- settings popover ---------- */
+  #settings {
+    position: fixed; right: 18px; bottom: 76px; z-index: 70; width: 270px;
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+    display: none; flex-direction: column; gap: 12px;
+  }
+  #settings.open { display: flex; }
+  .set { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; color: var(--muted); }
+  .set input[type="range"] { width: 110px; accent-color: var(--accent); }
+  .set .val { color: var(--text); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
+  .set input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
+
+  #toast {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 99px;
+    padding: 8px 16px; font-size: 13px; z-index: 80; opacity: 0; transition: opacity .3s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
 </style>
 </head>
 <body>
-  <header>
-    <div class="brand">
-      <span class="dot"></span>
-      <h1>Pinch Scrub</h1>
+  <video id="player" muted playsinline preload="auto"></video>
+  <div id="progress"></div>
+
+  <!-- draggable hand-tracking preview -->
+  <div id="pip" hidden>
+    <div class="pip-h"><span>✋ Camera tracking</span><span class="fps" id="fps">— fps</span></div>
+    <div class="view">
+      <video id="cam" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div class="hud">
+        <span class="pill" id="pillHand"><span class="led"></span><b id="handState">—</b></span>
+        <span class="pill" id="pillOpen"><span class="led"></span><b id="openVal">—</b></span>
+      </div>
     </div>
-    <p class="sub">Hand tracking by <b>Google MediaPipe</b> (21-point HandLandmarker, in-browser).
-      <b>Pinch</b> your thumb + index to grab the timeline, then <b>drag left/right</b> to scrub the video
-      backward/forward — just like dragging with a mouse. Open your fingers to release.</p>
-  </header>
-
-  <div class="grid">
-    <!-- VIDEO -->
-    <section class="card">
-      <div class="card-h"><span>▶ Video</span><span class="tag" id="videoName">sample clip</span></div>
-      <div class="stage">
-        <video id="player" playsinline crossorigin="anonymous"
-          src="https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files/big_buck_bunny.mp4"></video>
-      </div>
-      <div class="scrub-wrap">
-        <div class="bar" id="bar">
-          <div class="fill" id="fill"></div>
-          <div class="knob" id="knob"></div>
-        </div>
-        <div class="times"><span id="tCur">0:00</span><span id="tDur">0:00</span></div>
-      </div>
-    </section>
-
-    <!-- CAMERA + CONTROLS -->
-    <section class="card">
-      <div class="card-h"><span>✋ Camera tracking</span><span class="tag" id="fps">— fps</span></div>
-      <div class="cam">
-        <video id="cam" playsinline muted></video>
-        <canvas id="overlay"></canvas>
-        <div class="cam-hud">
-          <span class="pill" id="pillHand"><span class="led"></span>hand <b id="handState">—</b></span>
-          <span class="pill" id="pillPinch"><span class="led"></span>pinch <b id="pinchVal">—</b></span>
-        </div>
-      </div>
-      <div class="controls">
-        <div class="row">
-          <button class="primary" id="startBtn">Start camera</button>
-          <button id="playBtn" disabled>Play / Pause</button>
-          <label class="filebtn">Load video…<input type="file" id="fileInput" accept="video/*"></label>
-        </div>
-        <div class="setting">
-          <span>Scrub sensitivity</span>
-          <div style="display:flex;align-items:center;gap:10px">
-            <input type="range" id="sens" min="0.5" max="4" step="0.1" value="1.6">
-            <span class="val" id="sensVal">1.6×</span>
-          </div>
-        </div>
-        <div class="setting">
-          <span>Pinch threshold</span>
-          <div style="display:flex;align-items:center;gap:10px">
-            <input type="range" id="thresh" min="0.15" max="0.7" step="0.01" value="0.35">
-            <span class="val" id="threshVal">0.35</span>
-          </div>
-        </div>
-        <div class="status" id="status">Click <b>Start camera</b> to begin.</div>
-        <div class="guide">
-          <b>Pinch</b> (thumb + index touch) = grab the scrubber ·
-          move hand <b>→ right</b> = forward · <b>← left</b> = backward · open hand = release.
-          Keyboard: <kbd>Space</kbd> play/pause.
-        </div>
-      </div>
-    </section>
   </div>
+
+  <!-- start screen -->
+  <div id="startOverlay">
+    <h1>✋ Pinch Scrub</h1>
+    <p><b>Abre os dedos</b> (polegar + indicador) e o vídeo avança.
+       <b>Fecha-os</b> e o tempo anda para trás. O foguetão descola na tua mão.</p>
+    <button class="btn primary" id="startBtn">Ativar câmara</button>
+    <div class="err" id="startErr"></div>
+  </div>
+
+  <!-- control bar -->
+  <div id="bar" hidden>
+    <div class="chips" id="chips"></div>
+    <label class="btn" title="Carregar vídeos próprios">📁 Vídeos<input type="file" id="fileInput" accept="video/*" multiple></label>
+    <select class="btn" id="mode" title="Modo de controlo">
+      <option value="aperture">✌️ Abrir/Fechar</option>
+      <option value="drag">🤏 Arrastar</option>
+    </select>
+    <button class="btn" id="playBtn" title="Reproduzir/Pausar">▶</button>
+    <button class="btn" id="fsBtn" title="Ecrã inteiro (F)">⛶</button>
+    <button class="btn" id="gearBtn" title="Definições">⚙</button>
+  </div>
+
+  <!-- settings -->
+  <div id="settings">
+    <div class="set"><span>Suavização</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="range" id="smooth" min="0.05" max="0.5" step="0.01" value="0.18"><span class="val" id="smoothVal">0.18</span>
+      </div>
+    </div>
+    <div class="set"><span>Sensibilidade (arrastar)</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="range" id="sens" min="0.5" max="4" step="0.1" value="1.6"><span class="val" id="sensVal">1.6×</span>
+      </div>
+    </div>
+    <div class="set"><span>Limiar de pinch</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="range" id="thresh" min="0.15" max="0.7" step="0.01" value="0.35"><span class="val" id="threshVal">0.35</span>
+      </div>
+    </div>
+    <div class="set"><span>Auto-reset sem mãos</span><input type="checkbox" id="autoReset" checked></div>
+    <div class="set"><span>Som (whoosh ao viajar no tempo)</span><input type="checkbox" id="soundOn" checked></div>
+  </div>
+
+  <div id="toast"></div>
 
 <script type="module">
 import { FilesetResolver, HandLandmarker }
@@ -179,154 +199,305 @@ import { FilesetResolver, HandLandmarker }
 
 const $ = id => document.getElementById(id);
 const player = $("player"), cam = $("cam"), overlay = $("overlay"), octx = overlay.getContext("2d");
-const startBtn = $("startBtn"), playBtn = $("playBtn"), fileInput = $("fileInput");
-const status = $("status");
+
+/* ================= scenes ================= */
+const WM = "https://upload.wikimedia.org/wikipedia/commons/transcoded";
+const SCENES = [
+  { name: "🚀 Foguetão", src: `${WM}/6/61/Falcon_9_-_Starlink_10-53_Launch_%281009147%29.webm/Falcon_9_-_Starlink_10-53_Launch_%281009147%29.webm.480p.vp9.webm` },
+  { name: "☢️ Bomba atómica", src: `${WM}/f/fa/Baker_Shot.ogv/Baker_Shot.ogv.480p.vp9.webm` },
+  { name: "🌹 Rosa", src: `${WM}/e/ea/Time-lapse_of_opening_red_rose_isolated_on_black_background.Blooming_red_roses_flower_buds.webm/Time-lapse_of_opening_red_rose_isolated_on_black_background.Blooming_red_roses_flower_buds.webm.1080p.vp9.webm` },
+  { name: "🌼 Peónia", src: `${WM}/b/b4/Time_lapse_of_Peony_flower_blooming.webm/Time_lapse_of_Peony_flower_blooming.webm.480p.vp9.webm` },
+  { name: "🐰 Bunny", src: "https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files/big_buck_bunny.mp4" },
+];
+let activeScene = 0;
+
+const chipsEl = $("chips");
+function renderChips() {
+  chipsEl.innerHTML = "";
+  SCENES.forEach((s, i) => {
+    const c = document.createElement("button");
+    c.className = "chip" + (i === activeScene ? " active" : "");
+    c.textContent = s.name;
+    c.onclick = () => selectScene(i);
+    chipsEl.appendChild(c);
+  });
+}
+function selectScene(i) {
+  activeScene = i;
+  player.src = SCENES[i].src;
+  player.load();
+  displayedTime = 0;
+  targetTime = 0;
+  player.currentTime = 0;
+  renderChips();
+  toast(SCENES[i].name);
+}
+$("fileInput").onchange = e => {
+  const files = [...e.target.files];
+  if (!files.length) return;
+  for (const f of files) SCENES.push({ name: "📁 " + f.name.replace(/\.[^.]+$/, "").slice(0, 18), src: URL.createObjectURL(f) });
+  selectScene(SCENES.length - files.length); // first of the newly added
+};
+
+/* ================= UI helpers ================= */
+let toastT;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 1800);
+}
+// auto-hide UI when idle
+let idleT;
+function wakeUI() {
+  document.body.classList.remove("ui-hidden");
+  clearTimeout(idleT);
+  idleT = setTimeout(() => document.body.classList.add("ui-hidden"), 4000);
+}
+["pointermove", "pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, wakeUI));
+wakeUI();
+
+$("playBtn").onclick = () => player.paused ? player.play() : player.pause();
+$("fsBtn").onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+$("gearBtn").onclick = () => $("settings").classList.toggle("open");
+document.addEventListener("keydown", e => {
+  if (e.code === "Space") { e.preventDefault(); $("playBtn").onclick(); }
+  if (e.key === "f" || e.key === "F") $("fsBtn").onclick();
+});
+
+const smooth = $("smooth"), sens = $("sens"), thresh = $("thresh");
+smooth.oninput = () => $("smoothVal").textContent = (+smooth.value).toFixed(2);
+sens.oninput = () => $("sensVal").textContent = (+sens.value).toFixed(1) + "×";
+thresh.oninput = () => $("threshVal").textContent = (+thresh.value).toFixed(2);
+
+/* progress bar */
+function syncProgress() {
+  const d = player.duration || 0;
+  $("progress").style.width = (d ? (player.currentTime / d) * 100 : 0) + "%";
+  requestAnimationFrame(syncProgress);
+}
+requestAnimationFrame(syncProgress);
+
+/* ================= draggable PiP ================= */
+const pip = $("pip");
+(() => {
+  const saved = localStorage.getItem("pip-pos");
+  if (saved) {
+    try {
+      const { x, y } = JSON.parse(saved);
+      placePip(x, y);
+    } catch { /* ignore */ }
+  }
+  function placePip(x, y) {
+    const w = pip.offsetWidth || 280, h = pip.offsetHeight || 240;
+    x = Math.min(Math.max(0, x), window.innerWidth - w);
+    y = Math.min(Math.max(0, y), window.innerHeight - h);
+    pip.style.left = x + "px"; pip.style.top = y + "px";
+    pip.style.right = "auto"; pip.style.bottom = "auto";
+  }
+  let sx, sy, ox, oy, dragging = false;
+  pip.addEventListener("pointerdown", e => {
+    dragging = true; pip.classList.add("dragging");
+    pip.setPointerCapture(e.pointerId);
+    const r = pip.getBoundingClientRect();
+    sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+  });
+  pip.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    placePip(ox + e.clientX - sx, oy + e.clientY - sy);
+  });
+  pip.addEventListener("pointerup", e => {
+    dragging = false; pip.classList.remove("dragging");
+    pip.releasePointerCapture(e.pointerId);
+    const r = pip.getBoundingClientRect();
+    localStorage.setItem("pip-pos", JSON.stringify({ x: r.left, y: r.top }));
+  });
+  window.addEventListener("resize", () => {
+    const r = pip.getBoundingClientRect();
+    placePip(r.left, r.top);
+  });
+})();
+
+/* ================= sound: time-travel whoosh ================= */
+let audioCtx = null, noiseGain = null, noiseFilter = null;
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const len = audioCtx.sampleRate * 2;
+  const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf; src.loop = true;
+  noiseFilter = audioCtx.createBiquadFilter();
+  noiseFilter.type = "bandpass"; noiseFilter.frequency.value = 600; noiseFilter.Q.value = 1.2;
+  noiseGain = audioCtx.createGain(); noiseGain.gain.value = 0;
+  src.connect(noiseFilter).connect(noiseGain).connect(audioCtx.destination);
+  src.start();
+}
+function whoosh(speed) { // speed = |video-seconds per real second|
+  if (!audioCtx || !$("soundOn").checked) { if (noiseGain) noiseGain.gain.value = 0; return; }
+  const g = Math.min(0.35, Math.max(0, (speed - 0.15) * 0.12));
+  noiseGain.gain.setTargetAtTime(g, audioCtx.currentTime, 0.08);
+  noiseFilter.frequency.setTargetAtTime(400 + Math.min(2400, speed * 500), audioCtx.currentTime, 0.1);
+}
+
+/* ================= hand tracking ================= */
+const CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
 let landmarker = null, running = false, lastVideoTime = -1;
 let fpsEMA = 0, lastT = performance.now();
 
-// --- scrub state ---
-let grabbing = false;
-let anchorX = 0;        // normalized pinch-mid x at grab start
-let anchorTime = 0;     // player.currentTime at grab start
-const sens = $("sens"), thresh = $("thresh");
-sens.oninput = () => $("sensVal").textContent = (+sens.value).toFixed(1) + "×";
-thresh.oninput = () => $("threshVal").textContent = (+thresh.value).toFixed(2);
+// control state
+let displayedTime = 0;          // smoothed time we render
+let targetTime = 0;             // where the gesture wants us
+let handVisible = false;
+let grabbing = false, anchorX = 0, anchorTime = 0;   // drag mode
+let lastFrameTime = 0, lastShownTime = 0;
 
-// HandLandmarker connections (MediaPipe hand topology)
-const CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
-  [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
-
-function fmt(t){ if(!isFinite(t)) return "0:00"; t=Math.max(0,t|0); const m=t/60|0, s=t%60; return m+":"+String(s).padStart(2,"0"); }
-
-// ---- timeline UI ----
-const bar=$("bar"), fill=$("fill"), knob=$("knob");
-function syncBar(){
-  const d=player.duration||0, c=player.currentTime||0, p=d?c/d:0;
-  fill.style.width=(p*100)+"%"; knob.style.left=(p*100)+"%";
-  $("tCur").textContent=fmt(c); $("tDur").textContent=fmt(d);
-  requestAnimationFrame(syncBar);
-}
-requestAnimationFrame(syncBar);
-bar.addEventListener("pointerdown", e=>{
-  const r=bar.getBoundingClientRect();
-  const seek=x=>{ if(player.duration) player.currentTime=Math.min(1,Math.max(0,(x-r.left)/r.width))*player.duration; };
-  seek(e.clientX);
-  const mv=ev=>seek(ev.clientX); const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);};
-  document.addEventListener("pointermove",mv); document.addEventListener("pointerup",up);
-});
-
-// ---- video controls ----
-playBtn.onclick=()=> player.paused?player.play():player.pause();
-document.addEventListener("keydown",e=>{ if(e.code==="Space"){e.preventDefault(); playBtn.onclick();}});
-fileInput.onchange=e=>{
-  const f=e.target.files[0]; if(!f) return;
-  player.src=URL.createObjectURL(f); $("videoName").textContent=f.name; player.load();
-};
-
-// ---- init model ----
-async function initModel(){
-  status.textContent="Loading MediaPipe hand model…";
-  const fileset=await FilesetResolver.forVisionTasks(
+async function initModel() {
+  const fileset = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
-  landmarker=await HandLandmarker.createFromOptions(fileset,{
-    baseOptions:{ modelAssetPath:
-      "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-      delegate:"GPU" },
-    runningMode:"VIDEO", numHands:1
+  landmarker = await HandLandmarker.createFromOptions(fileset, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO", numHands: 1
   });
 }
 
-async function startCamera(){
-  startBtn.disabled=true; startBtn.textContent="Starting…";
-  try{
-    if(!landmarker) await initModel();
-    const stream=await navigator.mediaDevices.getUserMedia({video:{width:960,height:720,facingMode:"user"}});
-    cam.srcObject=stream; await cam.play();
-    overlay.width=cam.videoWidth; overlay.height=cam.videoHeight;
-    running=true; playBtn.disabled=false;
-    status.innerHTML="Tracking live — <b>pinch to grab</b> the timeline.";
-    startBtn.textContent="Camera on"; startBtn.classList.remove("primary");
+$("startBtn").onclick = async () => {
+  const btn = $("startBtn"), err = $("startErr");
+  btn.disabled = true; btn.textContent = "A carregar modelo…";
+  try {
+    initAudio();
+    if (!landmarker) await initModel();
+    btn.textContent = "A ligar câmara…";
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 960, height: 720, facingMode: "user" } });
+    cam.srcObject = stream; await cam.play();
+    overlay.width = cam.videoWidth; overlay.height = cam.videoHeight;
+    running = true;
+    $("startOverlay").remove();
+    pip.hidden = false; $("bar").hidden = false;
+    toast("✌️ Abre e fecha os dedos");
+    lastFrameTime = performance.now();
     loop();
-  }catch(err){
-    status.className="status err"; status.textContent="Error: "+err.message;
-    startBtn.disabled=false; startBtn.textContent="Start camera";
+  } catch (e) {
+    err.textContent = "Erro: " + e.message;
+    btn.disabled = false; btn.textContent = "Ativar câmara";
   }
-}
-startBtn.onclick=startCamera;
+};
 
-function loop(){
-  if(!running) return;
-  const now=performance.now();
-  if(cam.currentTime!==lastVideoTime){
-    lastVideoTime=cam.currentTime;
-    const res=landmarker.detectForVideo(cam, now);
-    draw(res);
+function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
+
+function loop() {
+  if (!running) return;
+  const now = performance.now();
+  if (cam.currentTime !== lastVideoTime) {
+    lastVideoTime = cam.currentTime;
+    const res = landmarker.detectForVideo(cam, now);
+    processHands(res);
   }
-  const dt=now-lastT; lastT=now; const fps=1000/dt;
-  fpsEMA=fpsEMA?fpsEMA*0.9+fps*0.1:fps;
-  $("fps").textContent=fpsEMA.toFixed(0)+" fps";
+  applyTime(now);
+  const dt = now - lastT; lastT = now;
+  fpsEMA = fpsEMA ? fpsEMA * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
+  $("fps").textContent = fpsEMA.toFixed(0) + " fps";
   requestAnimationFrame(loop);
 }
 
-function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y, dz=(a.z||0)-(b.z||0); return Math.hypot(dx,dy,dz); }
+function processHands(res) {
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  const hands = res.landmarks || [];
+  const pillHand = $("pillHand"), pillOpen = $("pillOpen");
 
-function draw(res){
-  octx.clearRect(0,0,overlay.width,overlay.height);
-  const hands=res.landmarks||[];
-  const pillHand=$("pillHand"), pillPinch=$("pillPinch");
-
-  if(!hands.length){
-    $("handState").textContent="none"; $("pinchVal").textContent="—";
-    pillHand.className="pill"; pillPinch.className="pill";
-    if(grabbing) releaseGrab();
+  if (!hands.length) {
+    handVisible = false; grabbing = false;
+    $("handState").textContent = "sem mão"; $("openVal").textContent = "—";
+    pillHand.className = "pill"; pillOpen.className = "pill";
     return;
   }
-  const lm=hands[0];
-  const W=overlay.width, H=overlay.height;
+  handVisible = true;
+  const lm = hands[0];
+  const W = overlay.width, H = overlay.height;
 
-  // draw skeleton
-  octx.lineWidth=4; octx.strokeStyle="rgba(129,140,248,.85)";
-  for(const [a,b] of CONNECTIONS){
-    octx.beginPath(); octx.moveTo(lm[a].x*W, lm[a].y*H); octx.lineTo(lm[b].x*W, lm[b].y*H); octx.stroke();
+  // skeleton
+  octx.lineWidth = 4; octx.strokeStyle = "rgba(129,140,248,.85)";
+  for (const [a, b] of CONNECTIONS) {
+    octx.beginPath(); octx.moveTo(lm[a].x * W, lm[a].y * H); octx.lineTo(lm[b].x * W, lm[b].y * H); octx.stroke();
   }
-  for(let i=0;i<lm.length;i++){
-    const tip=(i===4||i===8);
-    octx.beginPath(); octx.arc(lm[i].x*W, lm[i].y*H, tip?9:5, 0, Math.PI*2);
-    octx.fillStyle=tip?"#5eead4":"#e6e9f2"; octx.fill();
+  for (let i = 0; i < lm.length; i++) {
+    const tip = (i === 4 || i === 8);
+    octx.beginPath(); octx.arc(lm[i].x * W, lm[i].y * H, tip ? 9 : 5, 0, Math.PI * 2);
+    octx.fillStyle = tip ? "#5eead4" : "#e6e9f2"; octx.fill();
   }
 
-  // pinch metric: thumb tip(4) vs index tip(8), normalized by hand size (wrist0 -> middle_mcp9)
-  const handSize=dist(lm[0],lm[9])||0.0001;
-  const pinch=dist(lm[4],lm[8])/handSize;      // ~0.1 closed, ~1+ open
-  $("pinchVal").textContent=pinch.toFixed(2);
-  pillHand.className="pill on"; $("handState").textContent="tracked";
+  const handSize = dist(lm[0], lm[9]) || 0.0001;
+  const pinch = dist(lm[4], lm[8]) / handSize;   // ~0.15 fechado · ~1.3 aberto
+  const mode = $("mode").value;
+  pillHand.className = "pill on"; $("handState").textContent = "mão ok";
 
-  const midX=(lm[4].x+lm[8].x)/2;              // 0..1, note: cam is mirrored via CSS
+  // linha entre polegar e indicador
+  octx.beginPath(); octx.moveTo(lm[4].x * W, lm[4].y * H); octx.lineTo(lm[8].x * W, lm[8].y * H);
+  octx.lineWidth = 3;
 
-  // line between the two pinch fingers
-  octx.beginPath(); octx.moveTo(lm[4].x*W,lm[4].y*H); octx.lineTo(lm[8].x*W,lm[8].y*H);
-  octx.lineWidth=3; octx.strokeStyle=pinch<+thresh.value?"rgba(251,113,133,.95)":"rgba(94,234,212,.5)"; octx.stroke();
-
-  const isPinch=pinch < +thresh.value;
-  if(isPinch){
-    pillPinch.className="pill grab";
-    if(!grabbing){ grabbing=true; anchorX=midX; anchorTime=player.currentTime||0; }
-    // mirrored preview: moving hand to your right lowers landmark x → invert so right = forward
-    const deltaX=(anchorX - midX);             // >0 when hand moves right (screen)
-    const span=(player.duration||0) * (+sens.value);
-    let t=anchorTime + deltaX*span;
-    t=Math.min(player.duration||0, Math.max(0,t));
-    player.currentTime=t;
-    // grab indicator ring
-    octx.beginPath(); octx.arc(midX*W,(lm[4].y+lm[8].y)/2*H, 26,0,Math.PI*2);
-    octx.lineWidth=3; octx.strokeStyle="rgba(251,113,133,.9)"; octx.stroke();
-  }else{
-    pillPinch.className="pill on";
-    if(grabbing) releaseGrab();
+  if (mode === "aperture") {
+    const openness = Math.min(1, Math.max(0, (pinch - 0.30) / (1.10 - 0.30)));
+    targetTime = openness * (player.duration || 0);
+    $("openVal").textContent = (openness * 100).toFixed(0) + "%";
+    pillOpen.className = openness > 0.02 ? "pill hot" : "pill on";
+    octx.strokeStyle = `rgba(94,234,212,${0.35 + openness * 0.6})`; octx.stroke();
+    // arco de abertura
+    const cx = (lm[4].x + lm[8].x) / 2 * W, cy = (lm[4].y + lm[8].y) / 2 * H;
+    octx.beginPath(); octx.arc(cx, cy, 18 + openness * 26, -Math.PI / 2, -Math.PI / 2 + openness * Math.PI * 2);
+    octx.lineWidth = 4; octx.strokeStyle = "rgba(251,113,133,.9)"; octx.stroke();
+  } else {
+    // drag mode (v1): pinch agarra, arrastar horizontal faz scrub
+    const isPinch = pinch < +thresh.value;
+    const midX = (lm[4].x + lm[8].x) / 2;
+    $("openVal").textContent = pinch.toFixed(2);
+    octx.strokeStyle = isPinch ? "rgba(251,113,133,.95)" : "rgba(94,234,212,.5)"; octx.stroke();
+    if (isPinch) {
+      pillOpen.className = "pill hot";
+      if (!grabbing) { grabbing = true; anchorX = midX; anchorTime = displayedTime; }
+      const deltaX = (anchorX - midX); // preview espelhada: mão p/ direita = avançar
+      targetTime = anchorTime + deltaX * (player.duration || 0) * (+sens.value);
+      const cx = midX * W, cy = (lm[4].y + lm[8].y) / 2 * H;
+      octx.beginPath(); octx.arc(cx, cy, 26, 0, Math.PI * 2);
+      octx.lineWidth = 3; octx.strokeStyle = "rgba(251,113,133,.9)"; octx.stroke();
+    } else {
+      pillOpen.className = "pill on";
+      grabbing = false;
+      targetTime = displayedTime; // mantém posição quando larga
+    }
   }
 }
-function releaseGrab(){ grabbing=false; }
+
+function applyTime(now) {
+  const dur = player.duration || 0;
+  if (!dur) return;
+  if (!handVisible) {
+    if ($("autoReset").checked && $("mode").value === "aperture") {
+      targetTime = Math.max(0, targetTime - (now - lastFrameTime) / 1000 * dur * 0.10); // rebobina suave
+    } else {
+      targetTime = displayedTime;
+    }
+  }
+  targetTime = Math.min(dur, Math.max(0, targetTime));
+  displayedTime += (targetTime - displayedTime) * +smooth.value;
+  if (player.paused && Math.abs(displayedTime - player.currentTime) > 0.01) {
+    player.currentTime = displayedTime;
+  }
+  // whoosh proporcional à velocidade de viagem no tempo
+  const dt = (now - lastFrameTime) / 1000;
+  if (dt > 0) whoosh(Math.abs(player.currentTime - lastShownTime) / dt);
+  lastShownTime = player.currentTime;
+  lastFrameTime = now;
+}
+
+/* arranque: só depois de TODO o estado do módulo estar inicializado */
+renderChips();
+selectScene(0);
 </script>
 </body>
 </html>
