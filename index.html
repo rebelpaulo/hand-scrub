@@ -281,10 +281,10 @@ const player = $("player"), cam = $("cam"), overlay = $("overlay"), octx = overl
 // Presets locais re-codificados all-intra (todos os frames são keyframes):
 // o seek é instantâneo em qualquer direção → scrub fluido frame a frame.
 const SCENES = [
-  { name: "🚀 Foguetão", src: "media/rocket.mp4" },
-  { name: "☢️ Bomba atómica", src: "media/bomb.mp4" },
-  { name: "🌹 Rosa", src: "media/rose.mp4" },
-  { name: "🌼 Peónia", src: "media/peony.mp4" },
+  { name: "🚀 Foguetão", src: "media/rocket.mp4", id: "media/rocket.mp4" },
+  { name: "☢️ Bomba atómica", src: "media/bomb.mp4", id: "media/bomb.mp4" },
+  { name: "🌹 Rosa", src: "media/rose.mp4", id: "media/rose.mp4" },
+  { name: "🌼 Peónia", src: "media/peony.mp4", id: "media/peony.mp4" },
 ];
 let activeScene = 0;
 
@@ -305,6 +305,7 @@ function selectScene(i) {
   player.load();
   displayedTime = 0;
   targetTime = 0;
+  grabbing = false; // sem âncora de arrasto herdada da cena anterior
   player.currentTime = 0;
   renderChips();
   toast(SCENES[i].name);
@@ -312,7 +313,11 @@ function selectScene(i) {
 $("fileInput").onchange = e => {
   const files = [...e.target.files];
   if (!files.length) return;
-  for (const f of files) SCENES.push({ name: "📁 " + f.name.replace(/\.[^.]+$/, "").slice(0, 18), src: URL.createObjectURL(f) });
+  for (const f of files) SCENES.push({
+    name: "📁 " + f.name.replace(/\.[^.]+$/, "").slice(0, 18),
+    src: URL.createObjectURL(f),
+    id: "upload:" + f.name + "|" + f.size + "|" + f.lastModified, // estável entre sessões
+  });
   selectScene(SCENES.length - files.length); // first of the newly added
 };
 
@@ -370,7 +375,7 @@ $("musicOn").addEventListener("change", () => {
 let trimIn = 0, trimOut = 0; // trimOut=0 → até ao fim (definido no loadedmetadata)
 let trims = {};
 try { trims = JSON.parse(localStorage.getItem("scene-trims") || "{}"); } catch { trims = {}; }
-function trimKey() { return SCENES[activeScene].name + "|" + (player.duration || 0).toFixed(1); }
+function trimKey() { return SCENES[activeScene].id; }
 function saveTrim() {
   trims[trimKey()] = { in: trimIn, out: trimOut };
   try { localStorage.setItem("scene-trims", JSON.stringify(trims)); } catch { /* opcional */ }
@@ -380,10 +385,11 @@ player.addEventListener("timeupdate", () => {
   const end = trimOut || player.duration || 0;
   if (!player.paused && end && player.currentTime >= end - 0.05) player.currentTime = trimIn;
 });
+function minSpan() { return Math.min(0.5, player.duration || 0.5); }
 player.addEventListener("loadedmetadata", () => {
-  const t = trims[trimKey()];
-  trimIn = t ? Math.min(Math.max(0, t.in), player.duration) : 0;
-  trimOut = t ? Math.min(Math.max(trimIn + 0.5, t.out), player.duration) : player.duration;
+  const t = trims[trimKey()], d = player.duration, ms = minSpan();
+  trimIn = t ? Math.min(Math.max(0, t.in), Math.max(0, d - ms)) : 0;
+  trimOut = t ? Math.min(Math.max(trimIn + ms, t.out), d) : d;
   displayedTime = targetTime = trimIn;
   player.currentTime = trimIn;
   renderTrim();
@@ -411,8 +417,9 @@ function bindTrimHandle(h, isIn) {
       const d = player.duration || 0; if (!d) return;
       const r = trimStrip.getBoundingClientRect();
       const t = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * d;
-      if (isIn) trimIn = Math.min(Math.max(0, t), (trimOut || d) - 0.5);
-      else trimOut = Math.max(Math.min(d, t), trimIn + 0.5);
+      const ms = minSpan();
+      if (isIn) trimIn = Math.max(0, Math.min(t, (trimOut || d) - ms));
+      else trimOut = Math.min(d, Math.max(t, trimIn + ms));
       // preview em direto do ponto de corte (seek all-intra é instantâneo)
       player.pause();
       player.currentTime = isIn ? trimIn : trimOut;
@@ -576,6 +583,7 @@ let displayedTime = 0;          // smoothed time we render
 let targetTime = 0;             // where the gesture wants us
 let handVisible = false;        // mão de controlo do tempo visível
 let anyHand = false;            // qualquer mão visível (tempo ou punho)
+let timeHandPos = null;         // latch: posição do pulso da mão do tempo
 let fistActive = false, rollAnchor = 0, volAnchor = 0.6; // knob de volume
 let grabbing = false, anchorX = 0, anchorTime = 0;   // drag mode
 let lastFrameTime = 0, lastShownTime = 0;
@@ -595,6 +603,15 @@ async function initModel() {
 $("startBtn").onclick = async () => {
   const btn = $("startBtn"), err = $("startErr");
   btn.disabled = true; btn.textContent = "A carregar modelo…";
+  // arranca a música SÍNCRONO com o clique (a ativação de autoplay expira
+  // durante o carregamento do modelo); se falhar, tenta no próximo toque
+  if ($("musicOn").checked) {
+    music.play().catch(() => {
+      document.addEventListener("pointerdown",
+        () => { if ($("musicOn").checked) music.play().catch(() => {}); },
+        { once: true });
+    });
+  }
   try { initAudio(); } catch { $("soundOn").checked = false; } // som é opcional
   try {
     if (!landmarker) await initModel();
@@ -608,9 +625,16 @@ $("startBtn").onclick = async () => {
     toast("✌️ Abre e fecha os dedos");
     lastFrameTime = performance.now(); lastCamFrameAt = lastFrameTime;
     stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+      // câmara desligada: pára tudo em vez de deixar música e loop pendurados
       handVisible = false; anyHand = false; grabbing = false; fistActive = false;
+      timeHandPos = null; running = false;
+      music.pause();
+      if (noiseGain && audioCtx) {
+        noiseGain.gain.cancelScheduledValues(audioCtx.currentTime);
+        noiseGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.02);
+      }
+      toast("⚠️ Câmara desligada — recarrega a página para retomar");
     });
-    if ($("musicOn").checked) music.play().catch(() => { /* autoplay bloqueado */ });
     document.addEventListener("visibilitychange", () => { lastFrameTime = performance.now(); });
     loop();
   } catch (e) {
@@ -632,6 +656,7 @@ function loop() {
   } else if (now - lastCamFrameAt > 1500 && (handVisible || anyHand)) {
     // câmara congelada/terminada: solta o gesto para não fazer scrub eterno
     handVisible = false; anyHand = false; grabbing = false; fistActive = false;
+    timeHandPos = null;
   }
   applyTime(now);
   const dt = now - lastT; lastT = now;
@@ -664,14 +689,27 @@ function processHands(res) {
   const pillHand = $("pillHand"), pillOpen = $("pillOpen");
   const W = overlay.width, H = overlay.height;
 
-  // classifica cada mão: punho fechado = volume da música · mão aberta = tempo
+  // papel das mãos com latch por proximidade: a mão do tempo MANTÉM o papel
+  // mesmo quando fecha (senão virava punho de volume); o volume é só da outra mão
   let timeLm = null, fistLm = null;
-  for (const h of hands) {
-    const hs = dist(h[0], h[9]) || 0.0001;
-    if (isFist(h, hs)) { if (!fistLm) fistLm = h; }
-    else if (!timeLm) timeLm = h;
+  if (timeHandPos && hands.length) {
+    let best = null, bd = Infinity;
+    for (const h of hands) {
+      const d2 = (h[0].x - timeHandPos.x) ** 2 + (h[0].y - timeHandPos.y) ** 2;
+      if (d2 < bd) { bd = d2; best = h; }
+    }
+    if (bd < 0.09) timeLm = best; // ~0.3 em coords normalizadas
   }
+  if (!timeLm) {
+    for (const h of hands) {
+      const hs = dist(h[0], h[9]) || 0.0001;
+      if (!isFist(h, hs)) { timeLm = h; break; }
+    }
+  }
+  fistLm = hands.find(h => h !== timeLm && isFist(h, dist(h[0], h[9]) || 0.0001)) || null;
+  if (timeLm) timeHandPos = { x: timeLm[0].x, y: timeLm[0].y };
   anyHand = hands.length > 0;
+  if (!anyHand) timeHandPos = null;
 
   // ---- punho: roda para subir/descer a música ----
   if (fistLm && $("musicOn").checked) {
