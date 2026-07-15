@@ -31,14 +31,17 @@ in-browser mais fiável/rápido e mais recomendado.
 - **✂️ Trim por cena**: define início/fim (ex.: só dos 4s aos 8s) com pegas
   arrastáveis e preview em direto; o gesto, o play e o auto-reset ficam
   confinados ao intervalo. Guardado por cena.
-- **🎵 Música com a outra mão**: fecha o punho e roda-o como um botão de
-  volume — sobe e desce a música (Gymnopédie No.1, Kevin MacLeod, CC BY 3.0).
-  A mão aberta controla o tempo; o punho controla o som; funcionam em
+- **Papéis fixos por mão** (handedness): a mão direita controla o tempo, a
+  esquerda o som — troca nas definições ("Trocar mãos").
+- **🎵 Música na mão do som**: punho fechado roda como um botão de volume
+  (Gymnopédie No.1, Kevin MacLeod, CC BY 3.0); **palma toda aberta + swipe
+  horizontal** troca de vídeo (próximo/anterior). Tempo e som funcionam em
   simultâneo.
 - **Auto-reset**: sem mãos à frente da câmara, o vídeo rebobina lentamente
   para o início do corte (pronto para o próximo visitante).
-- **Som**: whoosh sintetizado (WebAudio) proporcional à velocidade da viagem
-  no tempo.
+- **🔗 Partilhar setup**: o botão 🔗 copia um link com os cortes e a cena
+  ativa embutidos — abre noutro browser/dispositivo e a configuração vem
+  junto (os cortes também ficam no localStorage do dispositivo).
 - UI esconde-se após 4 s de inatividade · **F** = ecrã inteiro · **Espaço** =
   play/pause.
 
