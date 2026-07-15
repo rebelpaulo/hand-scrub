@@ -489,7 +489,13 @@ $("shareBtn").onclick = async () => {
   if (!m) return;
   try {
     const cfg = JSON.parse(atob(m[1]));
-    if (cfg.t) { Object.assign(trims, cfg.t); try { localStorage.setItem("scene-trims", JSON.stringify(trims)); } catch { /* opcional */ } }
+    if (cfg.t) {
+      // o link representa o setup COMPLETO dos presets: limpa cortes antigos
+      // de presets (mantém os de uploads, que são só deste dispositivo)
+      for (const k of Object.keys(trims)) if (!k.startsWith("upload:")) delete trims[k];
+      Object.assign(trims, cfg.t);
+      try { localStorage.setItem("scene-trims", JSON.stringify(trims)); } catch { /* opcional */ }
+    }
     if (typeof cfg.s === "number" && SCENES[cfg.s]) pendingScene = cfg.s;
   } catch { /* link inválido: ignora */ }
 })();
@@ -729,7 +735,9 @@ function processHands(res) {
   // tempo, a OUTRA controla o som — estável mesmo com as duas fechadas.
   // "Trocar mãos" nas definições inverte.
   const hd = res.handednesses || res.handedness || [];
-  const wantTime = $("swapHands").checked ? "Left" : "Right";
+  // NOTA: o MediaPipe assume input espelhado (selfie); como lhe damos frames
+  // crus, a mão DIREITA física do utilizador vem etiquetada "Left".
+  const wantTime = $("swapHands").checked ? "Right" : "Left";
   let timeLm = null, soundLm = null;
   hands.forEach((h, i) => {
     const label = hd[i]?.[0]?.categoryName || "";
