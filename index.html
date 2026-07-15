@@ -849,6 +849,7 @@ function processHands(res) {
   const palmOpen = isOpenPalm(lm);
   if (palmOpen) { lastPalmAt = performance.now(); swipeState = trackSwipe(lm); }
   else if (performance.now() - lastPalmAt > 150) swipeHist = []; // graça p/ frames perdidos em movimento rápido
+  else if (swipeHist.length) swipeState = "moving"; // em graça com trajetória viva: não retomar o scrub
   const pinch = dist(lm[4], lm[8]) / handSize;   // ~0.15 fechado · ~1.3 aberto
   const mode = $("mode").value;
   pillHand.className = "pill on";
