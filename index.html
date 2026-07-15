@@ -224,7 +224,7 @@
     <label class="btn" title="Carregar vídeos próprios">📁 Vídeos<input type="file" id="fileInput" accept="video/*" multiple></label>
     <select class="btn" id="mode" title="Modo de controlo">
       <option value="aperture">✌️ Abrir/Fechar</option>
-      <option value="hands" hidden>🙏 Afastar as mãos</option>
+      <option value="hands">🙏 Afastar as mãos</option>
       <option value="drag">🤏 Arrastar</option>
     </select>
     <button class="btn" id="trimBtn" title="Trim da cena">✂️</button>
@@ -288,8 +288,8 @@ const SCENES = [
   { name: "☢️ Bomba atómica", src: "media/bomb.mp4", id: "media/bomb.mp4" },
   { name: "🌹 Rosa", src: "media/rose.mp4", id: "media/rose.mp4" },
   { name: "🌼 Peónia", src: "media/peony.mp4", id: "media/peony.mp4" },
-  // cena especial: só funciona com o gesto 🙏 (afastar as mãos separa as águas)
-  { name: "🌊 Moisés", src: "media/moses.mp4", id: "media/moses.mp4", forceMode: "hands" },
+  // cena secreta: não aparece nos chips — ativa-se escolhendo o modo 🙏
+  { name: "🌊 Moisés", src: "media/moses.mp4", id: "media/moses.mp4", forceMode: "hands", hidden: true },
 ];
 let activeScene = 0;
 
@@ -297,6 +297,7 @@ const chipsEl = $("chips");
 function renderChips() {
   chipsEl.innerHTML = "";
   SCENES.forEach((s, i) => {
+    if (s.hidden) return; // cena secreta: entra-se pelo modo 🙏
     const c = document.createElement("button");
     c.className = "chip" + (i === activeScene ? " active" : "");
     c.textContent = s.name;
@@ -312,16 +313,11 @@ function selectScene(i) {
   targetTime = 0;
   grabbing = false; // sem âncora de arrasto herdada da cena anterior
   player.currentTime = 0;
-  // cenas com gesto próprio (ex.: 🌊 = 🙏) forçam o modo; ao sair, restaura o do utilizador
+  // cenas com gesto próprio (🌊 = 🙏): o modo acompanha a cena; ao sair
+  // (chip/swipe), volta ao último modo escolhido pelo utilizador
   const modeSel = $("mode");
-  if (SCENES[i].forceMode) {
-    if (!modeSel.dataset.userMode) modeSel.dataset.userMode = modeSel.value;
-    modeSel.value = SCENES[i].forceMode;
-    modeSel.disabled = true;
-  } else {
-    if (modeSel.dataset.userMode) { modeSel.value = modeSel.dataset.userMode; delete modeSel.dataset.userMode; }
-    modeSel.disabled = false;
-  }
+  if (SCENES[i].forceMode) modeSel.value = SCENES[i].forceMode;
+  else if (modeSel.value === "hands") modeSel.value = lastUserMode;
   renderChips();
   toast(SCENES[i].name);
   cloudSave(); // cena ativa também persiste
@@ -362,7 +358,26 @@ document.addEventListener("keydown", e => {
   if (e.code === "Space") { e.preventDefault(); $("playBtn").onclick(); }
   if (e.key === "f" || e.key === "F") $("fsBtn").onclick();
 });
-$("mode").addEventListener("change", () => { grabbing = false; targetTime = displayedTime; });
+let lastUserMode = "aperture"; // último modo "normal" (para sair do menu secreto)
+let returnScene = 0;           // cena a retomar ao sair do 🙏
+$("mode").addEventListener("change", () => {
+  grabbing = false; targetTime = displayedTime;
+  const secretIdx = SCENES.findIndex(s => s.forceMode === "hands");
+  const v = $("mode").value;
+  if (v === "hands") {
+    // menu secreto: escolher 🙏 ativa a cena 🌊 Moisés
+    if (activeScene !== secretIdx && secretIdx >= 0) {
+      returnScene = activeScene;
+      selectScene(secretIdx);
+    }
+  } else {
+    lastUserMode = v;
+    if (activeScene === secretIdx) {
+      const back = (SCENES[returnScene] && !SCENES[returnScene].hidden) ? returnScene : 0;
+      selectScene(back); // selectScene mantém o modo escolhido (v) porque já não é "hands"
+    }
+  }
+});
 
 const smooth = $("smooth"), sens = $("sens"), thresh = $("thresh");
 smooth.oninput = () => $("smoothVal").textContent = (+smooth.value).toFixed(2);
@@ -794,7 +809,14 @@ function trackSwipe(lm) {
   if (Math.abs(v) > 1.1 && Math.abs(dx) > 0.14) {
     lastSwipeAt = t; swipeHist = [];
     // preview espelhada: mão para a ESQUERDA do utilizador → x da imagem sobe → próxima cena
-    selectScene((activeScene + (v > 0 ? 1 : SCENES.length - 1)) % SCENES.length);
+    // (salta cenas secretas/escondidas)
+    const dir = v > 0 ? 1 : -1;
+    let next = activeScene;
+    for (let k = 0; k < SCENES.length; k++) {
+      next = (next + dir + SCENES.length) % SCENES.length;
+      if (!SCENES[next].hidden) break;
+    }
+    selectScene(next);
     return "fired";
   }
   return Math.abs(v) > 0.6 ? "moving" : "idle";
