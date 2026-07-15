@@ -18,6 +18,9 @@ in-browser mais fiável/rápido e mais recomendado.
   - ✌️ **Abrir/Fechar** (por omissão): a abertura polegar–indicador **é a
     linha do tempo** — dedos fechados = início do corte, abertos ao máximo =
     fim; abrir e fechar percorre o vídeo, com suavização.
+  - 🙏 **Afastar as mãos** (exclusivo da cena 🌊 Moisés): mãos juntas (como
+    rezar) = início; à medida que as afastas as águas separam-se, ao juntá-las
+    voltam. O modo é forçado ao entrar na cena e restaurado ao sair.
   - 🤏 **Arrastar**: pinch agarra a timeline, arrastar a mão faz scrub
     (como um drag de rato).
 - **Scrub fluido frame-a-frame**: os presets estão re-codificados **all-intra**
@@ -36,8 +39,9 @@ in-browser mais fiável/rápido e mais recomendado.
 - **🎵 Música na mão do som**: punho fechado roda como um botão de volume
   (Gymnopédie No.1, Kevin MacLeod, CC BY 3.0). Tempo e som funcionam em
   simultâneo.
-- **Swipe na mão do tempo**: palma toda aberta + movimento horizontal rápido
-  troca de vídeo (próximo/anterior).
+- **Swipe na mão do som** (backhand slap): palma toda aberta + movimento
+  horizontal rápido troca de vídeo (próximo/anterior). A mão do tempo fica
+  100% dedicada à timeline.
 - **☁️ Persistência na cloud (Supabase)**: os cortes e a cena ativa gravam-se
   na tabela `hand_config` (projeto ROTDUBAY) — abre a app noutro dispositivo
   e o setup vem da cloud (prioridade: link `#cfg` > cloud > localStorage).
