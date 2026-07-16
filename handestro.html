@@ -271,9 +271,6 @@
   <script src="https://cdn.jsdelivr.net/npm/tone@15.1.22/build/Tone.js"></script>
 
 <script type="module">
-import { FilesetResolver, HandLandmarker }
-  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
-
 const $ = id => document.getElementById(id);
 
 /* ================= toast ================= */
@@ -288,6 +285,41 @@ function toast(msg) {
 function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
 function handSize(lm) { return dist(lm[0], lm[9]) || 0.0001; }
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+// fix 3: MediaPipe's hands[] order isn't stable across frames. Match detected hands
+// to stable per-slot tracks by nearest wrist (lm[0]) instead of trusting array index.
+// A slot whose track can't be matched (hand gone, jumped too far, or hand count
+// changed) comes back "fresh" so the caller can clear its gesture history.
+function nearestUnusedHandIndex(hands, wrist, maxDist, usedHands) {
+  let best = -1, bestD = Infinity;
+  for (let hi = 0; hi < hands.length; hi++) {
+    if (usedHands.has(hi)) continue;
+    const d = dist(hands[hi][0], wrist);
+    if (d < bestD) { bestD = d; best = hi; }
+  }
+  return (best !== -1 && bestD <= maxDist) ? best : -1;
+}
+function trackHandsBySlot(hands, trackWrists, maxDist) {
+  const n = trackWrists.length;
+  const usedHands = new Set();
+  const matched = new Array(n).fill(null);
+  const fresh = new Array(n).fill(false);
+
+  for (let ti = 0; ti < n; ti++) {
+    if (!trackWrists[ti]) continue;
+    const hi = nearestUnusedHandIndex(hands, trackWrists[ti], maxDist, usedHands);
+    if (hi !== -1) { matched[ti] = hands[hi]; usedHands.add(hi); }
+  }
+  for (let ti = 0; ti < n; ti++) {
+    if (matched[ti]) continue;
+    const hi = hands.findIndex((_, i) => !usedHands.has(i));
+    if (hi !== -1) { matched[ti] = hands[hi]; usedHands.add(hi); fresh[ti] = true; }
+  }
+  for (let ti = 0; ti < n; ti++) {
+    trackWrists[ti] = matched[ti] ? { x: matched[ti][0].x, y: matched[ti][0].y } : null;
+  }
+  return { matched, fresh };
+}
 
 // punho fechado com o polegar destacado para cima = 👍
 function isThumbsUp(lm) {
@@ -346,28 +378,46 @@ let cursorX = innerWidth / 2, cursorY = innerHeight / 2, cursorVisible = false;
 let poseStart = 0, poseHeld = false;
 let hoverTarget = null, hoverProgress = 0, hoverCooldownUntil = 0;
 let lastCursorTick = performance.now();
+let cursorTrackWrist = null;  // fix 3: wrist of the hand tracked last frame
+const FRAME_STALL_MS = 200;   // fix 2: gap above which the dwell is considered stale
 
 function setRing(pct) {
   const deg = Math.round(clamp(pct, 0, 1) * 360);
   $("cursorRing").style.background = `conic-gradient(from -90deg, var(--accent) ${deg}deg, transparent ${deg}deg)`;
 }
 
+// fix 3: MediaPipe's hands[] order isn't stable across frames — pick the hand
+// whose wrist is nearest to the one tracked last frame (fallback: hands[0]).
+function pickCursorHand(hands) {
+  if (!cursorTrackWrist) return hands[0];
+  let best = hands[0], bestD = Infinity;
+  for (const h of hands) {
+    const d = dist(h[0], cursorTrackWrist);
+    if (d < bestD) { bestD = d; best = h; }
+  }
+  return best;
+}
+
 function updateCursor(hands, now) {
-  const dt = now - lastCursorTick; lastCursorTick = now;
+  const rawDt = now - lastCursorTick; lastCursorTick = now;
+  // fix 2: a gap between processed frames (tab suspend, MediaPipe hiccup) must not
+  // let a stale hold insta-activate — clamp the accumulated dt and reset the dwell.
+  const stalled = rawDt > FRAME_STALL_MS;
+  const dt = Math.min(rawDt, FRAME_STALL_MS);
+
   if (!hands.length) {
     cursorVisible = false; poseHeld = false; poseStart = 0; hoverProgress = 0; hoverTarget = null;
+    cursorTrackWrist = null; // fix 3: reset hand tracking when no hands
     $("cursor").hidden = true;
     document.querySelectorAll(".hoverable.hovering").forEach(h => h.classList.remove("hovering"));
     setRing(0);
     return;
   }
-  const lm = hands[0];
-  const rawX = (1 - lm[8].x) * innerWidth;
-  const rawY = lm[8].y * innerHeight;
-  if (!cursorVisible) { cursorX = rawX; cursorY = rawY; cursorVisible = true; }
-  else { cursorX += (rawX - cursorX) * 0.35; cursorY += (rawY - cursorY) * 0.35; }
-  $("cursor").hidden = false;
-  $("cursor").style.transform = `translate(${cursorX}px, ${cursorY}px)`;
+
+  if (stalled) { poseStart = 0; poseHeld = false; hoverProgress = 0; hoverTarget = null; }
+
+  const lm = pickCursorHand(hands); // fix 3: stable hand identity
+  cursorTrackWrist = { x: lm[0].x, y: lm[0].y };
 
   if (isThumbsUp(lm)) {
     if (!poseStart) poseStart = now;
@@ -376,9 +426,21 @@ function updateCursor(hands, now) {
     poseStart = 0; poseHeld = false;
   }
 
-  const el = document.elementFromPoint(cursorX, cursorY);
-  const target = el ? el.closest(".hoverable") : null;
-  document.querySelectorAll(".hoverable.hovering").forEach(h => { if (h !== target) h.classList.remove("hovering"); });
+  // fix 1: freeze the cursor + hovered target while thumbs-up is confirmed, so
+  // entering the pose (which curls lm[8]) can't drag the cursor off the target.
+  let target = hoverTarget;
+  if (!poseHeld) {
+    const rawX = (1 - lm[8].x) * innerWidth;
+    const rawY = lm[8].y * innerHeight;
+    if (!cursorVisible) { cursorX = rawX; cursorY = rawY; cursorVisible = true; }
+    else { cursorX += (rawX - cursorX) * 0.35; cursorY += (rawY - cursorY) * 0.35; }
+
+    const el = document.elementFromPoint(cursorX, cursorY);
+    target = el ? el.closest(".hoverable") : null;
+    document.querySelectorAll(".hoverable.hovering").forEach(h => { if (h !== target) h.classList.remove("hovering"); });
+  }
+  $("cursor").hidden = false;
+  $("cursor").style.transform = `translate(${cursorX}px, ${cursorY}px)`;
 
   if (now < hoverCooldownUntil) { hoverProgress = 0; setRing(0); return; }
 
@@ -418,6 +480,12 @@ let landmarker = null, running = false, lastVideoTime = -1;
 const cam = $("cam");
 
 async function initModel() {
+  // fix 4: dynamic import (not a static top-level import) so a CDN failure can't
+  // block card clicks / back / Escape / the start button — all registered above,
+  // independent of this import. Called from startBtn's try/catch below, which
+  // already treats camera-init failure as non-fatal.
+  const { FilesetResolver, HandLandmarker } = await import(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
   const fileset = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
   landmarker = await HandLandmarker.createFromOptions(fileset, {
@@ -524,10 +592,17 @@ function bandaUpdate(hands, now) {
     const gain = 0.15 + spread * (1.0 - 0.15);
     if (bandaFilter) bandaFilter.frequency.rampTo(freq, 0.1);
     if (bandaGain) bandaGain.gain.rampTo(gain, 0.1);
-  }
-  bandaDisplayedT += (bandaTargetT - bandaDisplayedT) * 0.18;
-  if (video.duration && Math.abs(bandaDisplayedT - video.currentTime) > 0.005) {
-    video.currentTime = bandaDisplayedT;
+
+    bandaDisplayedT += (bandaTargetT - bandaDisplayedT) * 0.18;
+    if (Math.abs(bandaDisplayedT - video.currentTime) > 0.005) {
+      video.currentTime = bandaDisplayedT;
+    }
+  } else {
+    // fix 5: fewer than two hands — let the video free-run instead of seeking
+    // toward a stale/zeroed gesture target, keeping displayed/target synced to
+    // playback so there's no jump the moment two hands appear.
+    bandaDisplayedT = video.currentTime;
+    bandaTargetT = video.currentTime;
   }
   if (video.duration) $("bandaProgress").style.width = (video.currentTime / video.duration * 100) + "%";
 }
@@ -619,6 +694,7 @@ function maestroUpdate(hands, now) {
    ============================================================ */
 const HARP_NOTES = ["C4", "D4", "E4", "G4", "A4", "C5", "D5", "E5"];
 let harpSynths = [], harpStringEls = [], harpPrevFingerX = [null, null], harpCooldown = new Array(8).fill(0);
+let harpTrackWrists = [null, null]; // fix 3: per-slot stable hand identity
 
 function harpaEnter() {
   const container = $("strings");
@@ -635,6 +711,7 @@ function harpaEnter() {
     harpStringEls.push({ el, xFrac: xPct / 100, note });
   });
   harpPrevFingerX = [null, null];
+  harpTrackWrists = [null, null];
   harpCooldown = new Array(8).fill(0);
 }
 function harpaDispose() {
@@ -645,8 +722,13 @@ function harpaDispose() {
   $("noteDisplay").classList.remove("show");
 }
 function harpaUpdate(hands, now) {
-  hands.forEach((lm, hi) => {
-    if (hi > 1) return;
+  // fix 3: key history per stable hand track (nearest-wrist match), not raw array
+  // index — a track that can't be matched comes back cleared and must not pluck
+  // on its first frame.
+  const { matched, fresh } = trackHandsBySlot(hands, harpTrackWrists, 0.25);
+  matched.forEach((lm, hi) => {
+    if (!lm) { harpPrevFingerX[hi] = null; return; }
+    if (fresh[hi]) harpPrevFingerX[hi] = null;
     const fingerX = 1 - lm[8].x;
     const prev = harpPrevFingerX[hi];
     if (prev != null) {
@@ -661,7 +743,6 @@ function harpaUpdate(hands, now) {
     }
     harpPrevFingerX[hi] = fingerX;
   });
-  for (let hi = hands.length; hi < 2; hi++) harpPrevFingerX[hi] = null;
 }
 function pluckString(i) {
   const s = harpStringEls[i];
@@ -678,11 +759,13 @@ function pluckString(i) {
    ============================================================ */
 let percMembrane = null, percMetal = null;
 let percSwipeHist = [[], []], percLastSwipeAt = [0, 0];
+let percTrackWrists = [null, null]; // fix 3: per-slot stable hand identity
 
 function percussaoEnter() {
   percMembrane = new Tone.MembraneSynth().toDestination();
   percMetal = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.4, release: 0.2 } }).toDestination();
   percSwipeHist = [[], []]; percLastSwipeAt = [0, 0];
+  percTrackWrists = [null, null];
 }
 function percussaoDispose() {
   if (percMembrane) { percMembrane.dispose(); percMembrane = null; }
@@ -690,8 +773,13 @@ function percussaoDispose() {
   $("rippleLayer").innerHTML = "";
 }
 function percussaoUpdate(hands, now) {
-  hands.forEach((lm, hi) => {
-    if (hi > 1) return;
+  // fix 3: key swipe history per stable hand track (nearest-wrist match), not raw
+  // array index — a track that can't be matched comes back cleared and must not
+  // fire a swipe on its first frame.
+  const { matched, fresh } = trackHandsBySlot(hands, percTrackWrists, 0.25);
+  matched.forEach((lm, hi) => {
+    if (!lm) { percSwipeHist[hi] = []; return; }
+    if (fresh[hi]) percSwipeHist[hi] = [];
     const x = 1 - lm[0].x, y = lm[0].y;
     const hist = percSwipeHist[hi];
     hist.push({ t: now, x, y });
@@ -706,7 +794,6 @@ function percussaoUpdate(hands, now) {
       triggerCrash(x * innerWidth, y * innerHeight);
     }
   });
-  for (let hi = hands.length; hi < 2; hi++) percSwipeHist[hi] = [];
 }
 function triggerTaiko(x, y) {
   if (percMembrane) percMembrane.triggerAttackRelease("C1", "8n");

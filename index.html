@@ -144,9 +144,6 @@
   <div id="notice"></div>
 
 <script type="module">
-import { FilesetResolver, HandLandmarker }
-  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
-
 const $ = id => document.getElementById(id);
 const cam = $("cam"), overlay = $("overlay"), octx = overlay.getContext("2d");
 const camPip = $("camPip"), cursorEl = $("cursor"), noticeEl = $("notice");
@@ -170,6 +167,11 @@ choices.forEach(c => c.addEventListener("click", () => go(c.dataset.href)));
 let landmarker = null, running = false, lastVideoTime = -1;
 
 async function initModel() {
+  // fix 4: dynamic import (not a static top-level import) so a CDN failure can't
+  // block anything registered above — click handlers keep working. This call sits
+  // inside startCamera()'s try/catch below, which already shows the fallback notice.
+  const { FilesetResolver, HandLandmarker } = await import(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
   const fileset = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
   landmarker = await HandLandmarker.createFromOptions(fileset, {
@@ -217,10 +219,25 @@ function isThumbsUp(lm) {
   return true;
 }
 
+// fix 3: MediaPipe's hands[] order isn't stable across frames — pick the hand
+// whose wrist (lm[0]) is nearest to the one tracked last frame (fallback: hands[0]).
+function pickCursorHand(hands) {
+  if (!cursorTrackWrist) return hands[0];
+  let best = hands[0], bestD = Infinity;
+  for (const h of hands) {
+    const d = dist(h[0], cursorTrackWrist);
+    if (d < bestD) { bestD = d; best = h; }
+  }
+  return best;
+}
+
 /* ---------- cursor smoothing ---------- */
 let cursorX = window.innerWidth / 2, cursorY = window.innerHeight / 2;
 let cursorInit = false;
 const SMOOTH = 0.35;
+let cursorTrackWrist = null;  // fix 3: wrist of the hand tracked last frame
+let missedHandFrames = 0;     // fix 6: consecutive frames with no hand detected
+const HAND_MISS_HIDE = 5;     // frames of no hand before the dot hides
 
 /* ---------- thumbs-up debounce + activation ring ---------- */
 let thumbsSince = 0;          // performance.now() when the pose started holding, 0 = not holding
@@ -229,6 +246,8 @@ const ACTIVATE_MS = 700;      // ms of confirmed hold-over-button to activate
 let cooldownUntil = 0;        // performance.now() until which activation is blocked
 let hoverChoice = null;
 let holdStart = 0;            // when confirmed thumbs-up over hoverChoice began
+let lastFrameAt = 0;          // fix 2: last processed-frame timestamp (tracking-stall guard)
+const FRAME_STALL_MS = 200;   // gap above which the dwell is considered stale
 
 function loop() {
   if (!running) return;
@@ -242,30 +261,35 @@ function loop() {
 }
 
 function processHands(res, now) {
+  // fix 2: a gap between processed frames (tab suspend, MediaPipe hiccup) must not
+  // let a stale hold insta-activate on the returning frame — reset the dwell.
+  const stalled = lastFrameAt && (now - lastFrameAt > FRAME_STALL_MS);
+  lastFrameAt = now;
+  if (stalled) { thumbsSince = 0; holdStart = 0; }
+
   octx.clearRect(0, 0, overlay.width, overlay.height);
   const hands = res.landmarks || [];
   const W = overlay.width, H = overlay.height;
 
   if (!hands.length) {
     thumbsSince = 0;
+    cursorTrackWrist = null; // fix 3: reset hand tracking when no hands
     resetHover();
+    missedHandFrames++;
+    if (missedHandFrames >= HAND_MISS_HIDE) cursorEl.style.display = "none"; // fix 6
     return;
   }
+  missedHandFrames = 0;
+  cursorEl.style.display = "block";
 
-  const lm = hands[0];
+  const lm = pickCursorHand(hands); // fix 3: stable hand identity
+  cursorTrackWrist = { x: lm[0].x, y: lm[0].y, z: lm[0].z };
+
   // draw fingertip landmark on the PiP overlay (mirrored via CSS transform)
   octx.beginPath();
   octx.arc(lm[8].x * W, lm[8].y * H, 8, 0, Math.PI * 2);
   octx.fillStyle = "#5eead4"; octx.fill();
   octx.lineWidth = 2; octx.strokeStyle = "#0009"; octx.stroke();
-
-  // mirror x: camera is selfie-facing
-  const rawX = (1 - lm[8].x) * window.innerWidth;
-  const rawY = lm[8].y * window.innerHeight;
-  if (!cursorInit) { cursorX = rawX; cursorY = rawY; cursorInit = true; }
-  cursorX += (rawX - cursorX) * SMOOTH;
-  cursorY += (rawY - cursorY) * SMOOTH;
-  cursorEl.style.transform = `translate(${cursorX}px, ${cursorY}px) translate(-50%, -50%)`;
 
   const thumbsUp = isThumbsUp(lm);
   if (thumbsUp) {
@@ -276,10 +300,22 @@ function processHands(res, now) {
   const confirmedThumbsUp = thumbsSince && (now - thumbsSince >= THUMBS_DEBOUNCE);
   cursorEl.classList.toggle("confirming", !!confirmedThumbsUp);
 
-  const target = choiceUnderCursor();
-  if (target !== hoverChoice) {
-    resetHover();
-    hoverChoice = target;
+  // fix 1: freeze the cursor + hovered target while thumbs-up is confirmed, so
+  // entering the pose (which curls lm[8]) can't drag the cursor off the target.
+  if (!confirmedThumbsUp) {
+    // mirror x: camera is selfie-facing
+    const rawX = (1 - lm[8].x) * window.innerWidth;
+    const rawY = lm[8].y * window.innerHeight;
+    if (!cursorInit) { cursorX = rawX; cursorY = rawY; cursorInit = true; }
+    cursorX += (rawX - cursorX) * SMOOTH;
+    cursorY += (rawY - cursorY) * SMOOTH;
+    cursorEl.style.transform = `translate(${cursorX}px, ${cursorY}px) translate(-50%, -50%)`;
+
+    const target = choiceUnderCursor();
+    if (target !== hoverChoice) {
+      resetHover();
+      hoverChoice = target;
+    }
   }
 
   if (!hoverChoice) return;
