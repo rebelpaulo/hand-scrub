@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HANDESTRO — música por gestos</title>
+<style>
+  :root {
+    --panel: #0f1219cc;
+    --line: #2a3245;
+    --text: #eef2f8;
+    --muted: #98a2b6;
+    --accent: #5eead4;
+    --accent-2: #818cf8;
+    --hot: #fb7185;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: var(--text); }
+
+  /* ---------- start overlay ---------- */
+  #startOverlay {
+    position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px;
+    background: radial-gradient(900px 600px at 50% 30%, #131a2a, #05070acc);
+  }
+  #startOverlay h1 { font-size: clamp(28px, 5.5vw, 48px); margin: 0; letter-spacing: -.02em; }
+  #startOverlay p { color: var(--muted); max-width: 580px; text-align: center; line-height: 1.6; margin: 0; padding: 0 20px; }
+  #startOverlay p b { color: var(--accent); }
+  #startOverlay .err { color: var(--hot); min-height: 18px; font-size: 13px; padding: 0 20px; text-align: center; }
+  .btn {
+    appearance: none; border: 1px solid var(--line); background: #151a24; color: var(--text);
+    padding: 8px 14px; border-radius: 11px; font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: .15s; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .btn.primary { background: linear-gradient(180deg, var(--accent-2), #6d78e6); border-color: #6d78e6; color: #fff; font-size: 16px; padding: 13px 26px; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+  /* ---------- hand cursor ---------- */
+  #cursor { position: fixed; top: 0; left: 0; width: 0; height: 0; pointer-events: none; z-index: 96; }
+  #cursor[hidden] { display: none; }
+  #cursorDot {
+    position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff, var(--accent) 60%, transparent 100%);
+    box-shadow: 0 0 20px 4px var(--accent), 0 0 4px #fff;
+  }
+  #cursorRing {
+    position: absolute; left: -25px; top: -25px; width: 50px; height: 50px; border-radius: 50%;
+    background: conic-gradient(from -90deg, var(--accent) 0deg, transparent 0deg);
+    -webkit-mask: radial-gradient(circle, transparent 60%, black 62%);
+    mask: radial-gradient(circle, transparent 60%, black 62%);
+  }
+
+  /* ---------- camera PiP ---------- */
+  #camPip {
+    position: fixed; right: 16px; bottom: 16px; width: 180px; z-index: 50;
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 16px 40px -16px #000; aspect-ratio: 4/3;
+  }
+  #camPip[hidden] { display: none; }
+  #cam, #camOverlay {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; transform: scaleX(-1);
+  }
+
+  /* ---------- screens ---------- */
+  .screen { position: fixed; inset: 0; display: none; }
+  .screen.active { display: block; }
+  #screen-menu.active { display: flex; }
+
+  .back {
+    position: fixed; top: 16px; left: 16px; z-index: 60;
+    background: var(--panel); backdrop-filter: blur(10px); border: 1px solid var(--line);
+    color: var(--text); border-radius: 11px; padding: 9px 16px; font-size: 14px; font-weight: 700;
+    cursor: pointer; transition: .15s;
+  }
+  .back:hover, .back.hovering { border-color: var(--accent); transform: translateY(-1px); }
+  .hoverable.hovering { box-shadow: 0 0 0 3px var(--accent); }
+
+  .hint {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 55;
+    background: var(--panel); backdrop-filter: blur(10px); border: 1px solid var(--line);
+    border-radius: 99px; padding: 8px 18px; font-size: 13px; color: var(--muted); text-align: center;
+    white-space: nowrap;
+  }
+
+  /* ---------- MENU ---------- */
+  #screen-menu {
+    flex-direction: column; align-items: center; justify-content: center; gap: 30px;
+    background: radial-gradient(1100px 700px at 50% 20%, #131a2a, #05070a);
+    padding: 20px;
+  }
+  #screen-menu h1 { font-size: clamp(30px, 6vw, 52px); margin: 0; letter-spacing: -.02em; }
+  #screen-menu .sub { color: var(--muted); margin: -18px 0 0; font-size: 14px; }
+  .grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+    width: min(760px, 92vw);
+  }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    appearance: none; text-align: left; cursor: pointer;
+    background: var(--panel); backdrop-filter: blur(10px); border: 1px solid var(--line);
+    border-radius: 18px; padding: 22px; color: var(--text); transition: .18s;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .card .emoji { font-size: 40px; line-height: 1; }
+  .card .title { font-size: 19px; font-weight: 700; }
+  .card .desc { font-size: 13px; color: var(--muted); line-height: 1.4; }
+  .card.disabled { opacity: .4; cursor: not-allowed; }
+  .card.disabled:hover { border-color: var(--line); transform: none; }
+  .card .badge { font-size: 11px; color: var(--hot); font-weight: 700; }
+
+  /* ---------- BANDA SONORA ---------- */
+  #bandaVideo { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: cover; background: #000; }
+  #bandaProgress {
+    position: fixed; left: 0; bottom: 0; height: 5px; width: 0%;
+    background: linear-gradient(90deg, var(--accent-2), var(--accent));
+    box-shadow: 0 0 12px var(--accent); z-index: 40; transition: width .08s linear;
+  }
+
+  /* ---------- MAESTRO ---------- */
+  #screen-maestro { background: radial-gradient(1100px 700px at 50% 30%, #131a2a, #05070a); }
+  #batonCanvas { position: fixed; inset: 0; width: 100%; height: 100%; }
+  #bpmDisplay {
+    position: fixed; top: 20px; right: 20px; z-index: 55;
+    background: var(--panel); backdrop-filter: blur(10px); border: 1px solid var(--line);
+    border-radius: 14px; padding: 12px 20px; font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums;
+    color: var(--accent);
+  }
+
+  /* ---------- HARPA DE AR ---------- */
+  #screen-harpa { background: radial-gradient(1100px 700px at 50% 30%, #131a2a, #05070a); }
+  #strings { position: fixed; inset: 0; }
+  .string {
+    position: absolute; top: 8%; bottom: 8%; width: 3px; transform: translateX(-50%);
+    background: linear-gradient(180deg, transparent, var(--accent-2), var(--accent), transparent);
+    opacity: .55; transition: opacity .2s;
+  }
+  .string .note {
+    position: absolute; bottom: -26px; left: 50%; transform: translateX(-50%);
+    font-size: 12px; color: var(--muted); font-weight: 700; white-space: nowrap;
+  }
+  .string.pluck { animation: pluckWobble .5s ease-out; opacity: 1; }
+  @keyframes pluckWobble {
+    0%   { transform: translateX(-50%) scaleX(1); filter: drop-shadow(0 0 2px var(--accent)); }
+    15%  { transform: translateX(calc(-50% + 6px)) scaleX(1.4); filter: drop-shadow(0 0 14px var(--accent)); }
+    30%  { transform: translateX(calc(-50% - 5px)) scaleX(1.2); }
+    50%  { transform: translateX(calc(-50% + 3px)) scaleX(1.1); }
+    70%  { transform: translateX(calc(-50% - 2px)) scaleX(1.05); }
+    100% { transform: translateX(-50%) scaleX(1); filter: drop-shadow(0 0 2px var(--accent)); }
+  }
+  #noteDisplay {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 55;
+    font-size: 30px; font-weight: 800; color: var(--accent); opacity: 0; transition: opacity .15s;
+    text-shadow: 0 0 20px var(--accent);
+  }
+  #noteDisplay.show { opacity: 1; }
+
+  /* ---------- PERCUSSÃO ---------- */
+  #screen-percussao { background: radial-gradient(1100px 700px at 50% 30%, #131a2a, #05070a); }
+  #rippleLayer { position: fixed; inset: 0; overflow: hidden; }
+  .ripple {
+    position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%;
+    pointer-events: none; border: 4px solid var(--accent);
+  }
+  .ripple.taiko { border-color: #fb923c; animation: rippleOut .7s ease-out forwards; }
+  .ripple.crash { border-color: #67e8f9; animation: rippleOut .5s ease-out forwards; }
+  @keyframes rippleOut {
+    0%   { transform: scale(0.3); opacity: 1; }
+    100% { transform: scale(18); opacity: 0; }
+  }
+
+  #toast {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 99px;
+    padding: 8px 16px; font-size: 13px; z-index: 97; opacity: 0; transition: opacity .3s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+  <!-- start screen -->
+  <div id="startOverlay">
+    <h1>🎼 HANDESTRO</h1>
+    <p>Modo <b>MÚSICA</b> por gestos. Escolhe um instrumento e toca-o com as mãos —
+       a câmara segue o teu dedo indicador como cursor; mantém <b>👍 (joia)</b> sobre
+       um cartão para o confirmar. O rato também funciona sempre.</p>
+    <button class="btn primary" id="startBtn">Começar</button>
+    <div class="err" id="startErr"></div>
+  </div>
+
+  <!-- hand cursor -->
+  <div id="cursor" hidden>
+    <div id="cursorRing"></div>
+    <div id="cursorDot"></div>
+  </div>
+
+  <!-- camera PiP -->
+  <div id="camPip" hidden>
+    <video id="cam" playsinline muted></video>
+    <canvas id="camOverlay"></canvas>
+  </div>
+
+  <!-- ===================== MENU ===================== -->
+  <div id="screen-menu" class="screen active">
+    <h1>🎼 HANDESTRO</h1>
+    <p class="sub">escolhe o teu instrumento</p>
+    <div class="grid">
+      <button type="button" class="card hoverable" id="cardBanda" data-target="banda">
+        <div class="emoji">🎬</div>
+        <div class="title">Banda Sonora</div>
+        <div class="desc">o gesto rege imagem e som — afasta as mãos como a rezar</div>
+      </button>
+      <button type="button" class="card hoverable" data-target="maestro">
+        <div class="emoji">🎻</div>
+        <div class="title">Maestro</div>
+        <div class="desc">conduz a orquestra — altura da mão e velocidade do gesto</div>
+      </button>
+      <button type="button" class="card hoverable" data-target="harpa">
+        <div class="emoji">🎵</div>
+        <div class="title">Harpa de Ar</div>
+        <div class="desc">toca cordas invisíveis com o dedo indicador</div>
+      </button>
+      <button type="button" class="card hoverable" data-target="percussao">
+        <div class="emoji">🥁</div>
+        <div class="title">Percussão</div>
+        <div class="desc">dispara batidas com um golpe no ar</div>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===================== BANDA SONORA ===================== -->
+  <div id="screen-banda" class="screen">
+    <button type="button" class="back hoverable" data-action="back">← voltar</button>
+    <video id="bandaVideo" muted playsinline loop preload="auto" src="media/moses.mp4"></video>
+    <div id="bandaProgress"></div>
+    <div class="hint">🙏 afasta as mãos: imagem e som abrem · junta-as: fecham</div>
+  </div>
+
+  <!-- ===================== MAESTRO ===================== -->
+  <div id="screen-maestro" class="screen">
+    <button type="button" class="back hoverable" data-action="back">← voltar</button>
+    <canvas id="batonCanvas"></canvas>
+    <div id="bpmDisplay">— BPM</div>
+    <div class="hint">altura da mão = intensidade · velocidade do gesto = andamento</div>
+  </div>
+
+  <!-- ===================== HARPA DE AR ===================== -->
+  <div id="screen-harpa" class="screen">
+    <button type="button" class="back hoverable" data-action="back">← voltar</button>
+    <div id="strings"></div>
+    <div id="noteDisplay"></div>
+    <div class="hint">atravessa as cordas com o dedo indicador para as tocar</div>
+  </div>
+
+  <!-- ===================== PERCUSSÃO ===================== -->
+  <div id="screen-percussao" class="screen">
+    <button type="button" class="back hoverable" data-action="back">← voltar</button>
+    <div id="rippleLayer"></div>
+    <div class="hint">varre na horizontal = taiko · corta para baixo = crash</div>
+  </div>
+
+  <div id="toast"></div>
+
+  <!-- Tone.js (classic script → global window.Tone) -->
+  <script src="https://cdn.jsdelivr.net/npm/tone@15.1.22/build/Tone.js"></script>
+
+<script type="module">
+import { FilesetResolver, HandLandmarker }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const $ = id => document.getElementById(id);
+
+/* ================= toast ================= */
+let toastT;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+/* ================= geometry helpers ================= */
+function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
+function handSize(lm) { return dist(lm[0], lm[9]) || 0.0001; }
+function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+// punho fechado com o polegar destacado para cima = 👍
+function isThumbsUp(lm) {
+  const hs = handSize(lm);
+  for (const t of [8, 12, 16, 20]) if (dist(lm[t], lm[0]) / hs >= 1.3) return false;
+  if (dist(lm[4], lm[0]) / hs < 0.8) return false;
+  if (!(lm[4].y < lm[2].y)) return false;
+  return true;
+}
+
+/* ================= media availability check ================= */
+let bandaMediaOk = true;
+(async () => {
+  try {
+    const [a, b] = await Promise.all([
+      fetch("media/moses.mp4", { method: "HEAD" }),
+      fetch("media/music.mp3", { method: "HEAD" }),
+    ]);
+    if (!a.ok || !b.ok) throw new Error("missing media");
+  } catch {
+    bandaMediaOk = false;
+    const card = $("cardBanda");
+    card.classList.add("disabled");
+    const desc = card.querySelector(".desc");
+    desc.insertAdjacentHTML("afterend", '<div class="badge">ficheiros de media em falta</div>');
+  }
+})();
+
+/* ================= screen navigation ================= */
+const state = { screen: "menu" };
+function enterScreen(name) {
+  if (name === "banda" && !bandaMediaOk) { toast("🎬 Banda Sonora indisponível — media em falta"); return; }
+  disposeScreen(state.screen);
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  $("screen-" + name).classList.add("active");
+  state.screen = name;
+  if (name === "banda") bandaEnter();
+  else if (name === "maestro") maestroEnter();
+  else if (name === "harpa") harpaEnter();
+  else if (name === "percussao") percussaoEnter();
+}
+function disposeScreen(name) {
+  if (name === "banda") bandaDispose();
+  else if (name === "maestro") maestroDispose();
+  else if (name === "harpa") harpaDispose();
+  else if (name === "percussao") percussaoDispose();
+}
+function goBack() { if (state.screen !== "menu") enterScreen("menu"); }
+
+document.querySelectorAll(".card").forEach(c => c.addEventListener("click", () => enterScreen(c.dataset.target)));
+document.querySelectorAll('[data-action="back"]').forEach(b => b.addEventListener("click", goBack));
+document.addEventListener("keydown", e => { if (e.key === "Escape") goBack(); });
+
+/* ================= hand cursor + 👍 confirm ================= */
+let cursorX = innerWidth / 2, cursorY = innerHeight / 2, cursorVisible = false;
+let poseStart = 0, poseHeld = false;
+let hoverTarget = null, hoverProgress = 0, hoverCooldownUntil = 0;
+let lastCursorTick = performance.now();
+
+function setRing(pct) {
+  const deg = Math.round(clamp(pct, 0, 1) * 360);
+  $("cursorRing").style.background = `conic-gradient(from -90deg, var(--accent) ${deg}deg, transparent ${deg}deg)`;
+}
+
+function updateCursor(hands, now) {
+  const dt = now - lastCursorTick; lastCursorTick = now;
+  if (!hands.length) {
+    cursorVisible = false; poseHeld = false; poseStart = 0; hoverProgress = 0; hoverTarget = null;
+    $("cursor").hidden = true;
+    document.querySelectorAll(".hoverable.hovering").forEach(h => h.classList.remove("hovering"));
+    setRing(0);
+    return;
+  }
+  const lm = hands[0];
+  const rawX = (1 - lm[8].x) * innerWidth;
+  const rawY = lm[8].y * innerHeight;
+  if (!cursorVisible) { cursorX = rawX; cursorY = rawY; cursorVisible = true; }
+  else { cursorX += (rawX - cursorX) * 0.35; cursorY += (rawY - cursorY) * 0.35; }
+  $("cursor").hidden = false;
+  $("cursor").style.transform = `translate(${cursorX}px, ${cursorY}px)`;
+
+  if (isThumbsUp(lm)) {
+    if (!poseStart) poseStart = now;
+    poseHeld = (now - poseStart) >= 150;
+  } else {
+    poseStart = 0; poseHeld = false;
+  }
+
+  const el = document.elementFromPoint(cursorX, cursorY);
+  const target = el ? el.closest(".hoverable") : null;
+  document.querySelectorAll(".hoverable.hovering").forEach(h => { if (h !== target) h.classList.remove("hovering"); });
+
+  if (now < hoverCooldownUntil) { hoverProgress = 0; setRing(0); return; }
+
+  if (target && poseHeld) {
+    if (hoverTarget !== target) { hoverTarget = target; hoverProgress = 0; }
+    target.classList.add("hovering");
+    hoverProgress += dt;
+    if (hoverProgress >= 700) {
+      hoverProgress = 0; hoverCooldownUntil = now + 1000;
+      target.classList.remove("hovering");
+      setRing(0);
+      target.click();
+      return;
+    }
+  } else {
+    hoverTarget = null; hoverProgress = 0;
+  }
+  setRing(hoverTarget === target && target ? hoverProgress / 700 : 0);
+}
+
+/* ================= camera PiP drawing ================= */
+const camOverlay = $("camOverlay"), camOctx = camOverlay.getContext("2d");
+function drawCamPip(hands) {
+  if (!camOverlay.width) return;
+  camOctx.clearRect(0, 0, camOverlay.width, camOverlay.height);
+  const W = camOverlay.width, H = camOverlay.height;
+  for (const lm of hands) {
+    camOctx.beginPath();
+    camOctx.arc(lm[8].x * W, lm[8].y * H, 9, 0, Math.PI * 2);
+    camOctx.fillStyle = "#5eead4"; camOctx.fill();
+    camOctx.lineWidth = 2; camOctx.strokeStyle = "#0a0d14"; camOctx.stroke();
+  }
+}
+
+/* ================= mediapipe hand tracking ================= */
+let landmarker = null, running = false, lastVideoTime = -1;
+const cam = $("cam");
+
+async function initModel() {
+  const fileset = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  landmarker = await HandLandmarker.createFromOptions(fileset, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO", numHands: 2
+  });
+}
+
+function loop() {
+  if (!running) return;
+  const now = performance.now();
+  if (cam.currentTime !== lastVideoTime) {
+    lastVideoTime = cam.currentTime;
+    const res = landmarker.detectForVideo(cam, now);
+    processFrame(res, now);
+  }
+  requestAnimationFrame(loop);
+}
+
+function processFrame(res, now) {
+  const hands = res.landmarks || [];
+  drawCamPip(hands);
+  updateCursor(hands, now);
+  if (state.screen === "banda") bandaUpdate(hands, now);
+  else if (state.screen === "maestro") maestroUpdate(hands, now);
+  else if (state.screen === "harpa") harpaUpdate(hands, now);
+  else if (state.screen === "percussao") percussaoUpdate(hands, now);
+}
+
+/* ================= start button ================= */
+$("startBtn").onclick = async () => {
+  const btn = $("startBtn"), err = $("startErr");
+  btn.disabled = true; btn.textContent = "A preparar áudio…";
+  err.textContent = "";
+  try {
+    if (typeof Tone === "undefined") throw new Error("Tone.js não carregou (CDN indisponível)");
+    await Tone.start();
+
+    btn.textContent = "A carregar modelo de mãos…";
+    let camOk = true;
+    try {
+      if (!landmarker) await initModel();
+      btn.textContent = "A ligar câmara…";
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 960, height: 720, facingMode: "user" } });
+      cam.srcObject = stream; await cam.play();
+      camOverlay.width = cam.videoWidth; camOverlay.height = cam.videoHeight;
+      running = true;
+      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+        running = false;
+        $("camPip").hidden = true; $("cursor").hidden = true;
+        toast("⚠️ Câmara desligada — o rato continua a funcionar");
+      });
+    } catch (camErr) {
+      camOk = false;
+      toast("⚠️ Câmara indisponível — usa o rato para navegar");
+    }
+    $("startOverlay").remove();
+    if (camOk) { $("camPip").hidden = false; loop(); }
+  } catch (e) {
+    err.textContent = "Erro: " + e.message;
+    btn.disabled = false; btn.textContent = "Começar";
+  }
+};
+
+/* ============================================================
+   🎬 BANDA SONORA
+   ============================================================ */
+let bandaActive = false, bandaPlayer = null, bandaFilter = null, bandaGain = null;
+let bandaDisplayedT = 0, bandaTargetT = 0;
+
+function bandaEnter() {
+  bandaActive = true;
+  const video = $("bandaVideo");
+  video.currentTime = 0;
+  video.play().catch(() => {});
+  bandaGain = new Tone.Gain(0.15).toDestination();
+  bandaFilter = new Tone.Filter(200, "lowpass").connect(bandaGain);
+  bandaPlayer = new Tone.Player({
+    url: "media/music.mp3", loop: true,
+    onload: () => { if (bandaActive && bandaPlayer) bandaPlayer.start(); }
+  }).connect(bandaFilter);
+  bandaDisplayedT = 0; bandaTargetT = 0;
+}
+function bandaDispose() {
+  bandaActive = false;
+  $("bandaVideo").pause();
+  if (bandaPlayer) { try { bandaPlayer.stop(); } catch {} bandaPlayer.dispose(); bandaPlayer = null; }
+  if (bandaFilter) { bandaFilter.dispose(); bandaFilter = null; }
+  if (bandaGain) { bandaGain.dispose(); bandaGain = null; }
+  $("bandaProgress").style.width = "0%";
+}
+function bandaUpdate(hands, now) {
+  const video = $("bandaVideo");
+  if (hands.length >= 2 && video.duration) {
+    const c = h => ({ x: (h[0].x + h[9].x) / 2, y: (h[0].y + h[9].y) / 2 });
+    const a = c(hands[0]), b = c(hands[1]);
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    const spread = clamp((d - 0.12) / (0.62 - 0.12), 0, 1);
+    bandaTargetT = spread * video.duration;
+    const freq = 200 * Math.pow(12000 / 200, spread);
+    const gain = 0.15 + spread * (1.0 - 0.15);
+    if (bandaFilter) bandaFilter.frequency.rampTo(freq, 0.1);
+    if (bandaGain) bandaGain.gain.rampTo(gain, 0.1);
+  }
+  bandaDisplayedT += (bandaTargetT - bandaDisplayedT) * 0.18;
+  if (video.duration && Math.abs(bandaDisplayedT - video.currentTime) > 0.005) {
+    video.currentTime = bandaDisplayedT;
+  }
+  if (video.duration) $("bandaProgress").style.width = (video.currentTime / video.duration * 100) + "%";
+}
+
+/* ============================================================
+   🎻 MAESTRO
+   ============================================================ */
+let maestroSynth = null, maestroFilter = null, maestroGain = null, maestroSeq = null;
+let wristHist = [], batonTrail = [], maestroBpmSmoothed = 90;
+const CHORDS = [
+  ["C4", "E4", "G4", "C5"],
+  ["A3", "C4", "E4", "A4"],
+  ["F3", "A3", "C4", "F4"],
+  ["G3", "B3", "D4", "G4"],
+];
+
+function maestroEnter() {
+  maestroGain = new Tone.Gain(Math.pow(10, -24 / 20)).toDestination();
+  maestroFilter = new Tone.Filter(400, "lowpass").connect(maestroGain);
+  maestroSynth = new Tone.PolySynth(Tone.Synth, {
+    envelope: { attack: 0.02, decay: 0.2, sustain: 0.3, release: 0.6 }
+  }).connect(maestroFilter);
+  const seqNotes = CHORDS.flat();
+  maestroSeq = new Tone.Sequence((time, note) => {
+    maestroSynth.triggerAttackRelease(note, "8n", time);
+  }, seqNotes, "8n");
+  maestroSeq.loop = true;
+  maestroSeq.start(0);
+  Tone.Transport.bpm.value = 90;
+  Tone.Transport.start();
+  wristHist = []; batonTrail = []; maestroBpmSmoothed = 90;
+  $("bpmDisplay").textContent = "90 BPM";
+}
+function maestroDispose() {
+  Tone.Transport.stop();
+  Tone.Transport.cancel();
+  if (maestroSeq) { maestroSeq.stop(); maestroSeq.dispose(); maestroSeq = null; }
+  if (maestroSynth) { maestroSynth.releaseAll?.(); maestroSynth.dispose(); maestroSynth = null; }
+  if (maestroFilter) { maestroFilter.dispose(); maestroFilter = null; }
+  if (maestroGain) { maestroGain.dispose(); maestroGain = null; }
+  const ctx = $("batonCanvas").getContext("2d");
+  ctx.clearRect(0, 0, $("batonCanvas").width, $("batonCanvas").height);
+}
+function maestroUpdate(hands, now) {
+  const canvas = $("batonCanvas");
+  if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+    canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
+  }
+  const ctx = canvas.getContext("2d");
+  if (hands.length > 0) {
+    const lm = hands[0];
+    const wx = 1 - lm[0].x, wy = lm[0].y;
+    wristHist.push({ t: now, x: wx, y: wy });
+    while (wristHist.length && now - wristHist[0].t > 1500) wristHist.shift();
+    let totalDist = 0;
+    for (let i = 1; i < wristHist.length; i++) {
+      totalDist += Math.hypot(wristHist[i].x - wristHist[i - 1].x, wristHist[i].y - wristHist[i - 1].y);
+    }
+    const span = wristHist.length > 1 ? (wristHist[wristHist.length - 1].t - wristHist[0].t) / 1000 : 1;
+    const avgSpeed = span > 0 ? totalDist / span : 0;
+    const speedNorm = clamp(avgSpeed / 4, 0, 1);
+    const bpmTarget = 60 + speedNorm * 80;
+    maestroBpmSmoothed += (bpmTarget - maestroBpmSmoothed) * 0.05;
+    Tone.Transport.bpm.rampTo(maestroBpmSmoothed, 0.3);
+    $("bpmDisplay").textContent = Math.round(maestroBpmSmoothed) + " BPM";
+
+    const intensity = clamp(1 - lm[0].y, 0, 1);
+    const volDb = -24 + intensity * 24;
+    const freq = 400 * Math.pow(8000 / 400, intensity);
+    if (maestroGain) maestroGain.gain.rampTo(Math.pow(10, volDb / 20), 0.1);
+    if (maestroFilter) maestroFilter.frequency.rampTo(freq, 0.1);
+
+    batonTrail.push({ x: wx * canvas.width, y: wy * canvas.height, t: now });
+  }
+  while (batonTrail.length && now - batonTrail[0].t > 800) batonTrail.shift();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  for (let i = 1; i < batonTrail.length; i++) {
+    const p0 = batonTrail[i - 1], p1 = batonTrail[i];
+    const age = clamp((now - p1.t) / 800, 0, 1);
+    ctx.strokeStyle = `rgba(94,234,212,${1 - age})`;
+    ctx.lineWidth = 6 * (1 - age) + 1;
+    ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.stroke();
+  }
+}
+
+/* ============================================================
+   🎵 HARPA DE AR
+   ============================================================ */
+const HARP_NOTES = ["C4", "D4", "E4", "G4", "A4", "C5", "D5", "E5"];
+let harpSynths = [], harpStringEls = [], harpPrevFingerX = [null, null], harpCooldown = new Array(8).fill(0);
+
+function harpaEnter() {
+  const container = $("strings");
+  container.innerHTML = "";
+  harpStringEls = [];
+  harpSynths = HARP_NOTES.map(() => new Tone.PluckSynth().toDestination());
+  HARP_NOTES.forEach((note, i) => {
+    const xPct = 10 + i * (80 / 7);
+    const el = document.createElement("div");
+    el.className = "string";
+    el.style.left = xPct + "%";
+    el.innerHTML = `<span class="note">${note}</span>`;
+    container.appendChild(el);
+    harpStringEls.push({ el, xFrac: xPct / 100, note });
+  });
+  harpPrevFingerX = [null, null];
+  harpCooldown = new Array(8).fill(0);
+}
+function harpaDispose() {
+  harpSynths.forEach(s => s.dispose());
+  harpSynths = [];
+  $("strings").innerHTML = "";
+  $("noteDisplay").textContent = "";
+  $("noteDisplay").classList.remove("show");
+}
+function harpaUpdate(hands, now) {
+  hands.forEach((lm, hi) => {
+    if (hi > 1) return;
+    const fingerX = 1 - lm[8].x;
+    const prev = harpPrevFingerX[hi];
+    if (prev != null) {
+      harpStringEls.forEach((s, si) => {
+        const prevSign = Math.sign(prev - s.xFrac);
+        const currSign = Math.sign(fingerX - s.xFrac);
+        if (prevSign !== 0 && currSign !== 0 && prevSign !== currSign && now - harpCooldown[si] >= 120) {
+          harpCooldown[si] = now;
+          pluckString(si);
+        }
+      });
+    }
+    harpPrevFingerX[hi] = fingerX;
+  });
+  for (let hi = hands.length; hi < 2; hi++) harpPrevFingerX[hi] = null;
+}
+function pluckString(i) {
+  const s = harpStringEls[i];
+  if (!s) return;
+  harpSynths[i].triggerAttack(s.note);
+  s.el.classList.remove("pluck"); void s.el.offsetWidth; s.el.classList.add("pluck");
+  const nd = $("noteDisplay");
+  nd.textContent = s.note;
+  nd.classList.remove("show"); void nd.offsetWidth; nd.classList.add("show");
+}
+
+/* ============================================================
+   🥁 PERCUSSÃO
+   ============================================================ */
+let percMembrane = null, percMetal = null;
+let percSwipeHist = [[], []], percLastSwipeAt = [0, 0];
+
+function percussaoEnter() {
+  percMembrane = new Tone.MembraneSynth().toDestination();
+  percMetal = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.4, release: 0.2 } }).toDestination();
+  percSwipeHist = [[], []]; percLastSwipeAt = [0, 0];
+}
+function percussaoDispose() {
+  if (percMembrane) { percMembrane.dispose(); percMembrane = null; }
+  if (percMetal) { percMetal.dispose(); percMetal = null; }
+  $("rippleLayer").innerHTML = "";
+}
+function percussaoUpdate(hands, now) {
+  hands.forEach((lm, hi) => {
+    if (hi > 1) return;
+    const x = 1 - lm[0].x, y = lm[0].y;
+    const hist = percSwipeHist[hi];
+    hist.push({ t: now, x, y });
+    while (hist.length && now - hist[0].t > 450) hist.shift();
+    if (hist.length < 4 || now - percLastSwipeAt[hi] < 700) return;
+    const dx = x - hist[0].x, dy = y - hist[0].y;
+    if (Math.abs(dx) > 0.22 && Math.abs(dx) > 2 * Math.abs(dy)) {
+      percLastSwipeAt[hi] = now; percSwipeHist[hi] = [];
+      triggerTaiko(x * innerWidth, y * innerHeight);
+    } else if (Math.abs(dy) > 0.22 && dy > 0 && Math.abs(dy) > 2 * Math.abs(dx)) {
+      percLastSwipeAt[hi] = now; percSwipeHist[hi] = [];
+      triggerCrash(x * innerWidth, y * innerHeight);
+    }
+  });
+  for (let hi = hands.length; hi < 2; hi++) percSwipeHist[hi] = [];
+}
+function triggerTaiko(x, y) {
+  if (percMembrane) percMembrane.triggerAttackRelease("C1", "8n");
+  spawnRipple(x, y, "taiko");
+}
+function triggerCrash(x, y) {
+  if (percMetal) percMetal.triggerAttackRelease("C3", "4n");
+  spawnRipple(x, y, "crash");
+}
+function spawnRipple(x, y, type) {
+  const layer = $("rippleLayer");
+  const el = document.createElement("div");
+  el.className = "ripple " + type;
+  el.style.left = x + "px"; el.style.top = y + "px";
+  layer.appendChild(el);
+  el.addEventListener("animationend", () => el.remove());
+}
+</script>
+</body>
+</html>
