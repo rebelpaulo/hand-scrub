@@ -437,6 +437,7 @@ function updateCursor(hands, now) {
 
     const el = document.elementFromPoint(cursorX, cursorY);
     target = el ? el.closest(".hoverable") : null;
+    hoverTarget = target; // latch: é este alvo que fica congelado quando o 👍 entra
     document.querySelectorAll(".hoverable.hovering").forEach(h => { if (h !== target) h.classList.remove("hovering"); });
   }
   $("cursor").hidden = false;
@@ -445,18 +446,18 @@ function updateCursor(hands, now) {
   if (now < hoverCooldownUntil) { hoverProgress = 0; setRing(0); return; }
 
   if (target && poseHeld) {
-    if (hoverTarget !== target) { hoverTarget = target; hoverProgress = 0; }
     target.classList.add("hovering");
     hoverProgress += dt;
     if (hoverProgress >= 700) {
       hoverProgress = 0; hoverCooldownUntil = now + 1000;
       target.classList.remove("hovering");
       setRing(0);
+      hoverTarget = null; // não re-armar no alvo congelado se o 👍 continuar
       target.click();
       return;
     }
   } else {
-    hoverTarget = null; hoverProgress = 0;
+    hoverProgress = 0;
   }
   setRing(hoverTarget === target && target ? hoverProgress / 700 : 0);
 }
