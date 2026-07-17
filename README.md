@@ -1,62 +1,17 @@
-# hand-scrub — instalação interativa por gestos ✋
-
-Instalação de vídeo/música controlada por gestos, 100% no browser (webcam +
-MediaPipe, sem build, sem backend). A raiz do site é uma **landing page** onde
-o visitante escolhe entre duas experiências, apontando com o dedo e
-confirmando com um 👍.
-
-Demo: https://hand-scrub.vercel.app
-
-## Estrutura
-
-- **`index.html`** — landing page. Cursor controlado pela mão (indicador =
-  ponteiro) + confirmação por gesto de 👍 sustentado; clique de rato também
-  funciona. Duas escolhas:
-  - 🦋 **BUTTERFLY EFFECT** → `butterfly.html`
-  - 🎼 **HANDESTRO** → `handestro.html`
-- **`butterfly.html`** — a experiência original de scrub de vídeo por
-  gestos (antigo `index.html`; todas as secções abaixo aplicam-se a ela).
-- **`handestro.html`** — modo musical: 4 instrumentos controlados por
-  gestos (Banda Sonora que segue o gesto, Modo Maestro, Harpa de Ar,
-  Percussão por swipe), usando Tone.js.
-- **`media/`** — presets de vídeo re-codificados all-intra (fonte: Wikimedia
-  Commons, domínio público) + música de fundo.
-
-## Landing (`index.html`)
-
-- **Cursor por mão**: ponta do indicador (landmark 8 da primeira mão
-  detetada) mapeada para o ecrã com espelhamento em X (a câmara é
-  selfie-facing) e suavização EMA (fator ≈0.35). Um ponto luminoso mostra a
-  posição rastreada.
-- **Hover**: passar o cursor sobre um botão realça-o (leve ampliação + borda
-  de destaque).
-- **Confirmação por 👍**: polegar esticado para cima + restantes dedos
-  enrolados junto ao pulso, com debounce de ~150 ms contra jitter. Segurar o
-  gesto sobre um botão enche um anel de progresso circular em ~700 ms; ao
-  completar, navega para a página. Sair do botão ou largar o gesto reinicia
-  o anel. Cooldown de 1 s depois de qualquer ativação.
-- **Rato sempre funciona** como alternativa — clique simples em qualquer
-  botão navega.
-- Câmara arranca automaticamente ao carregar a página (não precisa de
-  clique). Se a permissão for negada ou o MediaPipe falhar a carregar,
-  aparece um aviso discreto ("câmara indisponível — usa o rato") e a
-  navegação por rato continua a funcionar.
-- Pequeno preview da câmara (PiP, canto inferior direito, espelhado) com o
-  landmark do indicador desenhado, para o visitante ver que está a ser
-  seguido.
-
-## Butterfly Effect (`butterfly.html`)
+# Pinch Scrub — instalação interativa de vídeo por gestos ✋
 
 Controla o tempo de um vídeo com a mão, via webcam:
 **abre o polegar + indicador → o vídeo avança · fecha-os → rebobina.**
 Um foguetão descola na tua mão; fecha os dedos e ele volta à plataforma.
 
-### Hand tracking
+Demo: https://hand-scrub.vercel.app
+
+## Hand tracking
 **Google MediaPipe `HandLandmarker`** (Tasks Vision) — 21 landmarks 3D por mão,
 tempo real, 100% no browser (GPU/WASM), carregado por CDN. É o tracker
 in-browser mais fiável/rápido e mais recomendado.
 
-### Funcionalidades
+## Funcionalidades
 - **Vídeo em fullscreen**, preview do hand-tracking numa **janela flutuante
   arrastável** (posição memorizada).
 - **Dois modos de controlo**:
@@ -99,14 +54,6 @@ in-browser mais fiável/rápido e mais recomendado.
 - UI esconde-se após 4 s de inatividade · **F** = ecrã inteiro · **Espaço** =
   play/pause.
 
-## Handestro (`handestro.html`)
-
-Modo musical com 4 instrumentos controlados por gestos (Tone.js):
-- **Banda Sonora** — a música segue o gesto da mão.
-- **Modo Maestro** — reges a orquestra com os movimentos.
-- **Harpa de Ar** — "tocas" cordas invisíveis no ar.
-- **Percussão por swipe** — bate percussão ao varrer a mão.
-
 ## Correr localmente
 A câmara exige `localhost` ou HTTPS. Usa um servidor com suporte de **Range
 requests** (o `python3 -m http.server` NÃO tem — o Chrome marca os vídeos como
@@ -118,9 +65,6 @@ npx serve -l 8777
 ```
 
 ## Ficheiros
-- `index.html` — landing page (escolha entre experiências, self-contained).
-- `butterfly.html` — experiência original de scrub de vídeo por gestos
-  (self-contained, sem build).
-- `handestro.html` — modo musical de 4 instrumentos (self-contained).
-- `media/` — presets re-codificados all-intra + música de fundo (fonte:
-  Wikimedia Commons, domínio público).
+- `index.html` — a app inteira (self-contained, sem build).
+- `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
+  domínio público).
