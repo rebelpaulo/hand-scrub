@@ -584,6 +584,8 @@ function bandaDispose() {
 function bandaUpdate(hands, now) {
   const video = $("bandaVideo");
   if (hands.length >= 2 && video.duration) {
+    // com o gesto no comando, o playback não pode lutar com os seeks por frame
+    if (!video.paused) video.pause();
     const c = h => ({ x: (h[0].x + h[9].x) / 2, y: (h[0].y + h[9].y) / 2 });
     const a = c(hands[0]), b = c(hands[1]);
     const d = Math.hypot(a.x - b.x, a.y - b.y);
@@ -602,6 +604,7 @@ function bandaUpdate(hands, now) {
     // fix 5: fewer than two hands — let the video free-run instead of seeking
     // toward a stale/zeroed gesture target, keeping displayed/target synced to
     // playback so there's no jump the moment two hands appear.
+    if (video.paused && bandaActive) video.play().catch(() => {});
     bandaDisplayedT = video.currentTime;
     bandaTargetT = video.currentTime;
   }

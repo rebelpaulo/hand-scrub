@@ -144,6 +144,12 @@
   <div id="notice"></div>
 
 <script type="module">
+// Links legados partilhados apontam para a raiz como /#cfg=... — antes desta
+// landing, a raiz ERA a app. Encaminha-os direto para o butterfly com o fragment.
+if (/^#cfg=/.test(location.hash)) {
+  location.replace("butterfly.html" + location.hash);
+}
+
 const $ = id => document.getElementById(id);
 const cam = $("cam"), overlay = $("overlay"), octx = overlay.getContext("2d");
 const camPip = $("camPip"), cursorEl = $("cursor"), noticeEl = $("notice");
