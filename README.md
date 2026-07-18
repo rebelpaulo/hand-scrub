@@ -14,7 +14,7 @@ in-browser mais fiável/rápido e mais recomendado.
 ## Funcionalidades
 - **Vídeo em fullscreen**, preview do hand-tracking numa **janela flutuante
   arrastável** (posição memorizada).
-- **Dois modos de controlo**:
+- **Quatro modos de controlo**:
   - ✌️ **Abrir/Fechar** (por omissão): a abertura polegar–indicador **é a
     linha do tempo** — dedos fechados = início do corte, abertos ao máximo =
     fim; abrir e fechar percorre o vídeo, com suavização.
@@ -23,14 +23,20 @@ in-browser mais fiável/rápido e mais recomendado.
     voltam. O modo é forçado ao entrar na cena e restaurado ao sair.
   - 🤏 **Arrastar**: pinch agarra a timeline, arrastar a mão faz scrub
     (como um drag de rato).
+  - 📄 **Amassar** (exclusivo da cena 📄 Origami): fecha a mão da timeline —
+    de palma aberta a punho cerrado — como se estivesses a amarrotar algo;
+    palma aberta = cara intacta (início), punho fechado = cara amassada em
+    bola de papel (fim). O modo é forçado ao entrar na cena e restaurado ao sair.
 - **Scrub fluido frame-a-frame**: os presets estão re-codificados **all-intra**
   (todos os frames são keyframes, H.264) e servidos localmente — o seek é
   instantâneo em qualquer direção, sem saltos entre keyframes.
 - **Biblioteca de cenas** (originais de domínio público, Wikimedia Commons):
   🚀 descolagem de Falcon 9 · ☢️ teste nuclear Baker Shot · 🌹🌼 flores a
-  desabrochar em time-lapse — e **upload dos teus vídeos** (múltiplos, locais,
-  nunca saem do browser). Dica: para máxima fluidez re-codifica os teus clips
-  com `ffmpeg -i in.mp4 -c:v libx264 -x264-params keyint=1 -an out.mp4`.
+  desabrochar em time-lapse · 📄 uma cara a amassar-se progressivamente em
+  bola de papel/origami (gesto próprio, ver 📄 Amassar acima) — e **upload
+  dos teus vídeos** (múltiplos, locais, nunca saem do browser). Dica: para
+  máxima fluidez re-codifica os teus clips com
+  `ffmpeg -i in.mp4 -c:v libx264 -x264-params keyint=1 -an out.mp4`.
 - **✂️ Trim por cena**: define início/fim (ex.: só dos 4s aos 8s) com pegas
   arrastáveis e preview em direto; o gesto, o play e o auto-reset ficam
   confinados ao intervalo. Guardado por cena.
