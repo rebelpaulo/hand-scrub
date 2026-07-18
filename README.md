@@ -14,7 +14,7 @@ in-browser mais fiável/rápido e mais recomendado.
 ## Funcionalidades
 - **Vídeo em fullscreen**, preview do hand-tracking numa **janela flutuante
   arrastável** (posição memorizada).
-- **Dois modos de controlo**:
+- **Quatro modos de controlo**:
   - ✌️ **Abrir/Fechar** (por omissão): a abertura polegar–indicador **é a
     linha do tempo** — dedos fechados = início do corte, abertos ao máximo =
     fim; abrir e fechar percorre o vídeo, com suavização.
