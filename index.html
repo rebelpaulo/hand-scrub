@@ -213,7 +213,9 @@
        início</b>, <b>abertos ao máximo = fim</b>. Mão esquerda: <b>punho
        fechado roda</b> 🎵 a música; <b>varre-a de um lado ao outro</b>
        para trocar de vídeo. Na cena <b>🌊 Moisés</b>: junta as mãos como a rezar e
-       <b>afasta-as</b> — as águas separam-se contigo; junta-as e voltam.</p>
+       <b>afasta-as</b> — as águas separam-se contigo; junta-as e voltam.
+       Na cena 📄 <b>Origami</b>: fecha a mão — de <b>palma aberta</b> a
+       <b>punho cerrado</b> — como se estivesses a <b>amarrotar</b> a cara.</p>
     <button class="btn primary" id="startBtn">Ativar câmara</button>
     <div class="err" id="startErr"></div>
   </div>
@@ -226,6 +228,9 @@
       <option value="aperture">✌️ Abrir/Fechar</option>
       <option value="hands">🙏 Afastar as mãos</option>
       <option value="drag">🤏 Arrastar</option>
+      <!-- gesto próprio da cena 📄 Origami: não aparece na lista (hidden),
+           mas continua a poder ser lido/atribuído via JS como qualquer option -->
+      <option value="squeeze" hidden>📄 Amassar</option>
     </select>
     <button class="btn" id="trimBtn" title="Trim da cena">✂️</button>
     <button class="btn" id="playBtn" title="Reproduzir/Pausar">▶</button>
@@ -287,6 +292,7 @@ const SCENES = [
   { name: "☢️ Bomba atómica", src: "media/bomb.mp4", id: "media/bomb.mp4" },
   { name: "🌹 Rosa", src: "media/rose.mp4", id: "media/rose.mp4" },
   { name: "🌼 Peónia", src: "media/peony.mp4", id: "media/peony.mp4" },
+  { name: "📄 Origami", src: "media/origami.mp4", id: "media/origami.mp4", forceMode: "squeeze" },
   // cena secreta: não aparece nos chips — ativa-se escolhendo o modo 🙏
   { name: "🌊 Moisés", src: "media/moses.mp4", id: "media/moses.mp4", forceMode: "hands", hidden: true },
 ];
@@ -312,11 +318,11 @@ function selectScene(i) {
   targetTime = 0;
   grabbing = false; // sem âncora de arrasto herdada da cena anterior
   player.currentTime = 0;
-  // cenas com gesto próprio (🌊 = 🙏): o modo acompanha a cena; ao sair
-  // (chip/swipe), volta ao último modo escolhido pelo utilizador
+  // cenas com gesto próprio (🌊 = 🙏 · 📄 = amassar): o modo acompanha a
+  // cena; ao sair (chip/swipe), volta ao último modo escolhido pelo utilizador
   const modeSel = $("mode");
   if (SCENES[i].forceMode) modeSel.value = SCENES[i].forceMode;
-  else if (modeSel.value === "hands") modeSel.value = lastUserMode;
+  else if (modeSel.value === "hands" || modeSel.value === "squeeze") modeSel.value = lastUserMode;
   renderChips();
   toast(SCENES[i].name);
   cloudSave(); // cena ativa também persiste
@@ -358,7 +364,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "f" || e.key === "F") $("fsBtn").onclick();
 });
 let lastUserMode = "aperture"; // último modo "normal" (para sair do menu secreto)
-let returnScene = 0;           // cena a retomar ao sair do 🙏
+let returnScene = 0;           // cena a retomar ao sair de uma cena com gesto forçado
 $("mode").addEventListener("change", () => {
   grabbing = false; targetTime = displayedTime;
   const secretIdx = SCENES.findIndex(s => s.forceMode === "hands");
@@ -371,9 +377,13 @@ $("mode").addEventListener("change", () => {
     }
   } else {
     lastUserMode = v;
-    if (activeScene === secretIdx) {
+    // qualquer cena ESCONDIDA com gesto forçado (ex: 🌊 Moisés/🙏): sair pelo
+    // dropdown volta à última cena normal. Cenas com gesto forçado mas
+    // visíveis (ex: 📄 Origami/amassar) não têm de "voltar" — o utilizador
+    // pode simplesmente trocar de modo sem sair da cena.
+    if (SCENES[activeScene] && SCENES[activeScene].hidden && SCENES[activeScene].forceMode) {
       const back = (SCENES[returnScene] && !SCENES[returnScene].hidden) ? returnScene : 0;
-      selectScene(back); // selectScene mantém o modo escolhido (v) porque já não é "hands"
+      selectScene(back); // selectScene mantém o modo escolhido (v) porque a cena de destino não o força
     }
   }
 });
@@ -920,6 +930,24 @@ function processHands(res) {
     const cx = (lm[4].x + lm[8].x) / 2 * W, cy = (lm[4].y + lm[8].y) / 2 * H;
     octx.beginPath(); octx.arc(cx, cy, 18 + openness * 26, -Math.PI / 2, -Math.PI / 2 + openness * Math.PI * 2);
     octx.lineWidth = 4; octx.strokeStyle = "rgba(94,234,212,.9)"; octx.stroke();
+  } else if (mode === "squeeze") {
+    // cena 📄 Origami: mão aberta = cara intacta (início) · punho fechado =
+    // cara amarrotada (fim) — abertura média dos 4 dedos (não só polegar/indicador)
+    const openness4 = ([8, 12, 16, 20].reduce((s, i) => s + dist(lm[i], lm[0]), 0) / 4) / handSize;
+    const open01 = Math.min(1, Math.max(0, (openness4 - 1.05) / (1.75 - 1.05)));
+    const squeezeAmt = 1 - open01;
+    const tEnd = trimOut || player.duration || 0;
+    targetTime = trimIn + squeezeAmt * (tEnd - trimIn);
+    $("openVal").textContent = (squeezeAmt * 100).toFixed(0) + "%";
+    pillOpen.className = "pill hot";
+    // círculo à volta da palma que encolhe conforme a mão fecha (amassa)
+    const cx = (lm[0].x + lm[9].x) / 2 * W, cy = (lm[0].y + lm[9].y) / 2 * H;
+    const r = 12 + open01 * 34;
+    octx.beginPath(); octx.arc(cx, cy, r, 0, Math.PI * 2);
+    octx.lineWidth = 4; octx.strokeStyle = `rgba(251,113,133,${0.35 + squeezeAmt * 0.6})`; octx.stroke();
+    // arco = fração do caminho percorrido (mesmo padrão do modo ✌️)
+    octx.beginPath(); octx.arc(cx, cy, r + 14, -Math.PI / 2, -Math.PI / 2 + squeezeAmt * Math.PI * 2);
+    octx.lineWidth = 4; octx.strokeStyle = "rgba(251,113,133,.9)"; octx.stroke();
   } else {
     // drag mode (v1): pinch agarra, arrastar horizontal faz scrub
     const isPinch = pinch < +thresh.value;
