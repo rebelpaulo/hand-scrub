@@ -532,7 +532,10 @@ let closeness = 0; // 0..1 suavizado a partir de `coverage` — controla o "cres
 
 function initScene(THREE) {
   scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x2a2226, 6, 22);
+  // garagem de betão CLARA (efeito "projetei a minha sombra no ecrã"): sem
+  // nevoeiro escuro a comer o contraste — a sombra tem de ficar nitidamente
+  // mais escura do que qualquer superfície iluminada, não o inverso.
+  scene.fog = null;
 
   camera3 = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 60);
   camera3.position.set(0, 1.5, 9);
@@ -545,11 +548,11 @@ function initScene(THREE) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-  /* ---- sala: garagem cor-de-rosa poeirenta, perspetiva de ponto único ---- */
+  /* ---- sala: garagem de betão clara, iluminada, perspetiva de ponto único ---- */
   const ROOM_W = 10, ROOM_D = 14, ROOM_H = 6;
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0xb9a8ab, roughness: 0.95, metalness: 0 });
-  const wallMat  = new THREE.MeshStandardMaterial({ color: 0x8d7f84, roughness: 0.97, metalness: 0 });
-  const ceilMat  = new THREE.MeshStandardMaterial({ color: 0x6e6266, roughness: 0.98, metalness: 0 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xcfc7ba, roughness: 0.9, metalness: 0 });
+  const wallMat  = new THREE.MeshStandardMaterial({ color: 0xb8b0a4, roughness: 0.92, metalness: 0 });
+  const ceilMat  = new THREE.MeshStandardMaterial({ color: 0x6b655c, roughness: 0.95, metalness: 0 });
 
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat);
   floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, -ROOM_D / 2 + 5);
@@ -573,35 +576,61 @@ function initScene(THREE) {
   ceiling.rotation.x = Math.PI / 2; ceiling.position.set(0, ROOM_H, -ROOM_D / 2 + 5);
   ceiling.receiveShadow = true; scene.add(ceiling);
 
-  /* ---- props: silhueta de carro à esquerda (caixa baixa + esfera em pedestal) ---- */
-  const propMat = new THREE.MeshStandardMaterial({ color: 0x7c6f73, roughness: 0.9 });
-  const carBody = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.05, 4.6), propMat);
-  carBody.position.set(-3.1, 0.55, -1.5);
-  carBody.receiveShadow = true; carBody.castShadow = false; scene.add(carBody);
+  /* ---- props: agora lançam a própria sombra comprida (castShadow) além de a
+     receberem — no efeito de referência os objetos da sala também "esticam"
+     pela sala, tal como a silhueta do visitante, e a sombra do visitante
+     deve conseguir sobrepor-se-lhes. ---- */
 
-  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.5, 20), propMat);
-  pedestal.position.set(-3.3, 0.25, 2.4);
-  pedestal.receiveShadow = true; scene.add(pedestal);
-  const orb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 24, 18), propMat);
-  orb.position.set(-3.3, 1.05, 2.4);
-  orb.receiveShadow = true; scene.add(orb);
+  /* prop (a): massa baixa tipo carro desportivo, estacionada ao meio-esquerda,
+     em ângulo — corpo + "cabine" para dar silhueta reconhecível. */
+  const carPaint = new THREE.MeshStandardMaterial({ color: 0x15171b, roughness: 0.35, metalness: 0.35 });
+  const carGroup = new THREE.Group();
+  const carBody = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.85, 1.9), carPaint);
+  carBody.position.set(0, 0.425, 0);
+  carBody.castShadow = true; carBody.receiveShadow = true; carGroup.add(carBody);
+  const carCabin = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.45, 1.5), carPaint);
+  carCabin.position.set(-0.3, 0.85 + 0.225, 0);
+  carCabin.castShadow = true; carCabin.receiveShadow = true; carGroup.add(carCabin);
+  carGroup.position.set(-3.0, 0, -1.0);
+  carGroup.rotation.y = 0.32;
+  scene.add(carGroup);
 
-  /* ---- prop: coluna alta e fina à direita (a "figura") ---- */
-  const column = new THREE.Mesh(new THREE.BoxGeometry(0.6, 5, 0.6), propMat);
-  column.position.set(3.2, 2.5, -2.5);
-  column.receiveShadow = true; scene.add(column);
+  /* prop (b): figura humanoide fina tipo "estátua-esqueleto", à direita,
+     mais perto do fundo da sala, ~1.8 m de altura em primitivas empilhadas. */
+  const figureMat = new THREE.MeshStandardMaterial({ color: 0x3a3632, roughness: 0.8 });
+  const figureGroup = new THREE.Group();
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.9, 0.32), figureMat);
+  legs.position.set(0, 0.45, 0);
+  legs.castShadow = true; legs.receiveShadow = true; figureGroup.add(legs);
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.65, 0.26), figureMat);
+  torso.position.set(0, 0.9 + 0.325, 0);
+  torso.castShadow = true; torso.receiveShadow = true; figureGroup.add(torso);
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.55, 0.12), figureMat);
+  armL.position.set(-0.27, 1.0, 0);
+  armL.castShadow = true; armL.receiveShadow = true; figureGroup.add(armL);
+  const armR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.55, 0.12), figureMat);
+  armR.position.set(0.27, 1.0, 0);
+  armR.castShadow = true; armR.receiveShadow = true; figureGroup.add(armR);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 12), figureMat);
+  head.position.set(0, 1.55 + 0.17, 0);
+  head.castShadow = true; head.receiveShadow = true; figureGroup.add(head);
+  figureGroup.position.set(3.3, 0, -4.5);
+  scene.add(figureGroup);
 
-  /* ---- luz ---- */
-  const ambient = new THREE.AmbientLight(0x554848, 0.55);
+  /* ---- luz: um sol quente forte atrás/acima do visitante, baixo o
+     suficiente para as sombras ficarem LONGAS — correm pelo chão e sobem
+     pela parede do fundo. Ambiente fica baixo de propósito: o contraste
+     luz/sombra é o efeito inteiro. ---- */
+  const ambient = new THREE.AmbientLight(0xffffff, 0.25);
   scene.add(ambient);
 
-  spotLight = new THREE.SpotLight(0xfff1e0, 3.2, 26, Math.PI / 5.2, 0.55, 1.4);
-  spotLight.position.set(0, 1.5, 9);        // à altura do peito do visitante, atrás da câmara
-  spotLight.target.position.set(0, 1.6, -7);
+  spotLight = new THREE.SpotLight(0xfff2dd, 8, 30, Math.PI / 4.5, 0.25, 1.3);
+  spotLight.position.set(0, 2.2, 10);       // atrás/acima da posição do visitante
+  spotLight.target.position.set(0, 0, -2);  // aponta ao chão a meio da sala → sombra estica para trás e sobe a parede
   spotLight.castShadow = true;
   spotLight.shadow.mapSize.set(2048, 2048);
   spotLight.shadow.camera.near = 0.5;
-  spotLight.shadow.camera.far = 22;
+  spotLight.shadow.camera.far = 26;
   spotLight.shadow.radius = 6;              // nota: ignorado pelo PCFSoft em spots (r160) — a suavidade vem do blur da máscara
   spotLight.shadow.bias = -0.0025;
   scene.add(spotLight, spotLight.target);
@@ -611,13 +640,13 @@ function initScene(THREE) {
   maskTexture = new THREE.CanvasTexture(maskCanvas);
   maskTexture.colorSpace = THREE.SRGBColorSpace;
 
-  const casterGeo = new THREE.PlaneGeometry(2.4, 3.4);
+  const casterGeo = new THREE.PlaneGeometry(2.6, 3.6);
   const casterMat = new THREE.MeshBasicMaterial({
     map: maskTexture, transparent: true, alphaTest: 0.5,
     colorWrite: false, side: THREE.DoubleSide, depthWrite: false
   });
   casterMesh = new THREE.Mesh(casterGeo, casterMat);
-  casterMesh.position.set(0, 1.55, 8);       // ~1m à frente da luz, rumo à sala
+  casterMesh.position.set(0, 1.55, 8.6);     // ~1.4m à frente da nova luz (0,2.2,10), rumo à sala
   casterMesh.castShadow = true;
   casterMesh.receiveShadow = false;
   casterMesh.customDepthMaterial = new THREE.MeshDepthMaterial({
@@ -655,11 +684,13 @@ function renderLoop() {
   // suaviza a proximidade (evita saltos entre frames de segmentação)
   closeness += ((coverage > 0.30 ? Math.min(1, (coverage - 0.30) / 0.4) : 0) - closeness) * 0.12;
 
-  // dinâmica de "teatro de sombras": aproximar a mão da câmara aproxima o
-  // caster da luz (e aumenta-o ligeiramente) → projeção enorme e disforme
-  const baseZ = 8, nearZ = 5.4;
+  // dinâmica de "teatro de sombras": aproximar a mão da câmara empurra o
+  // caster para dentro da sala (afasta-se da luz em (0,2.2,10)) e aumenta-o
+  // → projeção enorme e disforme na parede do fundo. Faixa retocada para a
+  // nova geometria da luz/caster (era baseZ=8/nearZ=5.4 com luz em z=9).
+  const baseZ = 8.6, nearZ = 6.6;
   casterMesh.position.z = baseZ - closeness * (baseZ - nearZ);
-  const scale = 1 + closeness * 1.6;
+  const scale = 1 + closeness * 1.8;
   casterMesh.scale.set(scale, scale, 1);
 
   if (dustPoints) dustPoints.rotation.y += 0.0006;
