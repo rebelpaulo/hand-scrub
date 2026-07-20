@@ -432,10 +432,16 @@ function segLoop() {
     lastVideoTime = cam.currentTime;
     if (!skipNext) {
       const t0 = performance.now();
+      let res = null;
       try {
-        const res = segmenter.segmentForVideo(cam, t0);
+        res = segmenter.segmentForVideo(cam, t0);
         paintMask(res);
       } catch { /* frame ocasionalmente instável — ignora e continua */ }
+      finally {
+        // sem callback, a máscara devolvida é um clone nosso: fechar SEMPRE,
+        // senão vaza uma WebGLTexture por frame até perder o contexto
+        try { res?.close(); } catch {}
+      }
       const dt = performance.now() - t0;
       segEMA = segEMA * 0.85 + dt * 0.15;
       // alvo: 30fps de render — se a segmentação por si só já gasta mais de
@@ -447,7 +453,7 @@ function segLoop() {
   }
   const now = performance.now();
   const dt = now - lastSegT; lastSegT = now;
-  fpsEMA = fpsEMA ? fpsEMA * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
+  if (dt > 0) fpsEMA = fpsEMA ? fpsEMA * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
   $("fps").textContent = fpsEMA.toFixed(0) + " fps";
   $("segState").textContent = segmenter ? "ativo" : "—";
   $("pillSeg").className = "pill on";
@@ -533,7 +539,7 @@ function initScene(THREE) {
   spotLight.shadow.mapSize.set(2048, 2048);
   spotLight.shadow.camera.near = 0.5;
   spotLight.shadow.camera.far = 22;
-  spotLight.shadow.radius = 6;              // borda suave (PCFSoftShadowMap)
+  spotLight.shadow.radius = 6;              // nota: ignorado pelo PCFSoft em spots (r160) — a suavidade vem do blur da máscara
   spotLight.shadow.bias = -0.0025;
   scene.add(spotLight, spotLight.target);
 
