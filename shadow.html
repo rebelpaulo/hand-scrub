@@ -396,6 +396,14 @@ let manualMaskOverride = false;  // depois de "i", para de reajustar sozinho
 let lastPolarityCheck = 0;
 const POLARITY_PATCH = 16;
 
+/* ancoragem ao chão: desloca a silhueta verticalmente (no canvas MASK_W×MASK_H)
+   até a linha de pixels de pessoa mais baixa encostar ao rodapé do canvas —
+   assim, mesmo com a câmara só a ver tronco/cabeça (setup de secretária), a
+   sombra fica sempre "de pé" no chão da sala, nunca a flutuar a meio do ar.
+   Suavizado com EMA para não tremer entre frames de segmentação. */
+let anchorShiftEMA = 0; // em pixels do espaço MASK_H (canvas final da máscara)
+const ANCHOR_EMA_ALPHA = 0.2;
+
 function patchPersonDensity(data, w, h, x0, y0) {
   const x1 = Math.min(w, x0 + POLARITY_PATCH), y1 = Math.min(h, y0 + POLARITY_PATCH);
   x0 = Math.max(0, x0); y0 = Math.max(0, y0);
@@ -441,12 +449,26 @@ function paintMask(result) {
   // nativa da máscara, depois escala para o canvas final com blur para
   // suavizar as bordas (sombra de teatro não tem contorno vetorial nítido).
   const id = mctx.createImageData(w, h);
+  let maxPersonY = -1; // linha (nativa) de pixel de pessoa mais baixa desta frame
   for (let i = 0; i < w * h; i++) {
     const isPerson = data[i] !== 0;
     const show = invertMask ? !isPerson : isPerson;
     const o = i * 4;
     id.data[o] = 255; id.data[o + 1] = 255; id.data[o + 2] = 255;
     id.data[o + 3] = show ? 255 : 0;
+    // reaproveita o loop já existente — sem segunda passagem de pixels
+    if (show) {
+      const y = (i / w) | 0;
+      if (y > maxPersonY) maxPersonY = y;
+    }
+  }
+  // desvio para ancorar ao chão: quanto falta para a linha de pessoa mais
+  // baixa (maxPersonY, resolução nativa h) chegar ao rodapé do canvas final
+  // (MASK_H), convertido para pixels desse canvas. Sem pessoa detetada nesta
+  // frame, mantém o último valor suavizado (não há como recalcular sem 2ª passagem).
+  if (maxPersonY >= 0) {
+    const targetShift = (h - 1 - maxPersonY) * (MASK_H / h);
+    anchorShiftEMA += (targetShift - anchorShiftEMA) * ANCHOR_EMA_ALPHA;
   }
   // canvas temporário à resolução nativa, depois copiado (mirrored + blur)
   let tmp = paintMask._tmp;
@@ -460,6 +482,7 @@ function paintMask(result) {
   mctx.clearRect(0, 0, MASK_W, MASK_H);
   mctx.filter = "blur(2px)";
   mctx.translate(MASK_W, 0); mctx.scale(-1, 1); // espelha (selfie)
+  mctx.translate(0, anchorShiftEMA); // ancoragem ao chão (ver bloco acima)
   mctx.drawImage(tmp, 0, 0, w, h, 0, 0, MASK_W, MASK_H);
   mctx.restore();
 
@@ -529,6 +552,9 @@ let fpsHasSample = false;
 /* ================= cena 3D (three.js) ================= */
 let scene, camera3, renderer, casterMesh, maskTexture, spotLight, dustPoints;
 let closeness = 0; // 0..1 suavizado a partir de `coverage` — controla o "crescer" da sombra
+// dimensões-base do caster (módulo, não só initScene): renderLoop precisa
+// da altura para reancorar a base do plano ao chão quando escala.
+const CASTER_W = 2.6, CASTER_H = 3.6;
 
 function initScene(THREE) {
   scene = new THREE.Scene();
@@ -617,36 +643,55 @@ function initScene(THREE) {
   figureGroup.position.set(3.3, 0, -4.5);
   scene.add(figureGroup);
 
-  /* ---- luz: um sol quente forte atrás/acima do visitante, baixo o
-     suficiente para as sombras ficarem LONGAS — correm pelo chão e sobem
-     pela parede do fundo. Ambiente fica baixo de propósito: o contraste
-     luz/sombra é o efeito inteiro. ---- */
+  /* ---- luz: baixa e atrás do visitante — como sol de fim de tarde — para as
+     sombras ficarem LONGAS: correm pelo chão primeiro e só depois sobem pela
+     parede do fundo, em vez de baterem direto na parede (projeção de cinema).
+     Ambiente fica baixo de propósito: o contraste luz/sombra é o efeito inteiro. ----
+
+     Verificação geométrica (luz L=(0,1.3,11); caster entre pés (0,0,7.5) e
+     topo (0,3.6,7.5), ver CASTER_H abaixo):
+       • um ponto do caster com y < ~1.07 (abaixo da luz) tem o raio L→P a
+         descer, e atinge o CHÃO (y=0) entre z=7.5 (pés, comprimento 0) e
+         z=-9 (base da parede do fundo, comprimento ~16.5 ≈ 4,6× a altura do
+         caster) — sombra comprida pelo chão, como pretendido;
+       • entre y≈1.07 e y≈2.12 o raio já não cruza o chão dentro da sala e
+         atinge antes a PAREDE do fundo, entre 0 e 6 m de altura → a sombra
+         "sobe pela parede";
+       • acima de y≈2.12 (topo/cabeça) o raio sairia pelo teto antes da
+         parede — artefacto menor e pouco visível no ângulo de câmara atual
+         (câmara ~ao nível dos olhos, teto raramente em quadro). */
   const ambient = new THREE.AmbientLight(0xffffff, 0.25);
   scene.add(ambient);
 
-  spotLight = new THREE.SpotLight(0xfff2dd, 8, 30, Math.PI / 4.5, 0.25, 1.3);
-  spotLight.position.set(0, 2.2, 10);       // atrás/acima da posição do visitante
-  spotLight.target.position.set(0, 0, -2);  // aponta ao chão a meio da sala → sombra estica para trás e sobe a parede
+  spotLight = new THREE.SpotLight(0xfff2dd, 8, 30, Math.PI / 4, 0.25, 1.3);
+  spotLight.position.set(0, 1.3, 11);       // baixa e atrás — ângulo raso, sombra comprida
+  spotLight.target.position.set(0, 0, -5);  // aponta para o chão bem lá no fundo da sala
   spotLight.castShadow = true;
   spotLight.shadow.mapSize.set(2048, 2048);
   spotLight.shadow.camera.near = 0.5;
-  spotLight.shadow.camera.far = 26;
+  spotLight.shadow.camera.far = 32;         // luz mais recuada + alvo mais fundo → frustum maior (>=30 pedido)
   spotLight.shadow.radius = 6;              // nota: ignorado pelo PCFSoft em spots (r160) — a suavidade vem do blur da máscara
-  spotLight.shadow.bias = -0.0025;
+  // bias mais negativo que antes (-0.0025 → -0.004): ângulo raso == raios quase
+  // rasantes às superfícies == mais risco de acne de sombra (self-shadowing);
+  // compensa-se com mais offset ao longo da normal.
+  spotLight.shadow.bias = -0.004;
   scene.add(spotLight, spotLight.target);
 
   /* ---- o "caster": plano invisível com a máscara da silhueta, entre a luz
-     e a sala — é isto que projeta a sombra do visitante nas paredes/objetos ---- */
+     e a sala — é isto que projeta a sombra do visitante nas paredes/objetos.
+     Tamanho mantido (2.6×3.6); a base (rodapé) do plano fica exatamente ao
+     nível do chão (y=0) → centro em y = CASTER_H/2, tal como um visitante
+     de pé. ---- */
   maskTexture = new THREE.CanvasTexture(maskCanvas);
   maskTexture.colorSpace = THREE.SRGBColorSpace;
 
-  const casterGeo = new THREE.PlaneGeometry(2.6, 3.6);
+  const casterGeo = new THREE.PlaneGeometry(CASTER_W, CASTER_H);
   const casterMat = new THREE.MeshBasicMaterial({
     map: maskTexture, transparent: true, alphaTest: 0.5,
     colorWrite: false, side: THREE.DoubleSide, depthWrite: false
   });
   casterMesh = new THREE.Mesh(casterGeo, casterMat);
-  casterMesh.position.set(0, 1.55, 8.6);     // ~1.4m à frente da nova luz (0,2.2,10), rumo à sala
+  casterMesh.position.set(0, CASTER_H / 2, 7.5); // pés (rodapé do plano) em y=0, z=7.5
   casterMesh.castShadow = true;
   casterMesh.receiveShadow = false;
   casterMesh.customDepthMaterial = new THREE.MeshDepthMaterial({
@@ -685,13 +730,20 @@ function renderLoop() {
   closeness += ((coverage > 0.30 ? Math.min(1, (coverage - 0.30) / 0.4) : 0) - closeness) * 0.12;
 
   // dinâmica de "teatro de sombras": aproximar a mão da câmara empurra o
-  // caster para dentro da sala (afasta-se da luz em (0,2.2,10)) e aumenta-o
-  // → projeção enorme e disforme na parede do fundo. Faixa retocada para a
-  // nova geometria da luz/caster (era baseZ=8/nearZ=5.4 com luz em z=9).
-  const baseZ = 8.6, nearZ = 6.6;
+  // caster ligeiramente para dentro da sala e aumenta-o — mas com os pés
+  // presos ao chão, para nunca virar um blob que engole a sala. Faixa
+  // encolhida (era baseZ=8.6/nearZ=6.6 com escala até 1+1.8=2.8×; agora
+  // baseZ=7.5/nearZ=6.8 — combina com a posição de repouso do caster da
+  // fix de geometria — e escala máxima 1.35×).
+  const baseZ = 7.5, nearZ = 6.8;
   casterMesh.position.z = baseZ - closeness * (baseZ - nearZ);
-  const scale = 1 + closeness * 1.8;
+  const scale = 1 + closeness * 0.35; // 1 .. 1.35 (era 1 .. 1.8)
   casterMesh.scale.set(scale, scale, 1);
+  // a escala do Three.js parte do centro do plano — sem isto, o plano
+  // "cresceria" para cima e para baixo por igual e os pés descolariam do
+  // chão. Reancora a base (y=0 sem escala) recolocando o centro em
+  // CASTER_H/2 * scale a cada frame.
+  casterMesh.position.y = (CASTER_H / 2) * scale;
 
   if (dustPoints) dustPoints.rotation.y += 0.0006;
 
