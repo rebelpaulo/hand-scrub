@@ -554,7 +554,10 @@ let scene, camera3, renderer, casterMesh, maskTexture, spotLight, dustPoints;
 let closeness = 0; // 0..1 suavizado a partir de `coverage` — controla o "crescer" da sombra
 // dimensões-base do caster (módulo, não só initScene): renderLoop precisa
 // da altura para reancorar a base do plano ao chão quando escala.
-const CASTER_W = 2.6, CASTER_H = 3.6;
+/* 4:3 como a máscara da câmara (480×360) — se o rácio do plano divergir do da
+   textura, a silhueta é esticada (o bug das proporções: 2.6×3.6 esticava ~1.85×
+   na vertical). 1.9 m ≈ altura humana com folga. */
+const CASTER_H = 1.9, CASTER_W = CASTER_H * (4 / 3);
 
 function initScene(THREE) {
   scene = new THREE.Scene();
@@ -648,18 +651,16 @@ function initScene(THREE) {
      parede do fundo, em vez de baterem direto na parede (projeção de cinema).
      Ambiente fica baixo de propósito: o contraste luz/sombra é o efeito inteiro. ----
 
-     Verificação geométrica (luz L=(0,1.3,11); caster entre pés (0,0,7.5) e
-     topo (0,3.6,7.5), ver CASTER_H abaixo):
-       • um ponto do caster com y < ~1.07 (abaixo da luz) tem o raio L→P a
-         descer, e atinge o CHÃO (y=0) entre z=7.5 (pés, comprimento 0) e
-         z=-9 (base da parede do fundo, comprimento ~16.5 ≈ 4,6× a altura do
-         caster) — sombra comprida pelo chão, como pretendido;
-       • entre y≈1.07 e y≈2.12 o raio já não cruza o chão dentro da sala e
-         atinge antes a PAREDE do fundo, entre 0 e 6 m de altura → a sombra
-         "sobe pela parede";
-       • acima de y≈2.12 (topo/cabeça) o raio sairia pelo teto antes da
-         parede — artefacto menor e pouco visível no ângulo de câmara atual
-         (câmara ~ao nível dos olhos, teto raramente em quadro). */
+     Verificação geométrica (luz L=(0,1.3,11); caster entre pés (0,0,4.5) e
+     topo (0,1.9,4.5) — magnificação até à parede do fundo (z=-9):
+     (11-(-9)) / (11-4.5) = 20/6.5 ≈ 3.08×; um ponto do caster a altura y
+     projeta na parede a y' = 1.3 + 3.08·(y − 1.3)):
+       • pontos com y < ~0.88 atingem o CHÃO entre z=4.5 (pés, comprimento 0)
+         e z=-9 — sombra comprida pelo chão primeiro, como na referência;
+       • pontos entre y≈0.88 e o topo atingem a PAREDE do fundo: a cabeça
+         (y=1.9) fica a ~3.15 m → sombra ~1.66× a altura real, bem abaixo
+         do teto (6 m). Com o crescimento máximo (escala 1.35, topo ~2.57)
+         a cabeça projeta a ~5.2 m — dramático mas ainda dentro da parede. */
   const ambient = new THREE.AmbientLight(0xffffff, 0.25);
   scene.add(ambient);
 
@@ -679,9 +680,10 @@ function initScene(THREE) {
 
   /* ---- o "caster": plano invisível com a máscara da silhueta, entre a luz
      e a sala — é isto que projeta a sombra do visitante nas paredes/objetos.
-     Tamanho mantido (2.6×3.6); a base (rodapé) do plano fica exatamente ao
-     nível do chão (y=0) → centro em y = CASTER_H/2, tal como um visitante
-     de pé. ---- */
+     Rácio 4:3 = o da máscara (sem esticar a anatomia); afastado da luz
+     (z=4.5, magnificação ~3.08×) para a sombra ter escala humana; a base
+     (rodapé) fica exatamente ao nível do chão (y=0) → centro em CASTER_H/2,
+     tal como um visitante de pé. ---- */
   maskTexture = new THREE.CanvasTexture(maskCanvas);
   maskTexture.colorSpace = THREE.SRGBColorSpace;
 
@@ -691,7 +693,7 @@ function initScene(THREE) {
     colorWrite: false, side: THREE.DoubleSide, depthWrite: false
   });
   casterMesh = new THREE.Mesh(casterGeo, casterMat);
-  casterMesh.position.set(0, CASTER_H / 2, 7.5); // pés (rodapé do plano) em y=0, z=7.5
+  casterMesh.position.set(0, CASTER_H / 2, 4.5); // pés (rodapé do plano) em y=0, z=4.5
   casterMesh.castShadow = true;
   casterMesh.receiveShadow = false;
   casterMesh.customDepthMaterial = new THREE.MeshDepthMaterial({
@@ -733,9 +735,9 @@ function renderLoop() {
   // caster ligeiramente para dentro da sala e aumenta-o — mas com os pés
   // presos ao chão, para nunca virar um blob que engole a sala. Faixa
   // encolhida (era baseZ=8.6/nearZ=6.6 com escala até 1+1.8=2.8×; agora
-  // baseZ=7.5/nearZ=6.8 — combina com a posição de repouso do caster da
-  // fix de geometria — e escala máxima 1.35×).
-  const baseZ = 7.5, nearZ = 6.8;
+  // baseZ=4.5/nearZ=3.6 — combina com a posição de repouso do caster da
+  // fix de proporções (magnificação ~3.08× em repouso) — e escala máxima 1.35×).
+  const baseZ = 4.5, nearZ = 3.6;
   casterMesh.position.z = baseZ - closeness * (baseZ - nearZ);
   const scale = 1 + closeness * 0.35; // 1 .. 1.35 (era 1 .. 1.8)
   casterMesh.scale.set(scale, scale, 1);
