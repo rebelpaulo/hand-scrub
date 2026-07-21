@@ -3,705 +3,470 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Pinch Scrub — instalação interativa de vídeo por gestos</title>
+<title>✋ hand-scrub — escolhe a experiência</title>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;900&family=Archivo:wght@500;600;700&display=swap');
+
   :root {
     --panel: #0f1219cc;
     --line: #2a3245;
     --text: #eef2f8;
     --muted: #98a2b6;
-    --accent: #5eead4;
+    --accent: #5eead4;   /* teal — Butterfly Effect */
     --accent-2: #818cf8;
     --hot: #fb7185;
+    --amber: #f59e0b;    /* Sala de Sombras */
+    --magenta: #ff4dd2;  /* Pinch Draw */
+    --bg-0: #000;
+    --bg-1: #05070a;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: var(--text); }
-
-  /* ---------- fullscreen video ---------- */
-  video#player {
-    position: fixed; inset: 0; width: 100vw; height: 100vh;
-    object-fit: cover; background: #000;
+  html, body {
+    margin: 0; height: 100%; width: 100%; background: var(--bg-0);
+    overflow: hidden; color: var(--text);
+    font-family: Archivo, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
+  .display {
+    font-family: "Big Shoulders Display", Archivo, sans-serif;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: -0.01em;
+  }
+  button { font-family: inherit; }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
-  /* thin global progress bar */
-  #progress {
-    position: fixed; left: 0; bottom: 0; height: 5px; width: 0%;
-    background: linear-gradient(90deg, var(--accent-2), var(--accent));
-    box-shadow: 0 0 12px var(--accent); z-index: 40; transition: width .08s linear;
+  /* ============================================================ stage */
+  .stage {
+    position: fixed; inset: 0; width: 100vw; height: 100vh;
+    overflow: hidden; background: var(--bg-0);
+  }
+  .view {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    transition: opacity .35s ease-out;
+  }
+  .view[hidden] { display: none; }
+
+  /* ============================================================ ATTRACT */
+  #bgArt {
+    position: absolute; inset: 0; z-index: 0;
+    background-image: url('media/home-bg.jpg');
+    background-size: cover; background-position: center;
+    opacity: .32;
+  }
+  #bgArt::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(180deg, #000000b0, #000000e6);
+  }
+  .view-attract .bg {
+    position: absolute; inset: 0; z-index: 1;
+    background:
+      radial-gradient(1200px 800px at 18% 22%, #10241fcc, transparent 60%),
+      radial-gradient(1000px 700px at 82% 78%, #0c1a2fcc, transparent 60%),
+      linear-gradient(160deg, #04070a 0%, #060a10 45%, #030405 100%);
+    background-size: 180% 180%, 180% 180%, 100% 100%;
+    animation: bgDrift 22s ease-in-out infinite alternate;
+  }
+  .view-attract .bg::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(120% 90% at 50% 50%, transparent 55%, #000000b0 100%);
     pointer-events: none;
   }
+  @keyframes bgDrift {
+    0%   { background-position: 0% 20%, 100% 80%, 0 0; }
+    100% { background-position: 30% 45%, 70% 55%, 0 0; }
+  }
 
-  /* ---------- draggable PiP ---------- */
-  #pip {
-    position: fixed; right: 18px; bottom: 64px; width: 280px; z-index: 50;
-    background: var(--panel); backdrop-filter: blur(10px);
-    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
-    box-shadow: 0 20px 50px -18px #000; cursor: grab; user-select: none;
-    touch-action: none;
+  .scene-tag {
+    position: absolute; left: clamp(24px, 4vw, 64px); bottom: clamp(28px, 6vh, 72px);
+    z-index: 3; transition: opacity .3s ease-out;
   }
-  #pip.dragging { cursor: grabbing; opacity: .92; }
-  #pip .pip-h {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 7px 11px; font-size: 12px; font-weight: 600;
-    border-bottom: 1px solid var(--line);
+  .scene-tag .eyebrow {
+    display: flex; align-items: center; gap: 8px;
+    font-size: clamp(11px, 1vw, 14px); font-weight: 700; letter-spacing: .22em;
+    color: var(--exp-accent, var(--accent)); text-transform: uppercase; margin: 0 0 6px 2px;
   }
-  #pip .pip-h .fps { color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
-  .pip-x {
-    appearance: none; border: none; background: none; color: var(--muted);
-    font-size: 13px; cursor: pointer; padding: 2px 4px; line-height: 1;
+  .scene-tag .eyebrow .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--exp-accent, var(--accent));
+    box-shadow: 0 0 12px var(--exp-accent, var(--accent)); animation: pulseDot 1.8s ease-in-out infinite;
   }
-  .pip-x:hover { color: var(--hot); }
-  #pipResize {
-    position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; z-index: 3;
-    cursor: nwse-resize; touch-action: none;
-    background: linear-gradient(135deg, transparent 50%, #8b95a8aa 50%);
-    border-bottom-right-radius: 4px;
+  @keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .scene-tag h1 {
+    margin: 0; font-size: clamp(40px, 8.5vw, 128px); line-height: .88;
+    color: var(--text); text-shadow: 0 8px 40px #000c;
+    transition: opacity .3s ease-out;
   }
-  #pipReopen {
-    position: fixed; right: 18px; bottom: 64px; z-index: 50;
-    width: 48px; height: 48px; border-radius: 50%; font-size: 22px;
-    background: var(--panel); backdrop-filter: blur(10px);
-    border: 1px solid var(--line); color: var(--text); cursor: pointer;
-    box-shadow: 0 12px 30px -12px #000; transition: .15s;
+  .scene-tag .hint-line {
+    margin: 12px 0 0 3px; font-size: clamp(13px, 1.1vw, 17px); color: var(--muted);
+    font-weight: 600; letter-spacing: .02em;
   }
-  #pipReopen:hover { border-color: var(--accent); transform: scale(1.06); }
-  #pipReopen[hidden] { display: none; }
-  #pip .view { position: relative; aspect-ratio: 4/3; background: #05070a; }
-  video#cam, canvas#overlay {
+
+  /* ghost hand — SVG silhouette cycling open -> closed */
+  .ghost-hand-wrap {
+    position: absolute; right: clamp(6vw, 12vw, 16vw); top: 50%;
+    transform: translateY(-52%);
+    width: clamp(220px, 24vw, 420px); z-index: 2;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ghost-hand-wrap .halo {
+    position: absolute; width: 62%; height: 62%; border-radius: 50%;
+    background: radial-gradient(circle, var(--exp-accent, var(--accent)) 0%, transparent 70%);
+    opacity: .2;
+    animation: haloBreathe 3.6s ease-in-out infinite;
+  }
+  @keyframes haloBreathe { 0%,100% { transform: scale(.9); opacity: .12; } 50% { transform: scale(1.15); opacity: .3; } }
+  .ghost-hand-wrap svg { position: relative; width: 100%; height: auto; opacity: .92; }
+  .finger { transform-box: fill-box; animation: curl 3.6s cubic-bezier(.4,0,.2,1) infinite; }
+  .finger.f1 { transform-origin: 50% 100%; animation-delay: 0ms; }
+  .finger.f2 { transform-origin: 50% 100%; animation-delay: 60ms; }
+  .finger.f3 { transform-origin: 50% 100%; animation-delay: 120ms; }
+  .finger.f4 { transform-origin: 50% 100%; animation-delay: 180ms; }
+  .finger.thumb { transform-origin: 100% 60%; animation: curlThumb 3.6s cubic-bezier(.4,0,.2,1) infinite; animation-delay: 30ms; }
+  .finger, .palm { stroke: var(--exp-accent, var(--accent)); transition: stroke .3s ease-out; }
+  @keyframes curl {
+    0%, 8%   { transform: rotate(0deg); }
+    42%, 58% { transform: rotate(112deg); }
+    92%, 100%{ transform: rotate(0deg); }
+  }
+  @keyframes curlThumb {
+    0%, 8%   { transform: rotate(0deg); }
+    42%, 58% { transform: rotate(55deg); }
+    92%, 100%{ transform: rotate(0deg); }
+  }
+
+  /* ============================================================ SELECTOR */
+  .view-selector {
+    background: radial-gradient(1400px 900px at 50% 0%, #0b0f18, #020304 70%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: clamp(20px, 4vh, 48px); padding: 4vw;
+  }
+  .selector-head { text-align: center; }
+  .selector-head .eyebrow {
+    font-size: clamp(11px, 1vw, 14px); font-weight: 700; letter-spacing: .28em;
+    color: var(--muted); text-transform: uppercase; margin: 0 0 8px;
+  }
+  .selector-head h2 {
+    margin: 0; font-size: clamp(28px, 4vw, 54px); font-weight: 900;
+    letter-spacing: -0.01em; color: var(--text);
+  }
+  .cards {
+    display: flex; gap: clamp(16px, 2vw, 32px); width: 100%; max-width: 1400px;
+    justify-content: center; flex-wrap: wrap;
+  }
+  .card {
+    position: relative; flex: 1 1 320px; max-width: 420px; min-width: 260px;
+    border-radius: 20px; overflow: hidden; cursor: pointer;
+    border: 1px solid var(--line); background: #0a0d13; text-align: left;
+    padding: 0; appearance: none; color: inherit; font-family: inherit;
+    transition: transform .3s ease-out, border-color .3s ease-out, box-shadow .3s ease-out;
+  }
+  .card:hover, .card:focus-visible, .card.hover { transform: translateY(-6px); box-shadow: 0 30px 60px -24px #000c; }
+  .card[data-accent="teal"]:hover, .card[data-accent="teal"]:focus-visible, .card[data-accent="teal"].hover { border-color: var(--accent); }
+  .card[data-accent="amber"]:hover, .card[data-accent="amber"]:focus-visible, .card[data-accent="amber"].hover { border-color: var(--amber); }
+  .card[data-accent="magenta"]:hover, .card[data-accent="magenta"]:focus-visible, .card[data-accent="magenta"].hover { border-color: var(--magenta); }
+  .card.selected { transform: translateY(-6px) scale(1.02); }
+  .card[data-accent="teal"].selected    { border-color: var(--accent);  box-shadow: 0 0 0 2px #5eead455, 0 30px 70px -20px #5eead433; }
+  .card[data-accent="amber"].selected   { border-color: var(--amber);   box-shadow: 0 0 0 2px #f59e0b55, 0 30px 70px -20px #f59e0b33; }
+  .card[data-accent="magenta"].selected { border-color: var(--magenta); box-shadow: 0 0 0 2px #ff4dd255, 0 30px 70px -20px #ff4dd233; }
+
+  .card .preview { position: relative; aspect-ratio: 16/10; overflow: hidden; }
+  .card[data-accent="teal"] .preview {
+    background: radial-gradient(120% 120% at 20% 20%, #123b34, #05100e 70%);
+    animation: previewShiftTeal 9s ease-in-out infinite alternate;
+  }
+  .card[data-accent="amber"] .preview {
+    background: radial-gradient(120% 120% at 80% 30%, #3a2a0c, #100b04 70%);
+    animation: previewShiftAmber 9s ease-in-out infinite alternate;
+  }
+  .card[data-accent="magenta"] .preview {
+    background: radial-gradient(120% 120% at 30% 80%, #3a0c34, #10041e 70%);
+    animation: previewShiftMagenta 9s ease-in-out infinite alternate;
+  }
+  @keyframes previewShiftTeal    { from { background-position: 0% 0%; } to { background-position: 40% 60%; } }
+  @keyframes previewShiftAmber   { from { background-position: 100% 0%; } to { background-position: 60% 50%; } }
+  @keyframes previewShiftMagenta { from { background-position: 0% 100%; } to { background-position: 55% 30%; } }
+  .card .preview .icon {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    filter: drop-shadow(0 10px 30px #0008);
+    animation: iconFloat 4.5s ease-in-out infinite;
+  }
+  .card .preview .icon svg { width: clamp(48px, 6vw, 84px); height: clamp(48px, 6vw, 84px); }
+  .card[data-accent="teal"] .preview .icon svg    { color: var(--accent); }
+  .card[data-accent="amber"] .preview .icon svg   { color: var(--amber); }
+  .card[data-accent="magenta"] .preview .icon svg { color: var(--magenta); }
+  @keyframes iconFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+
+  /* dwell ring — filled by real mouse :hover (CSS) or by gesture dwell (JS) */
+  .dwell {
+    position: absolute; top: 14px; right: 14px; width: 46px; height: 46px; z-index: 3;
+  }
+  .dwell svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .dwell circle.track { fill: none; stroke: #ffffff22; stroke-width: 4; }
+  .dwell circle.fill {
+    fill: none; stroke-width: 4; stroke-linecap: round;
+    stroke-dasharray: 125.6; stroke-dashoffset: 125.6;
+    transition: stroke-dashoffset .7s linear;
+  }
+  .card[data-accent="teal"] .dwell circle.fill    { stroke: var(--accent); }
+  .card[data-accent="amber"] .dwell circle.fill   { stroke: var(--amber); }
+  .card[data-accent="magenta"] .dwell circle.fill { stroke: var(--magenta); }
+  .card:hover .dwell circle.fill { stroke-dashoffset: 0; }
+  /* gesture-driven dwell writes stroke-dashoffset inline (JS) — no CSS transition then */
+  .card.gesture-dwelling .dwell circle.fill { transition: none; }
+
+  .card .body { padding: 18px 20px 22px; }
+  .card .body .title {
+    margin: 0 0 6px; font-size: clamp(20px, 1.8vw, 28px); font-weight: 800;
+    color: var(--text); letter-spacing: -0.01em;
+  }
+  .card .body .desc {
+    margin: 0; font-size: clamp(13px, 1vw, 15px); color: var(--muted); line-height: 1.5;
+  }
+
+  /* ============================================================ hand cursor */
+  #cursor {
+    position: fixed; top: 0; left: 0; width: 26px; height: 26px;
+    border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 18px 6px #5eead4aa, 0 0 0 2px #0009;
+    transform: translate(-50%, -50%);
+    pointer-events: none; z-index: 200; display: none;
+    transition: background .15s;
+  }
+  #cursor.confirming { background: var(--hot); box-shadow: 0 0 18px 6px #fb718599, 0 0 0 2px #0009; }
+
+  /* ============================================================ camera PiP */
+  #camPip {
+    position: fixed; right: 18px; bottom: 18px; width: 160px; z-index: 150;
+    border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+    background: #05070a; box-shadow: 0 16px 40px -16px #000;
+  }
+  #camPip .view { position: relative; aspect-ratio: 4/3; }
+  #camPip video, #camPip canvas {
     position: absolute; inset: 0; width: 100%; height: 100%;
     object-fit: cover; transform: scaleX(-1);
   }
-  #pip .hud {
-    position: absolute; left: 8px; top: 8px; display: flex; gap: 6px; z-index: 2;
-  }
-  .pill {
-    background: #0a0d14cc; border: 1px solid var(--line); border-radius: 99px;
-    padding: 3px 9px; font-size: 11px; color: var(--muted);
-    display: flex; align-items: center; gap: 6px;
-  }
-  .pill b { color: var(--text); font-variant-numeric: tabular-nums; }
-  .pill .led { width: 7px; height: 7px; border-radius: 50%; background: #3a4256; }
-  .pill.on .led { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-  .pill.hot .led { background: var(--hot); box-shadow: 0 0 8px var(--hot); }
+  #camPip[hidden] { display: none; }
 
-  /* ---------- start overlay ---------- */
-  #startOverlay {
-    position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 18px;
-    background: radial-gradient(900px 600px at 50% 30%, #131a2a, #05070acc);
-  }
-  #startOverlay h1 { font-size: clamp(26px, 5vw, 44px); margin: 0; letter-spacing: -.02em; }
-  #startOverlay p { color: var(--muted); max-width: 560px; text-align: center; line-height: 1.6; margin: 0; padding: 0 20px; }
-  #startOverlay p b { color: var(--accent); }
-  #startOverlay .err { color: var(--hot); min-height: 18px; font-size: 13px; }
-
-  /* ---------- bottom control bar ---------- */
-  #bar {
-    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
-    display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px);
-    background: var(--panel); backdrop-filter: blur(10px);
-    border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px;
-    z-index: 60; transition: opacity .4s, transform .4s; overflow-x: auto;
-  }
-  #bar[hidden], #pip[hidden] { display: none; }
-  body.ui-hidden #bar { opacity: 0; transform: translateX(-50%) translateY(12px); pointer-events: none; }
-  body.ui-hidden { cursor: none; }
-
-  .chips { display: flex; gap: 8px; overflow-x: auto; flex: 1 1 auto; min-width: 0; max-width: 46vw; scrollbar-width: none; }
-  .chips::-webkit-scrollbar { display: none; }
-  .chip {
-    flex: 0 0 auto; border: 1px solid var(--line); background: #151a24;
-    color: var(--text); border-radius: 11px; padding: 8px 12px; font-size: 13px;
-    font-weight: 600; cursor: pointer; transition: .15s; white-space: nowrap;
-  }
-  .chip:hover { border-color: var(--accent); transform: translateY(-1px); }
-  .chip.active { background: linear-gradient(180deg, var(--accent-2), #6d78e6); border-color: #6d78e6; color: #fff; }
-
-  .btn {
-    appearance: none; border: 1px solid var(--line); background: #151a24; color: var(--text);
-    padding: 8px 12px; border-radius: 11px; font-size: 13px; font-weight: 600; cursor: pointer;
-    transition: .15s; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
-  }
-  .btn:hover { border-color: var(--accent); transform: translateY(-1px); }
-  .btn.primary { background: linear-gradient(180deg, var(--accent-2), #6d78e6); border-color: #6d78e6; color: #fff; font-size: 15px; padding: 12px 22px; }
-  input[type="file"] { display: none; }
-
-  select.btn { padding-right: 8px; }
-
-  /* ---------- settings popover ---------- */
-  #settings {
-    position: fixed; right: 18px; bottom: 76px; z-index: 70; width: 270px;
-    background: var(--panel); backdrop-filter: blur(10px);
-    border: 1px solid var(--line); border-radius: 14px; padding: 14px;
-    display: none; flex-direction: column; gap: 12px;
-  }
-  #settings.open { display: flex; }
-  .set { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; color: var(--muted); }
-  .set input[type="range"] { width: 110px; accent-color: var(--accent); }
-  .set .val { color: var(--text); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
-  .set input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
-
-  /* ---------- trim editor ---------- */
-  #trimPanel {
-    position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%);
-    width: min(640px, calc(100vw - 32px)); z-index: 65;
-    background: var(--panel); backdrop-filter: blur(10px);
-    border: 1px solid var(--line); border-radius: 14px; padding: 14px;
-    display: none; flex-direction: column; gap: 12px;
-  }
-  #trimPanel.open { display: flex; }
-  .trim-head { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); }
-  .trim-head b { color: var(--accent); font-variant-numeric: tabular-nums; }
-  .trim-strip {
-    position: relative; height: 34px; border-radius: 9px;
-    background: #151a24; border: 1px solid var(--line);
-  }
-  .trim-range {
-    position: absolute; top: 0; bottom: 0; border-radius: 8px;
-    background: linear-gradient(90deg, #818cf866, #5eead466);
-    border: 1px solid var(--accent);
-  }
-  .trim-handle {
-    position: absolute; top: -5px; bottom: -5px; width: 14px;
-    transform: translateX(-50%); border-radius: 6px; cursor: ew-resize;
-    background: var(--accent-2); border: 2px solid #fff3; touch-action: none;
-    box-shadow: 0 4px 10px #0008; z-index: 2;
-  }
-  .trim-handle.out { background: var(--accent); }
-  .trim-actions { display: flex; gap: 8px; justify-content: flex-end; }
-
-  #toast {
-    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+  /* ============================================================ fallback notice */
+  #notice {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
     background: var(--panel); border: 1px solid var(--line); border-radius: 99px;
-    padding: 8px 16px; font-size: 13px; z-index: 80; opacity: 0; transition: opacity .3s;
-    pointer-events: none;
+    padding: 8px 16px; font-size: 12.5px; color: var(--muted); z-index: 160;
+    opacity: 0; transition: opacity .3s; pointer-events: none;
+    backdrop-filter: blur(10px);
   }
-  #toast.show { opacity: 1; }
+  #notice.show { opacity: 1; }
+
+  /* ============================================================ prefers-reduced-motion */
+  @media (prefers-reduced-motion: reduce) {
+    .view-attract .bg,
+    .scene-tag .eyebrow .dot,
+    .ghost-hand-wrap .halo,
+    .finger, .finger.thumb,
+    .card .preview,
+    .card .preview .icon { animation: none !important; }
+  }
+
+  /* ============================================================ narrow-screen degrade */
+  @media (max-width: 720px) {
+    .ghost-hand-wrap { width: 46vw; right: 6vw; top: 40%; }
+    .scene-tag h1 { font-size: clamp(34px, 12vw, 60px); }
+    .cards { flex-direction: column; align-items: stretch; }
+    .card { max-width: 100%; }
+    #camPip { width: 110px; }
+  }
 </style>
 </head>
 <body>
-  <video id="player" muted playsinline preload="auto"></video>
-  <audio id="music" loop preload="auto" src="media/music.mp3"></audio>
-  <div id="progress"></div>
+  <div class="stage" id="stage">
 
-  <!-- draggable hand-tracking preview -->
-  <div id="pip" hidden>
-    <div class="pip-h"><span>✋ Camera tracking</span>
-      <span style="display:flex;align-items:center;gap:8px">
-        <span class="fps" id="fps">— fps</span>
-        <button class="pip-x" id="pipClose" title="Fechar preview">✕</button>
-      </span>
-    </div>
+    <!-- ================= ATTRACT ================= -->
+    <section class="view view-attract" id="viewAttract">
+      <div id="bgArt"></div>
+      <div class="bg"></div>
+
+      <div class="ghost-hand-wrap">
+        <div class="halo"></div>
+        <svg aria-hidden="true" viewBox="0 0 220 260" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect class="finger f4" x="46"  y="70"  width="20" height="92" rx="10" fill="#eef2f8" opacity=".14" stroke-width="1.4"/>
+          <rect class="finger f3" x="74"  y="52"  width="22" height="112" rx="11" fill="#eef2f8" opacity=".16" stroke-width="1.4"/>
+          <rect class="finger f2" x="104" y="46"  width="22" height="118" rx="11" fill="#eef2f8" opacity=".18" stroke-width="1.4"/>
+          <rect class="finger f1" x="134" y="58"  width="20" height="104" rx="10" fill="#eef2f8" opacity=".16" stroke-width="1.4"/>
+          <rect class="finger thumb" x="20" y="140" width="52" height="22" rx="11" fill="#eef2f8" opacity=".18" stroke-width="1.4"/>
+          <rect class="palm" x="44" y="150" width="118" height="88" rx="30" fill="#eef2f8" opacity=".14" stroke-width="1.6"/>
+        </svg>
+      </div>
+
+      <div class="scene-tag">
+        <p class="eyebrow"><span class="dot"></span>hand-scrub</p>
+        <h1 class="display" id="attractName">🦋 BUTTERFLY EFFECT</h1>
+        <p class="hint-line">toca ou aproxima-te para escolher</p>
+      </div>
+    </section>
+
+    <!-- ================= SELECTOR ================= -->
+    <section class="view view-selector" id="viewSelector" hidden>
+      <div class="selector-head">
+        <p class="eyebrow">Escolhe a experiência</p>
+        <h2 class="display">hand-scrub</h2>
+      </div>
+      <div class="cards" id="cards">
+
+        <button class="card" type="button" data-accent="teal" data-href="scrub.html">
+          <div class="preview"><span class="icon">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5c-1-3-4-3-5-1-1 2 0 4 2 5 1.5.8 2.5 2 3 4"/><path d="M12 5c1-3 4-3 5-1 1 2 0 4-2 5-1.5.8-2.5 2-3 4"/><path d="M12 9c-2 1-4 3-4 6 0 2 1 4 4 4"/><path d="M12 9c2 1 4 3 4 6 0 2-1 4-4 4"/><line x1="12" y1="4" x2="12" y2="21"/></svg>
+          </span></div>
+          <div class="dwell">
+            <svg aria-hidden="true" viewBox="0 0 46 46"><circle class="track" cx="23" cy="23" r="20"/><circle class="fill" cx="23" cy="23" r="20"/></svg>
+          </div>
+          <div class="body">
+            <h3 class="title">🦋 Butterfly Effect</h3>
+            <p class="desc">controla o tempo do vídeo com a abertura da mão</p>
+          </div>
+        </button>
+
+        <button class="card" type="button" data-accent="amber" data-href="shadow.html">
+          <div class="preview"><span class="icon">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+          </span></div>
+          <div class="dwell">
+            <svg aria-hidden="true" viewBox="0 0 46 46"><circle class="track" cx="23" cy="23" r="20"/><circle class="fill" cx="23" cy="23" r="20"/></svg>
+          </div>
+          <div class="body">
+            <h3 class="title">🌑 Sala de Sombras</h3>
+            <p class="desc">a tua sombra vive dentro de uma sala 3D</p>
+          </div>
+        </button>
+
+        <button class="card" type="button" data-accent="magenta" data-href="draw.html">
+          <div class="preview"><span class="icon">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19 7-7 3 3-7 7-3-3z"/><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="m2 2 7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+          </span></div>
+          <div class="dwell">
+            <svg aria-hidden="true" viewBox="0 0 46 46"><circle class="track" cx="23" cy="23" r="20"/><circle class="fill" cx="23" cy="23" r="20"/></svg>
+          </div>
+          <div class="body">
+            <h3 class="title">✍️ Pinch Draw</h3>
+            <p class="desc">escreve no ar com luz — aperta o polegar e o indicador</p>
+          </div>
+        </button>
+
+      </div>
+    </section>
+  </div>
+
+  <div id="cursor"></div>
+
+  <div id="camPip" hidden>
     <div class="view">
       <video id="cam" playsinline muted></video>
       <canvas id="overlay"></canvas>
-      <div class="hud">
-        <span class="pill" id="pillHand"><span class="led"></span><b id="handState">—</b></span>
-        <span class="pill" id="pillOpen"><span class="led"></span><b id="openVal">—</b></span>
-        <span class="pill" id="pillVol"><span class="led"></span><b id="volVal">🎵 —</b></span>
-      </div>
-      <div id="pipResize" title="Redimensionar"></div>
-    </div>
-  </div>
-  <button id="pipReopen" title="Mostrar preview" hidden>✋</button>
-
-  <!-- start screen -->
-  <div id="startOverlay">
-    <h1>✋ Pinch Scrub</h1>
-    <p>Mão direita: a abertura dos dedos é a linha do tempo — <b>fechados =
-       início</b>, <b>abertos ao máximo = fim</b>. Mão esquerda: <b>punho
-       fechado roda</b> 🎵 a música; <b>varre-a de um lado ao outro</b>
-       para trocar de vídeo. Na cena <b>🌊 Moisés</b>: junta as mãos como a rezar e
-       <b>afasta-as</b> — as águas separam-se contigo; junta-as e voltam.
-       Na cena 📄 <b>Origami</b>: fecha a mão — de <b>palma aberta</b> a
-       <b>punho cerrado</b> — como se estivesses a <b>amarrotar</b> a cara.</p>
-    <button class="btn primary" id="startBtn">Ativar câmara</button>
-    <div class="err" id="startErr"></div>
-  </div>
-
-  <!-- control bar -->
-  <div id="bar" hidden>
-    <div class="chips" id="chips"></div>
-    <label class="btn" title="Carregar vídeos próprios">📁 Vídeos<input type="file" id="fileInput" accept="video/*" multiple></label>
-    <select class="btn" id="mode" title="Modo de controlo">
-      <option value="aperture">✌️ Abrir/Fechar</option>
-      <option value="hands">🙏 Afastar as mãos</option>
-      <option value="drag">🤏 Arrastar</option>
-      <!-- gesto próprio da cena 📄 Origami: não aparece na lista (hidden),
-           mas continua a poder ser lido/atribuído via JS como qualquer option -->
-      <option value="squeeze" hidden>📄 Amassar</option>
-    </select>
-    <button class="btn" id="trimBtn" title="Trim da cena">✂️</button>
-    <button class="btn" id="playBtn" title="Reproduzir/Pausar">▶</button>
-    <button class="btn" id="fsBtn" title="Ecrã inteiro (F)">⛶</button>
-    <button class="btn" id="gearBtn" title="Definições">⚙</button>
-<a class="btn" href="shadow.html" title="Sala de Sombras (beta)">🌑</a>
-<a class="btn" href="draw.html" title="Pinch Draw — pintura de luz">✍️</a>
-  </div>
-
-  <!-- settings -->
-  <div id="settings">
-    <div class="set"><span>Suavização</span>
-      <div style="display:flex;align-items:center;gap:8px">
-        <input type="range" id="smooth" min="0.05" max="0.5" step="0.01" value="0.18"><span class="val" id="smoothVal">0.18</span>
-      </div>
-    </div>
-    <div class="set"><span>Sensibilidade (arrastar)</span>
-      <div style="display:flex;align-items:center;gap:8px">
-        <input type="range" id="sens" min="0.5" max="4" step="0.1" value="1.6"><span class="val" id="sensVal">1.6×</span>
-      </div>
-    </div>
-    <div class="set"><span>Limiar de pinch</span>
-      <div style="display:flex;align-items:center;gap:8px">
-        <input type="range" id="thresh" min="0.15" max="0.7" step="0.01" value="0.35"><span class="val" id="threshVal">0.35</span>
-      </div>
-    </div>
-    <div class="set"><span>Auto-reset sem mãos</span><input type="checkbox" id="autoReset" checked></div>
-    <div class="set"><span>Música (punho fechado roda o volume)</span><input type="checkbox" id="musicOn" checked></div>
-    <div class="set"><span>Trocar mãos (tempo ↔ som)</span><input type="checkbox" id="swapHands"></div>
-    <div style="font-size:10.5px;color:var(--muted)">🎵 Gymnopédie No.1 — Kevin MacLeod (CC BY 3.0)</div>
-  </div>
-
-  <!-- editor de trim -->
-  <div id="trimPanel">
-    <div class="trim-head"><span>✂️ Trim da cena — arrasta as pegas</span><b id="trimLabel">—</b></div>
-    <div class="trim-strip" id="trimStrip">
-      <div class="trim-range" id="trimRange"></div>
-      <div class="trim-handle" id="trimInH" title="Início" tabindex="0" role="slider" aria-label="Início do corte"></div>
-      <div class="trim-handle out" id="trimOutH" title="Fim" tabindex="0" role="slider" aria-label="Fim do corte"></div>
-    </div>
-    <div class="trim-actions">
-      <button class="btn" id="trimReset">Repor</button>
-      <button class="btn" id="trimClose">Fechar</button>
     </div>
   </div>
 
-  <div id="toast"></div>
+  <div id="notice"></div>
 
 <script type="module">
-import { FilesetResolver, HandLandmarker }
-  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+// Links legados partilhados apontam para a raiz como /#cfg=... — antes desta
+// home, a raiz ERA a app do Butterfly Effect. Encaminha-os direto lá.
+if (/^#cfg=/.test(location.hash)) {
+  location.replace("scrub.html" + location.hash);
+}
 
 const $ = id => document.getElementById(id);
-const player = $("player"), cam = $("cam"), overlay = $("overlay"), octx = overlay.getContext("2d");
+const stage = $("stage");
+const viewAttract = $("viewAttract"), viewSelector = $("viewSelector");
+const attractName = $("attractName"), sceneTag = document.querySelector(".scene-tag");
+const cards = [...document.querySelectorAll(".card")];
+const cam = $("cam"), overlay = $("overlay"), octx = overlay.getContext("2d");
+const camPip = $("camPip"), cursorEl = $("cursor"), noticeEl = $("notice");
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/* ================= scenes ================= */
-// Presets locais re-codificados all-intra (todos os frames são keyframes):
-// o seek é instantâneo em qualquer direção → scrub fluido frame a frame.
-const SCENES = [
-  { name: "🚀 Foguetão", src: "media/rocket.mp4", id: "media/rocket.mp4" },
-  { name: "☢️ Bomba atómica", src: "media/bomb.mp4", id: "media/bomb.mp4" },
-  { name: "🌹 Rosa", src: "media/rose.mp4", id: "media/rose.mp4" },
-  { name: "🌼 Peónia", src: "media/peony.mp4", id: "media/peony.mp4" },
-  { name: "📄 Origami", src: "media/origami.mp4", id: "media/origami.mp4", forceMode: "squeeze" },
-  // cena secreta: não aparece nos chips — ativa-se escolhendo o modo 🙏
-  { name: "🌊 Moisés", src: "media/moses.mp4", id: "media/moses.mp4", forceMode: "hands", hidden: true },
+function notice(msg) {
+  noticeEl.textContent = msg;
+  noticeEl.classList.add("show");
+}
+
+/* ================= state machine: attract <-> selector ================= */
+let view = "attract";
+function setView(name) {
+  if (view === name) return;
+  view = name;
+  viewAttract.hidden = name !== "attract";
+  viewSelector.hidden = name !== "selector";
+}
+function goSelector() { setView("selector"); }
+
+// any click, tap or keypress on the attract screen moves to the selector
+document.addEventListener("click", () => { if (view === "attract") goSelector(); });
+document.addEventListener("keydown", (e) => {
+  if (view === "attract") { goSelector(); return; }
+  if (e.key === "Escape" && view === "selector") setView("attract");
+});
+
+/* regresso ao attract: instalação não pode ficar presa no seletor — sem
+   interação (rato/tecla/mão) durante IDLE_MS, volta ao loop de atração. */
+const IDLE_MS = 60000;
+let idleTimer = 0;
+function bumpIdle() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { if (view === "selector" && !navigated) setView("attract"); }, IDLE_MS);
+}
+["pointermove", "pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, bumpIdle, { passive: true }));
+bumpIdle();
+
+/* ================= attract: cycling experience name ================= */
+const EXPERIENCES = [
+  { name: "🦋 BUTTERFLY EFFECT", accent: "#5eead4" },
+  { name: "🌑 SALA DE SOMBRAS",  accent: "#f59e0b" },
+  { name: "✍️ PINCH DRAW",       accent: "#ff4dd2" },
 ];
-let activeScene = 0;
+let expIdx = 0;
+function paintExperience(i) {
+  attractName.textContent = EXPERIENCES[i].name;
+  // set on the view (not scene-tag) so the ghost-hand, a sibling, inherits it too
+  viewAttract.style.setProperty("--exp-accent", EXPERIENCES[i].accent);
+}
+paintExperience(expIdx);
+if (!reduceMotion) {
+  setInterval(() => {
+    if (view !== "attract") return; // não mexer no DOM escondido
+    sceneTag.style.opacity = "0";
+    setTimeout(() => {
+      expIdx = (expIdx + 1) % EXPERIENCES.length;
+      paintExperience(expIdx);
+      sceneTag.style.opacity = "1";
+    }, 300);
+  }, 4200);
+}
 
-const chipsEl = $("chips");
-function renderChips() {
-  chipsEl.innerHTML = "";
-  SCENES.forEach((s, i) => {
-    if (s.hidden) return; // cena secreta: entra-se pelo modo 🙏
-    const c = document.createElement("button");
-    c.className = "chip" + (i === activeScene ? " active" : "");
-    c.textContent = s.name;
-    c.onclick = () => selectScene(i);
-    chipsEl.appendChild(c);
+/* ================= selector cards: click / mouse-dwell / gesture-dwell ================= */
+let navigated = false;
+function go(href) {
+  if (navigated) return;
+  navigated = true;
+  window.location.href = href;
+}
+cards.forEach(card => {
+  card.addEventListener("click", () => go(card.dataset.href));
+  const fillCircle = card.querySelector(".dwell circle.fill");
+  let hovering = false;
+  card.addEventListener("mouseenter", () => { hovering = true; });
+  card.addEventListener("mouseleave", () => { hovering = false; });
+  fillCircle.addEventListener("transitionend", e => {
+    if (e.propertyName !== "stroke-dashoffset") return;
+    if (hovering && card.matches(":hover")) go(card.dataset.href);
   });
-}
-function selectScene(i) {
-  activeScene = i;
-  player.src = SCENES[i].src;
-  player.load();
-  displayedTime = 0;
-  targetTime = 0;
-  grabbing = false; // sem âncora de arrasto herdada da cena anterior
-  player.currentTime = 0;
-  // cenas com gesto próprio (🌊 = 🙏 · 📄 = amassar): o modo acompanha a
-  // cena; ao sair (chip/swipe), volta ao último modo escolhido pelo utilizador
-  const modeSel = $("mode");
-  if (SCENES[i].forceMode) modeSel.value = SCENES[i].forceMode;
-  else if (modeSel.value === "hands" || modeSel.value === "squeeze") modeSel.value = lastUserMode;
-  renderChips();
-  toast(SCENES[i].name);
-  cloudSave(); // cena ativa também persiste
-}
-$("fileInput").onchange = e => {
-  const files = [...e.target.files];
-  if (!files.length) return;
-  for (const f of files) SCENES.push({
-    name: "📁 " + f.name.replace(/\.[^.]+$/, "").slice(0, 18),
-    src: URL.createObjectURL(f),
-    id: "upload:" + f.name + "|" + f.size + "|" + f.lastModified, // estável entre sessões
-  });
-  selectScene(SCENES.length - files.length); // first of the newly added
-};
-
-/* ================= UI helpers ================= */
-let toastT;
-function toast(msg) {
-  const t = $("toast");
-  t.textContent = msg; t.classList.add("show");
-  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 1800);
-}
-// auto-hide UI when idle
-let idleT;
-function wakeUI() {
-  document.body.classList.remove("ui-hidden");
-  clearTimeout(idleT);
-  idleT = setTimeout(() => document.body.classList.add("ui-hidden"), 4000);
-}
-["pointermove", "pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, wakeUI));
-wakeUI();
-
-$("playBtn").onclick = () => player.paused ? player.play() : player.pause();
-$("fsBtn").onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
-$("gearBtn").onclick = () => $("settings").classList.toggle("open");
-document.addEventListener("keydown", e => {
-  if (e.target.matches("input, select, button, textarea, [role='slider']") || e.target.isContentEditable) return;
-  if (e.code === "Space") { e.preventDefault(); $("playBtn").onclick(); }
-  if (e.key === "f" || e.key === "F") $("fsBtn").onclick();
 });
-let lastUserMode = "aperture"; // último modo "normal" (para sair do menu secreto)
-let returnScene = 0;           // cena a retomar ao sair de uma cena com gesto forçado
-$("mode").addEventListener("change", () => {
-  grabbing = false; targetTime = displayedTime;
-  const secretIdx = SCENES.findIndex(s => s.forceMode === "hands");
-  const v = $("mode").value;
-  if (v === "hands") {
-    // menu secreto: escolher 🙏 ativa a cena 🌊 Moisés
-    if (activeScene !== secretIdx && secretIdx >= 0) {
-      returnScene = activeScene;
-      selectScene(secretIdx);
-    }
-  } else {
-    lastUserMode = v;
-    // qualquer cena ESCONDIDA com gesto forçado (ex: 🌊 Moisés/🙏): sair pelo
-    // dropdown volta à última cena normal. Cenas com gesto forçado mas
-    // visíveis (ex: 📄 Origami/amassar) não têm de "voltar" — o utilizador
-    // pode simplesmente trocar de modo sem sair da cena.
-    if (SCENES[activeScene] && SCENES[activeScene].hidden && SCENES[activeScene].forceMode) {
-      const back = (SCENES[returnScene] && !SCENES[returnScene].hidden) ? returnScene : 0;
-      selectScene(back); // selectScene mantém o modo escolhido (v) porque a cena de destino não o força
-    }
-  }
-});
-
-const smooth = $("smooth"), sens = $("sens"), thresh = $("thresh");
-smooth.oninput = () => $("smoothVal").textContent = (+smooth.value).toFixed(2);
-sens.oninput = () => $("sensVal").textContent = (+sens.value).toFixed(1) + "×";
-thresh.oninput = () => $("threshVal").textContent = (+thresh.value).toFixed(2);
-
-/* progress bar (dentro do intervalo de trim) */
-function syncProgress() {
-  const d = player.duration || 0;
-  const a = trimIn, b = trimOut || d, span = Math.max(0.001, b - a);
-  $("progress").style.width = (d ? Math.min(1, Math.max(0, (player.currentTime - a) / span)) * 100 : 0) + "%";
-  requestAnimationFrame(syncProgress);
-}
-requestAnimationFrame(syncProgress);
-
-/* ================= música (volume por rotação do punho) ================= */
-const music = $("music");
-let musicVol = 0.6;
-music.volume = musicVol;
-$("musicOn").addEventListener("change", () => {
-  if ($("musicOn").checked && running) music.play().catch(() => { /* autoplay */ });
-  else music.pause();
-});
-
-/* ================= trim editor ================= */
-let trimIn = 0, trimOut = 0; // trimOut=0 → até ao fim (definido no loadedmetadata)
-let pendingScene = 0;        // cena inicial (pode vir do link #cfg)
-let trims = {};
-try { trims = JSON.parse(localStorage.getItem("scene-trims") || "{}"); } catch { trims = {}; }
-function trimKey() { return SCENES[activeScene].id; }
-function saveTrim() {
-  trims[trimKey()] = { in: trimIn, out: trimOut };
-  try { localStorage.setItem("scene-trims", JSON.stringify(trims)); } catch { /* opcional */ }
-  cloudSave();
-}
-player.addEventListener("timeupdate", () => {
-  // garante o loop dentro do trim também sem a câmara ativa
-  const end = trimOut || player.duration || 0;
-  if (!player.paused && end && player.currentTime >= end - 0.05) player.currentTime = trimIn;
-});
-function minSpan() { return Math.min(0.5, player.duration || 0.5); }
-function applyTrimsToCurrentScene() {
-  const d = player.duration;
-  if (!d) return;
-  const t = trims[trimKey()], ms = minSpan();
-  trimIn = t ? Math.min(Math.max(0, t.in), Math.max(0, d - ms)) : 0;
-  trimOut = t ? Math.min(Math.max(trimIn + ms, t.out), d) : d;
-  displayedTime = targetTime = trimIn;
-  if (player.paused) player.currentTime = trimIn;
-  renderTrim();
-}
-player.addEventListener("loadedmetadata", applyTrimsToCurrentScene);
-
-/* ===== sincronização na cloud (Supabase · tabela hand_config) =====
-   Os cortes + cena ativa persistem entre dispositivos. Prioridade no arranque:
-   link #cfg > cloud > localStorage. Chave anon é pública por design (RLS). */
-const SB_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
-const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
-const SB_HDRS = { apikey: SB_KEY, Authorization: "Bearer " + SB_KEY, "Content-Type": "application/json" };
-const CFG_ID = "default";
-let cloudSaveT = 0, hasLinkCfg = false;
-let cloudReady = false, cloudPendingSave = false; // não gravar antes de hidratar
-async function cloudLoad() {
-  try {
-    const r = await fetch(`${SB_URL}/rest/v1/hand_config?id=eq.${CFG_ID}&select=data`, { headers: SB_HDRS });
-    if (!r.ok) return;
-    const cfg = (await r.json())[0]?.data;
-    if (!cfg || hasLinkCfg) return; // um link #cfg explícito ganha à cloud
-    if (cfg.t) {
-      for (const k of Object.keys(trims)) if (!k.startsWith("upload:")) delete trims[k];
-      Object.assign(trims, cfg.t);
-      try { localStorage.setItem("scene-trims", JSON.stringify(trims)); } catch { /* opcional */ }
-      applyTrimsToCurrentScene();
-    }
-    if (typeof cfg.s === "number" && SCENES[cfg.s] && cfg.s !== activeScene) selectScene(cfg.s);
-  } catch { /* offline: localStorage chega */ }
-  finally {
-    cloudReady = true;
-    if (cloudPendingSave) { cloudPendingSave = false; cloudSave(); }
-  }
-}
-function cloudSave() {
-  if (!cloudReady) { cloudPendingSave = true; return; } // a hidratação ganha à gravação
-  clearTimeout(cloudSaveT);
-  cloudSaveT = setTimeout(async () => {
-    const presetTrims = {};
-    for (const [k, v] of Object.entries(trims)) {
-      if (!k.startsWith("upload:")) presetTrims[k] = { in: +v.in.toFixed(2), out: +v.out.toFixed(2) };
-    }
-    try {
-      await fetch(`${SB_URL}/rest/v1/hand_config`, {
-        method: "POST",
-        headers: { ...SB_HDRS, Prefer: "resolution=merge-duplicates" },
-        body: JSON.stringify([{ id: CFG_ID, data: { t: presetTrims, s: activeScene }, updated_at: new Date().toISOString() }]),
-      });
-    } catch { /* offline: fica no localStorage */ }
-  }, 1200);
-}
-const trimPanel = $("trimPanel"), trimStrip = $("trimStrip");
-$("trimBtn").onclick = () => { trimPanel.classList.toggle("open"); renderTrim(); };
-$("trimClose").onclick = () => trimPanel.classList.remove("open");
-$("trimReset").onclick = () => {
-  trimIn = 0; trimOut = player.duration || 0;
-  saveTrim(); renderTrim(); toast("Trim reposto");
-};
-function renderTrim() {
-  const d = player.duration || 0;
-  if (!d) { $("trimLabel").textContent = "—"; return; }
-  const a = trimIn / d * 100, b = (trimOut || d) / d * 100;
-  $("trimRange").style.left = a + "%"; $("trimRange").style.width = (b - a) + "%";
-  $("trimInH").style.left = a + "%"; $("trimOutH").style.left = b + "%";
-  const ms = minSpan();
-  const bounds = [
-    [$("trimInH"), trimIn, 0, (trimOut || d) - ms],
-    [$("trimOutH"), trimOut || d, trimIn + ms, d],
-  ];
-  for (const [el, val, lo, hi] of bounds) {
-    el.setAttribute("aria-valuemin", lo.toFixed(1));
-    el.setAttribute("aria-valuemax", hi.toFixed(1));
-    el.setAttribute("aria-valuenow", val.toFixed(1));
-  }
-  $("trimLabel").textContent = trimIn.toFixed(1) + "s → " + (trimOut || d).toFixed(1) + "s";
-}
-function bindTrimHandle(h, isIn) {
-  // teclado: setas ±0.1s (Shift ±1s), Home/End para os extremos
-  h.addEventListener("keydown", e => {
-    const d = player.duration || 0; if (!d) return;
-    const step = e.shiftKey ? 1 : 0.1; const ms = minSpan();
-    let t = isIn ? trimIn : trimOut;
-    if (e.key === "ArrowLeft" || e.key === "ArrowDown") t -= step;
-    else if (e.key === "ArrowRight" || e.key === "ArrowUp") t += step;
-    else if (e.key === "Home") t = isIn ? 0 : trimIn + ms;
-    else if (e.key === "End") t = isIn ? (trimOut || d) - ms : d;
-    else return;
-    e.preventDefault(); e.stopPropagation();
-    if (isIn) trimIn = Math.max(0, Math.min(t, (trimOut || d) - ms));
-    else trimOut = Math.min(d, Math.max(t, trimIn + ms));
-    player.pause();
-    player.currentTime = isIn ? trimIn : trimOut;
-    displayedTime = targetTime = player.currentTime;
-    saveTrim(); renderTrim();
-  });
-  h.addEventListener("pointerdown", e => {
-    e.stopPropagation();
-    try { h.setPointerCapture(e.pointerId); } catch { /* ponteiro já inativo */ }
-    const move = ev => {
-      const d = player.duration || 0; if (!d) return;
-      const r = trimStrip.getBoundingClientRect();
-      const t = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * d;
-      const ms = minSpan();
-      if (isIn) trimIn = Math.max(0, Math.min(t, (trimOut || d) - ms));
-      else trimOut = Math.min(d, Math.max(t, trimIn + ms));
-      // preview em direto do ponto de corte (seek all-intra é instantâneo)
-      player.pause();
-      player.currentTime = isIn ? trimIn : trimOut;
-      displayedTime = targetTime = player.currentTime;
-      renderTrim();
-    };
-    const up = ev => {
-      h.removeEventListener("pointermove", move);
-      h.removeEventListener("pointerup", up);
-      h.removeEventListener("pointercancel", up);
-      if (h.hasPointerCapture?.(ev.pointerId)) h.releasePointerCapture(ev.pointerId);
-      displayedTime = targetTime = trimIn; player.currentTime = trimIn; // volta ao início do corte
-      saveTrim(); renderTrim();
-    };
-    h.addEventListener("pointermove", move);
-    h.addEventListener("pointerup", up);
-    h.addEventListener("pointercancel", up);
-  });
-}
-bindTrimHandle($("trimInH"), true);
-bindTrimHandle($("trimOutH"), false);
-
-(() => {
-  // (o botão de partilha por link foi removido — a cloud persiste o setup;
-  // links #cfg antigos continuam a ser honrados ao abrir)
-  // ao abrir com #cfg=..., os cortes do link têm prioridade sobre o localStorage
-  const m = location.hash.match(/#cfg=(.+)/);
-  if (!m) return;
-  try {
-    const cfg = JSON.parse(atob(m[1]));
-    if (cfg.t) {
-      // o link representa o setup COMPLETO dos presets: limpa cortes antigos
-      // de presets (mantém os de uploads, que são só deste dispositivo)
-      for (const k of Object.keys(trims)) if (!k.startsWith("upload:")) delete trims[k];
-      Object.assign(trims, cfg.t);
-      try { localStorage.setItem("scene-trims", JSON.stringify(trims)); } catch { /* opcional */ }
-    }
-    if (typeof cfg.s === "number" && SCENES[cfg.s]) pendingScene = cfg.s;
-    hasLinkCfg = true;
-  } catch { /* link inválido: ignora */ }
-})();
-
-/* ================= draggable PiP ================= */
-const pip = $("pip");
-let pipClosed = false;
-(() => {
-  const reopen = $("pipReopen"), closeBtn = $("pipClose"), handle = $("pipResize");
-  function placePip(x, y) {
-    const w = pip.offsetWidth || 280, h = pip.offsetHeight || 240;
-    x = Math.min(Math.max(0, x), Math.max(0, window.innerWidth - w));
-    y = Math.min(Math.max(0, y), Math.max(0, window.innerHeight - h));
-    pip.style.left = x + "px"; pip.style.top = y + "px";
-    pip.style.right = "auto"; pip.style.bottom = "auto";
-  }
-  function saveState() {
-    const r = pip.getBoundingClientRect();
-    try {
-      localStorage.setItem("pip-state", JSON.stringify({ x: r.left, y: r.top, w: pip.offsetWidth, closed: pipClosed }));
-    } catch { /* persistência é opcional */ }
-  }
-  try {
-    const saved = localStorage.getItem("pip-state");
-    if (saved) {
-      const { x, y, w, closed } = JSON.parse(saved);
-      if (w) pip.style.width = Math.min(Math.max(200, w), window.innerWidth - 24) + "px";
-      if (typeof x === "number") placePip(x, y);
-      pipClosed = !!closed;
-    }
-  } catch { /* persistência é opcional */ }
-
-  // fechar / reabrir (a câmara continua a seguir a mão com o preview fechado)
-  closeBtn.addEventListener("click", e => {
-    e.stopPropagation();
-    pipClosed = true; saveState(); // guarda a geometria ANTES de esconder (senão mede 0×0)
-    pip.hidden = true; reopen.hidden = false;
-  });
-  reopen.addEventListener("click", () => {
-    pipClosed = false; pip.hidden = false; reopen.hidden = true; saveState();
-  });
-  // aplica estado fechado guardado quando a câmara arrancar
-  pip.applySavedVisibility = () => {
-    pip.hidden = pipClosed; reopen.hidden = !pipClosed;
-    if (!pipClosed) { const r = pip.getBoundingClientRect(); placePip(r.left, r.top); }
-  };
-
-  // arrastar (ignora cliques nos controlos e na pega de resize)
-  let sx, sy, ox, oy, dragging = false;
-  pip.addEventListener("pointerdown", e => {
-    if (e.target.closest(".pip-x, #pipResize")) return;
-    dragging = true; pip.classList.add("dragging");
-    try { pip.setPointerCapture(e.pointerId); } catch { /* ponteiro já inativo */ }
-    const r = pip.getBoundingClientRect();
-    sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
-  });
-  pip.addEventListener("pointermove", e => {
-    if (!dragging) return;
-    placePip(ox + e.clientX - sx, oy + e.clientY - sy);
-  });
-  const endDrag = e => {
-    if (!dragging) return;
-    dragging = false; pip.classList.remove("dragging");
-    if (pip.hasPointerCapture?.(e.pointerId)) pip.releasePointerCapture(e.pointerId);
-    saveState();
-  };
-  pip.addEventListener("pointerup", endDrag);
-  pip.addEventListener("pointercancel", endDrag);
-  pip.addEventListener("lostpointercapture", endDrag);
-
-  // redimensionar pela pega (largura; altura segue o aspect-ratio)
-  let rsx, rw, resizing = false;
-  handle.addEventListener("pointerdown", e => {
-    e.stopPropagation();
-    resizing = true; rsx = e.clientX; rw = pip.offsetWidth;
-    try { handle.setPointerCapture(e.pointerId); } catch { /* ponteiro já inativo */ }
-  });
-  handle.addEventListener("pointermove", e => {
-    if (!resizing) return;
-    const w = Math.min(Math.max(200, rw + e.clientX - rsx), window.innerWidth - 24);
-    pip.style.width = w + "px";
-  });
-  const endResize = e => {
-    if (!resizing) return;
-    resizing = false;
-    if (handle.hasPointerCapture?.(e.pointerId)) handle.releasePointerCapture(e.pointerId);
-    const r = pip.getBoundingClientRect();
-    placePip(r.left, r.top); // garante que continua dentro do ecrã
-    saveState();
-  };
-  handle.addEventListener("pointerup", endResize);
-  handle.addEventListener("pointercancel", endResize);
-  handle.addEventListener("lostpointercapture", endResize);
-
-  window.addEventListener("resize", () => {
-    if (pip.offsetWidth > window.innerWidth - 24) {
-      pip.style.width = Math.max(200, window.innerWidth - 24) + "px";
-    }
-    const r = pip.getBoundingClientRect();
-    placePip(r.left, r.top);
-  });
-})();
 
 /* ================= hand tracking ================= */
-const CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
-  [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
-
 let landmarker = null, running = false, lastVideoTime = -1;
-let fpsEMA = 0, lastT = performance.now(), lastCamFrameAt = performance.now();
-
-// control state
-let displayedTime = 0;          // smoothed time we render
-let targetTime = 0;             // where the gesture wants us
-let handVisible = false;        // mão de controlo do tempo visível
-let anyHand = false;            // qualquer mão visível (tempo ou som)
-let fistActive = false, rollAnchor = 0, volAnchor = 0.6; // knob de volume
-let swipeHist = [];             // trajetória do pulso p/ deteção de swipe
-let lastSwipeAt = 0;            // cooldown do swipe
-let lastPalmAt = 0;             // último frame com palma aberta (graça)
-let grabbing = false, anchorX = 0, anchorTime = 0;   // drag mode
-let lastFrameTime = 0;
 
 async function initModel() {
+  // dynamic import (not a static top-level import) so a CDN failure can't
+  // block anything registered above — click handlers keep working.
+  const { FilesetResolver, HandLandmarker } = await import(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
   const fileset = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
   landmarker = await HandLandmarker.createFromOptions(fileset, {
@@ -713,45 +478,72 @@ async function initModel() {
   });
 }
 
-$("startBtn").onclick = async () => {
-  const btn = $("startBtn"), err = $("startErr");
-  btn.disabled = true; btn.textContent = "A carregar modelo…";
-  // arranca a música SÍNCRONO com o clique (a ativação de autoplay expira
-  // durante o carregamento do modelo); se falhar, tenta no próximo toque
-  if ($("musicOn").checked) {
-    music.play().catch(() => {
-      document.addEventListener("pointerdown",
-        () => { if ($("musicOn").checked) music.play().catch(() => {}); },
-        { once: true });
-    });
-  }
+async function startCamera() {
   try {
-    if (!landmarker) await initModel();
-    btn.textContent = "A ligar câmara…";
+    await initModel();
     const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 960, height: 720, facingMode: "user" } });
     cam.srcObject = stream; await cam.play();
     overlay.width = cam.videoWidth; overlay.height = cam.videoHeight;
+    camPip.hidden = false;
+    cursorEl.style.display = "block";
     running = true;
-    $("startOverlay").remove();
-    pip.applySavedVisibility(); $("bar").hidden = false;
-    toast("✌️ Abre e fecha os dedos");
-    lastFrameTime = performance.now(); lastCamFrameAt = lastFrameTime;
     stream.getVideoTracks()[0]?.addEventListener("ended", () => {
-      // câmara desligada: pára tudo em vez de deixar música e loop pendurados
-      handVisible = false; anyHand = false; grabbing = false; fistActive = false;
-      running = false;
-      music.pause();
-      toast("⚠️ Câmara desligada — recarrega a página para retomar");
+      running = false; camPip.hidden = true; cursorEl.style.display = "none";
+      notice("câmara indisponível — usa o rato ou toca no ecrã");
     });
-    document.addEventListener("visibilitychange", () => { lastFrameTime = performance.now(); });
     loop();
   } catch (e) {
-    err.textContent = "Erro: " + e.message;
-    btn.disabled = false; btn.textContent = "Ativar câmara";
+    notice("câmara indisponível — usa o rato ou toca no ecrã");
   }
-};
+}
+startCamera();
 
 function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
+
+/* ---------- thumbs-up detection ---------- */
+function isThumbsUp(lm) {
+  const handSize = dist(lm[0], lm[9]) || 0.0001;
+  // fingertips 8,12,16,20 curled near the wrist
+  for (const t of [8, 12, 16, 20]) {
+    if (dist(lm[t], lm[0]) / handSize > 1.3) return false;
+  }
+  // thumb extended away from wrist
+  if (dist(lm[4], lm[0]) / handSize < 0.8) return false;
+  // thumb pointing up in image space (smaller y = higher on screen)
+  if (!(lm[4].y < lm[2].y)) return false;
+  return true;
+}
+
+// MediaPipe's hands[] order isn't stable across frames — pick the hand whose
+// wrist (lm[0]) is nearest to the one tracked last frame (fallback: hands[0]).
+function pickCursorHand(hands) {
+  if (!cursorTrackWrist) return hands[0];
+  let best = hands[0], bestD = Infinity;
+  for (const h of hands) {
+    const d = dist(h[0], cursorTrackWrist);
+    if (d < bestD) { bestD = d; best = h; }
+  }
+  return best;
+}
+
+/* ---------- cursor smoothing ---------- */
+let cursorX = window.innerWidth / 2, cursorY = window.innerHeight / 2;
+let cursorInit = false;
+const SMOOTH = 0.35;
+let cursorTrackWrist = null;  // wrist of the hand tracked last frame
+let missedHandFrames = 0;     // consecutive frames with no hand detected
+const HAND_MISS_HIDE = 5;     // frames of no hand before the dot hides
+
+/* ---------- thumbs-up debounce + dwell-ring activation ---------- */
+let thumbsSince = 0;          // performance.now() when the pose started holding, 0 = not holding
+const THUMBS_DEBOUNCE = 150;  // ms pose must hold before it "counts"
+const ACTIVATE_MS = 700;      // ms of confirmed hold-over-card to activate
+const DASH = 125.6;           // stroke-dasharray of the dwell ring circle
+let cooldownUntil = 0;        // performance.now() until which activation is blocked
+let hoverCard = null;
+let holdStart = 0;            // when confirmed thumbs-up over hoverCard began
+let lastFrameAt = 0;          // last processed-frame timestamp (tracking-stall guard)
+const FRAME_STALL_MS = 200;   // gap above which the dwell is considered stale
 
 function loop() {
   if (!running) return;
@@ -759,254 +551,111 @@ function loop() {
   if (cam.currentTime !== lastVideoTime) {
     lastVideoTime = cam.currentTime;
     const res = landmarker.detectForVideo(cam, now);
-    processHands(res);
-    lastCamFrameAt = now;
-  } else if (now - lastCamFrameAt > 1500 && (handVisible || anyHand)) {
-    // câmara congelada/terminada: solta o gesto para não fazer scrub eterno
-    handVisible = false; anyHand = false; grabbing = false; fistActive = false;
+    processHands(res, now);
   }
-  applyTime(now);
-  const dt = now - lastT; lastT = now;
-  fpsEMA = fpsEMA ? fpsEMA * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
-  $("fps").textContent = fpsEMA.toFixed(0) + " fps";
   requestAnimationFrame(loop);
 }
 
-function drawHand(lm, W, H, stroke) {
-  octx.lineWidth = 4; octx.strokeStyle = stroke;
-  for (const [a, b] of CONNECTIONS) {
-    octx.beginPath(); octx.moveTo(lm[a].x * W, lm[a].y * H); octx.lineTo(lm[b].x * W, lm[b].y * H); octx.stroke();
-  }
-  for (let i = 0; i < lm.length; i++) {
-    const tip = (i === 4 || i === 8);
-    octx.beginPath(); octx.arc(lm[i].x * W, lm[i].y * H, tip ? 9 : 5, 0, Math.PI * 2);
-    octx.fillStyle = tip ? "#5eead4" : "#e6e9f2"; octx.fill();
-  }
-}
-function isFist(lm, handSize) {
-  // punho fechado: pelo menos 3 das 4 pontas dos dedos enroladas junto ao pulso
-  let curled = 0;
-  for (const t of [8, 12, 16, 20]) if (dist(lm[t], lm[0]) / handSize < 1.3) curled++;
-  return curled >= 3;
-}
-function trackSwipe(lm) {
-  // varrimento deliberado da mão do som (sem exigência de pose — a deteção de
-  // "palma aberta" falhava sempre durante o movimento, por blur): pulso a
-  // atravessar ≥22% do ecrã em ≤450ms, claramente na horizontal
-  const t = performance.now(), x = lm[0].x, y = lm[0].y;
-  swipeHist.push({ t, x, y });
-  while (swipeHist.length && t - swipeHist[0].t > 450) swipeHist.shift();
-  if (swipeHist.length < 4 || t - lastSwipeAt < 1000) return;
-  const dx = x - swipeHist[0].x, dy = y - swipeHist[0].y;
-  if (Math.abs(dx) > 0.22 && Math.abs(dx) > 2 * Math.abs(dy)) {
-    lastSwipeAt = t; swipeHist = [];
-    // preview espelhada: mão para a ESQUERDA do utilizador → x da imagem sobe → próxima cena
-    // (salta cenas secretas/escondidas)
-    const dir = dx > 0 ? 1 : -1;
-    let next = activeScene;
-    for (let k = 0; k < SCENES.length; k++) {
-      next = (next + dir + SCENES.length) % SCENES.length;
-      if (!SCENES[next].hidden) break;
-    }
-    selectScene(next);
-  }
-}
+function processHands(res, now) {
+  // a gap between processed frames (tab suspend, MediaPipe hiccup) must not
+  // let a stale hold insta-activate on the returning frame — reset the dwell.
+  const stalled = lastFrameAt && (now - lastFrameAt > FRAME_STALL_MS);
+  lastFrameAt = now;
+  if (stalled) { thumbsSince = 0; holdStart = 0; }
 
-function processHands(res) {
   octx.clearRect(0, 0, overlay.width, overlay.height);
   const hands = res.landmarks || [];
-  const pillHand = $("pillHand"), pillOpen = $("pillOpen");
   const W = overlay.width, H = overlay.height;
-  anyHand = hands.length > 0;
 
-  // ---- modo 🙏: mãos juntas = início, afastadas = fim ----
-  if ($("mode").value === "hands") {
-    grabbing = false; fistActive = false; swipeHist = [];
-    if (hands.length >= 2) {
-      handVisible = true;
-      if (!player.paused) player.pause();
-      drawHand(hands[0], W, H, "rgba(129,140,248,.85)");
-      drawHand(hands[1], W, H, "rgba(94,234,212,.85)");
-      // centro da palma de cada mão (média pulso + base do dedo médio)
-      const c = h => ({ x: (h[0].x + h[9].x) / 2, y: (h[0].y + h[9].y) / 2 });
-      const a = c(hands[0]), b = c(hands[1]);
-      const d = Math.hypot(a.x - b.x, a.y - b.y);          // fração da imagem
-      const spread = Math.min(1, Math.max(0, (d - 0.12) / (0.62 - 0.12)));
-      const tEnd = trimOut || player.duration || 0;
-      targetTime = trimIn + spread * (tEnd - trimIn);
-      $("handState").textContent = "🙏 2 mãos";
-      $("openVal").textContent = (spread * 100).toFixed(0) + "%";
-      pillHand.className = "pill on"; pillOpen.className = "pill hot";
-      // corda entre as mãos com o progresso
-      octx.beginPath(); octx.moveTo(a.x * W, a.y * H); octx.lineTo(b.x * W, b.y * H);
-      octx.lineWidth = 4; octx.strokeStyle = `rgba(94,234,212,${0.35 + spread * 0.6})`; octx.stroke();
-    } else {
-      handVisible = false; // 1 mão = segura posição · 0 mãos = auto-reset (applyTime)
-      $("handState").textContent = anyHand ? "falta 1 mão" : "sem mãos";
-      $("openVal").textContent = "—";
-      pillHand.className = anyHand ? "pill on" : "pill"; pillOpen.className = "pill";
-      if (anyHand) drawHand(hands[0], W, H, "rgba(152,162,182,.6)");
-    }
-    $("volVal").textContent = "🎵 " + Math.round(musicVol * 100) + "%";
-    $("pillVol").className = $("musicOn").checked ? "pill on" : "pill";
+  if (!hands.length) {
+    thumbsSince = 0;
+    cursorTrackWrist = null; // reset hand tracking when no hands
+    resetHover();
+    missedHandFrames++;
+    if (missedHandFrames >= HAND_MISS_HIDE) cursorEl.style.display = "none";
     return;
   }
+  missedHandFrames = 0;
+  cursorEl.style.display = "block";
+  if (view === "attract") goSelector(); // hand detected on attract -> selector
+  bumpIdle(); // mão presente conta como interação — não voltar ao attract
 
-  // papéis fixos por anatomia (handedness do MediaPipe): uma mão controla o
-  // tempo, a OUTRA controla o som — estável mesmo com as duas fechadas.
-  // "Trocar mãos" nas definições inverte.
-  const hd = res.handednesses || res.handedness || [];
-  // NOTA: o MediaPipe assume input espelhado (selfie); como lhe damos frames
-  // crus, a mão DIREITA física do utilizador vem etiquetada "Left".
-  const wantTime = $("swapHands").checked ? "Right" : "Left";
-  let timeLm = null, soundLm = null;
-  hands.forEach((h, i) => {
-    const label = hd[i]?.[0]?.categoryName || "";
-    if (label === wantTime) { if (!timeLm) timeLm = h; }
-    else if (!soundLm) soundLm = h;
-  });
-  const fistLm = (soundLm && isFist(soundLm, dist(soundLm[0], soundLm[9]) || 0.0001)) ? soundLm : null;
+  const lm = pickCursorHand(hands); // stable hand identity
+  cursorTrackWrist = { x: lm[0].x, y: lm[0].y, z: lm[0].z };
 
-  // ---- mão do som: punho roda o volume · palma aberta faz swipe de cena ----
-  if (fistLm && $("musicOn").checked) {
-    drawHand(fistLm, W, H, "rgba(250,204,21,.85)");
-    const roll = Math.atan2(fistLm[17].y - fistLm[5].y, fistLm[17].x - fistLm[5].x);
-    if (!fistActive) { fistActive = true; rollAnchor = roll; volAnchor = musicVol; }
-    let dAng = roll - rollAnchor;
-    while (dAng > Math.PI) dAng -= 2 * Math.PI;
-    while (dAng < -Math.PI) dAng += 2 * Math.PI;
-    musicVol = Math.min(1, Math.max(0, volAnchor - dAng / (Math.PI * 0.8))); // direção invertida (pedido)
-    music.volume = musicVol;
-    $("pillVol").className = "pill hot";
-    // anel de volume à volta do punho
-    const cx = (fistLm[0].x + fistLm[9].x) / 2 * W, cy = (fistLm[0].y + fistLm[9].y) / 2 * H;
-    octx.beginPath(); octx.arc(cx, cy, 34, -Math.PI / 2, -Math.PI / 2 + musicVol * Math.PI * 2);
-    octx.lineWidth = 5; octx.strokeStyle = "rgba(250,204,21,.95)"; octx.stroke();
+  // draw fingertip landmark on the PiP overlay (mirrored via CSS transform)
+  octx.beginPath();
+  octx.arc(lm[8].x * W, lm[8].y * H, 8, 0, Math.PI * 2);
+  octx.fillStyle = "#5eead4"; octx.fill();
+  octx.lineWidth = 2; octx.strokeStyle = "#0009"; octx.stroke();
+
+  const thumbsUp = isThumbsUp(lm);
+  if (thumbsUp) {
+    if (!thumbsSince) thumbsSince = now;
   } else {
-    fistActive = false;
-    $("pillVol").className = $("musicOn").checked ? "pill on" : "pill";
-    if (soundLm) {
-      // qualquer movimento lateral deliberado da mão do som (não-punho) = swipe
-      lastPalmAt = performance.now(); // último frame com a mão do som visível
-      drawHand(soundLm, W, H, "rgba(94,234,212,.6)");
-      trackSwipe(soundLm);
-    } else if (performance.now() - lastPalmAt > 200) {
-      swipeHist = []; // graça: o blur do varrimento perde a mão 1-2 frames
+    thumbsSince = 0;
+  }
+  const confirmedThumbsUp = thumbsSince && (now - thumbsSince >= THUMBS_DEBOUNCE);
+  cursorEl.classList.toggle("confirming", !!confirmedThumbsUp);
+
+  // freeze the cursor + hovered target while thumbs-up is confirmed, so
+  // entering the pose (which curls lm[8]) can't drag the cursor off the target.
+  if (!confirmedThumbsUp) {
+    // mirror x: camera is selfie-facing
+    const rawX = (1 - lm[8].x) * window.innerWidth;
+    const rawY = lm[8].y * window.innerHeight;
+    if (!cursorInit) { cursorX = rawX; cursorY = rawY; cursorInit = true; }
+    cursorX += (rawX - cursorX) * SMOOTH;
+    cursorY += (rawY - cursorY) * SMOOTH;
+    cursorEl.style.transform = `translate(${cursorX}px, ${cursorY}px) translate(-50%, -50%)`;
+
+    if (view !== "selector") return;
+    const target = cardUnderCursor();
+    if (target !== hoverCard) {
+      resetHover();
+      hoverCard = target;
+      if (hoverCard) hoverCard.classList.add("hover");
     }
-    $("volVal").textContent = "🎵 " + Math.round(musicVol * 100) + "%";
   }
-  if (fistLm) $("volVal").textContent = "🎵 " + Math.round(musicVol * 100) + "%";
 
-  // ---- mão do tempo ----
-  if (!timeLm) {
-    handVisible = false; grabbing = false;
-    $("handState").textContent = anyHand ? "punho 🎵" : "sem mão";
-    $("openVal").textContent = "—";
-    pillHand.className = anyHand ? "pill on" : "pill"; pillOpen.className = "pill";
-    return;
-  }
-  handVisible = true;
-  if (!player.paused) player.pause(); // o gesto assume o controlo do tempo
-  const lm = timeLm;
-  drawHand(lm, W, H, "rgba(129,140,248,.85)");
+  if (view !== "selector" || !hoverCard) return;
 
-  const handSize = dist(lm[0], lm[9]) || 0.0001;
-  const pinch = dist(lm[4], lm[8]) / handSize;   // ~0.15 fechado · ~1.3 aberto
-  const mode = $("mode").value;
-  pillHand.className = "pill on"; $("handState").textContent = "mão ok";
-
-  // linha entre polegar e indicador
-  octx.beginPath(); octx.moveTo(lm[4].x * W, lm[4].y * H); octx.lineTo(lm[8].x * W, lm[8].y * H);
-  octx.lineWidth = 3;
-
-  if (mode === "aperture") {
-    // posição direta: dedos fechados = início do corte, abertos ao máximo = fim
-    // (a abertura É a linha do tempo; a suavização faz o glide entre frames)
-    const openness = Math.min(1, Math.max(0, (pinch - 0.30) / (1.10 - 0.30)));
-    const tEnd = trimOut || player.duration || 0;
-    targetTime = trimIn + openness * (tEnd - trimIn);
-    $("openVal").textContent = (openness * 100).toFixed(0) + "%";
-    pillOpen.className = "pill hot";
-    octx.strokeStyle = `rgba(94,234,212,${0.35 + openness * 0.6})`; octx.stroke();
-    // arco = fração do caminho percorrido
-    const cx = (lm[4].x + lm[8].x) / 2 * W, cy = (lm[4].y + lm[8].y) / 2 * H;
-    octx.beginPath(); octx.arc(cx, cy, 18 + openness * 26, -Math.PI / 2, -Math.PI / 2 + openness * Math.PI * 2);
-    octx.lineWidth = 4; octx.strokeStyle = "rgba(94,234,212,.9)"; octx.stroke();
-  } else if (mode === "squeeze") {
-    // cena 📄 Origami: mão aberta = cara intacta (início) · punho fechado =
-    // cara amarrotada (fim) — abertura média dos 4 dedos (não só polegar/indicador)
-    const openness4 = ([8, 12, 16, 20].reduce((s, i) => s + dist(lm[i], lm[0]), 0) / 4) / handSize;
-    const open01 = Math.min(1, Math.max(0, (openness4 - 1.05) / (1.75 - 1.05)));
-    const squeezeAmt = 1 - open01;
-    const tEnd = trimOut || player.duration || 0;
-    targetTime = trimIn + squeezeAmt * (tEnd - trimIn);
-    $("openVal").textContent = (squeezeAmt * 100).toFixed(0) + "%";
-    pillOpen.className = "pill hot";
-    // círculo à volta da palma que encolhe conforme a mão fecha (amassa)
-    const cx = (lm[0].x + lm[9].x) / 2 * W, cy = (lm[0].y + lm[9].y) / 2 * H;
-    const r = 12 + open01 * 34;
-    octx.beginPath(); octx.arc(cx, cy, r, 0, Math.PI * 2);
-    octx.lineWidth = 4; octx.strokeStyle = `rgba(251,113,133,${0.35 + squeezeAmt * 0.6})`; octx.stroke();
-    // arco = fração do caminho percorrido (mesmo padrão do modo ✌️)
-    octx.beginPath(); octx.arc(cx, cy, r + 14, -Math.PI / 2, -Math.PI / 2 + squeezeAmt * Math.PI * 2);
-    octx.lineWidth = 4; octx.strokeStyle = "rgba(251,113,133,.9)"; octx.stroke();
+  if (confirmedThumbsUp && now >= cooldownUntil) {
+    if (!holdStart) holdStart = now;
+    const elapsed = now - holdStart;
+    const pct = Math.min(100, (elapsed / ACTIVATE_MS) * 100);
+    const fillCircle = hoverCard.querySelector(".dwell circle.fill");
+    hoverCard.classList.add("gesture-dwelling");
+    fillCircle.style.strokeDashoffset = DASH * (1 - pct / 100);
+    if (elapsed >= ACTIVATE_MS) {
+      cooldownUntil = now + 1000;
+      go(hoverCard.dataset.href);
+    }
   } else {
-    // drag mode (v1): pinch agarra, arrastar horizontal faz scrub
-    const isPinch = pinch < +thresh.value;
-    const midX = (lm[4].x + lm[8].x) / 2;
-    $("openVal").textContent = pinch.toFixed(2);
-    octx.strokeStyle = isPinch ? "rgba(251,113,133,.95)" : "rgba(94,234,212,.5)"; octx.stroke();
-    if (isPinch) {
-      pillOpen.className = "pill hot";
-      if (!grabbing) { grabbing = true; anchorX = midX; anchorTime = displayedTime; }
-      const deltaX = (anchorX - midX); // preview espelhada: mão p/ direita = avançar
-      targetTime = anchorTime + deltaX * (player.duration || 0) * (+sens.value);
-      const cx = midX * W, cy = (lm[4].y + lm[8].y) / 2 * H;
-      octx.beginPath(); octx.arc(cx, cy, 26, 0, Math.PI * 2);
-      octx.lineWidth = 3; octx.strokeStyle = "rgba(251,113,133,.9)"; octx.stroke();
-    } else {
-      pillOpen.className = "pill on";
-      grabbing = false;
-      targetTime = displayedTime; // mantém posição quando larga
-    }
+    holdStart = 0;
+    const fillCircle = hoverCard.querySelector(".dwell circle.fill");
+    hoverCard.classList.remove("gesture-dwelling");
+    fillCircle.style.strokeDashoffset = "";
   }
 }
 
-function applyTime(now) {
-  const dur = player.duration || 0;
-  // clamp: um tab suspenso não pode integrar segundos de gesto num só frame
-  const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
-  lastFrameTime = now;
-  if (!dur) return;
-  const tEnd = trimOut || dur;
-  if (!player.paused) {
-    // reprodução normal: faz loop dentro do trim e sincroniza o estado do gesto
-    if (player.currentTime >= tEnd - 0.05 || player.currentTime < trimIn) player.currentTime = trimIn;
-    displayedTime = targetTime = player.currentTime;
-    return;
+function cardUnderCursor() {
+  for (const c of cards) {
+    const r = c.getBoundingClientRect();
+    if (cursorX >= r.left && cursorX <= r.right && cursorY >= r.top && cursorY <= r.bottom) return c;
   }
-  if (!anyHand) {
-    if ($("autoReset").checked) {
-      const trimSpan = Math.max(0.001, tEnd - trimIn);
-      targetTime = Math.max(trimIn, targetTime - dt * trimSpan * 0.10); // rebobina suave até ao início do corte
-    } else {
-      targetTime = displayedTime;
-    }
-  } else if (!handVisible) {
-    targetTime = displayedTime; // só punho presente (a ajustar música): segura o tempo
-  }
-  targetTime = Math.min(tEnd, Math.max(trimIn, targetTime));
-  displayedTime += (targetTime - displayedTime) * +smooth.value;
-  // só emite um novo seek quando o anterior terminou — evita fila de seeks (soluços)
-  if (!player.seeking && Math.abs(displayedTime - player.currentTime) > 0.005) {
-    player.currentTime = displayedTime;
-  }
+  return null;
 }
 
-/* arranque: só depois de TODO o estado do módulo estar inicializado */
-renderChips();
-selectScene(pendingScene);
-cloudLoad();
+function resetHover() {
+  if (hoverCard) {
+    hoverCard.classList.remove("gesture-dwelling", "hover");
+    const fillCircle = hoverCard.querySelector(".dwell circle.fill");
+    fillCircle.style.strokeDashoffset = "";
+  }
+  hoverCard = null;
+  holdStart = 0;
+}
 </script>
 </body>
 </html>

@@ -71,6 +71,15 @@ npx serve -l 8777
 ```
 
 ## Ficheiros
-- `index.html` — a app inteira (self-contained, sem build).
+- `index.html` — a **home** da instalação: ecrã de atração (attract) com o
+  nome da experiência a rodar + mão fantasma, seguido do seletor de 3
+  cartões (🦋 Butterfly Effect · 🌑 Sala de Sombras · ✍️ Pinch Draw). Toca,
+  clica, tecla ou aproxima a mão para passar do attract ao seletor; os
+  cartões respondem a clique, hover-dwell do rato e dwell por gesto (👍 700ms).
+- `scrub.html` — 🦋 Butterfly Effect, a app original (self-contained, sem
+  build): controla o tempo do vídeo com a mão.
+- `shadow.html` — 🌑 Sala de Sombras (beta): a sombra do corpo projetada
+  numa sala 3D.
+- `draw.html` — ✍️ Pinch Draw: pintura de luz no ar com o gesto de pinch.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).

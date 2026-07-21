@@ -67,7 +67,7 @@ const pipVideo = $("pipVideo"), pipCanvas = $("pipCanvas"), pctx = pipCanvas.get
 const notice = $("notice");
 
 /* ================= tunables ================= */
-const PINCH_THRESHOLD = 0.4;   // dist(4,8)/handSize below this = pinching
+const PINCH_ENTER = 0.35, PINCH_EXIT = 0.5; // histerese: entra apertado, sai largo — sem traços picotados no limiar
 const EMA_ALPHA = 0.4;         // point smoothing
 const MIN_POINT_DIST = 3;      // px, minimum spacing between stored points
 const FADE_START = 3000;       // ms, full brightness until here
@@ -204,7 +204,8 @@ function processHands(res, now) {
     st.lm4 = lm[4]; st.lm8 = lm[8];
 
     const handSize = dist(lm[0], lm[9]) || 0.0001;
-    const isPinch = dist(lm[4], lm[8]) / handSize < PINCH_THRESHOLD;
+    const ratio = dist(lm[4], lm[8]) / handSize;
+    const isPinch = st.pinching ? ratio < PINCH_EXIT : ratio < PINCH_ENTER;
     const midXn = (lm[4].x + lm[8].x) / 2, midYn = (lm[4].y + lm[8].y) / 2;
     const rawX = (1 - midXn) * W, rawY = midYn * H; // mirrored to match selfie view
 
