@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Pinch Scrub — instalação interativa de vídeo por gestos</title>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&display=swap');
+
   :root {
     --panel: #0f1219cc;
     --line: #2a3245;
@@ -13,10 +15,13 @@
     --accent: #5eead4;
     --accent-2: #818cf8;
     --hot: #fb7185;
+    --amber: #f59e0b;
+    --magenta: #ff4dd2;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: var(--text); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
   /* ---------- fullscreen video ---------- */
   video#player {
@@ -99,24 +104,32 @@
   /* ---------- bottom control bar ---------- */
   #bar {
     position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
-    display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px);
+    display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px);
     background: var(--panel); backdrop-filter: blur(10px);
     border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px;
     z-index: 60; transition: opacity .4s, transform .4s; overflow-x: auto;
+    font-family: Archivo, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
   }
+  #bar button, #bar select, #bar label, #bar a { font-family: inherit; cursor: pointer; }
   #bar[hidden], #pip[hidden] { display: none; }
   body.ui-hidden #bar { opacity: 0; transform: translateX(-50%) translateY(12px); pointer-events: none; }
   body.ui-hidden { cursor: none; }
 
-  .chips { display: flex; gap: 8px; overflow-x: auto; flex: 1 1 auto; min-width: 0; max-width: 46vw; scrollbar-width: none; }
+  /* groups: CENAS · MODO · AÇÕES · EXPERIÊNCIAS, divided by 1px separators */
+  .bar-group { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .bar-sep { align-self: stretch; width: 1px; flex: 0 0 auto; background: var(--line); }
+
+  .chips { display: flex; gap: 8px; overflow-x: auto; flex: 1 1 auto; min-width: 0; max-width: 40vw; scrollbar-width: none; }
   .chips::-webkit-scrollbar { display: none; }
   .chip {
     flex: 0 0 auto; border: 1px solid var(--line); background: #151a24;
-    color: var(--text); border-radius: 11px; padding: 8px 12px; font-size: 13px;
-    font-weight: 600; cursor: pointer; transition: .15s; white-space: nowrap;
+    color: var(--text); border-radius: 11px; padding: 10px 14px; font-size: 13px;
+    font-weight: 600; cursor: pointer; transition: .15s; white-space: nowrap; min-height: 44px;
+    display: inline-flex; align-items: center; gap: 6px;
   }
   .chip:hover { border-color: var(--accent); transform: translateY(-1px); }
-  .chip.active { background: linear-gradient(180deg, var(--accent-2), #6d78e6); border-color: #6d78e6; color: #fff; }
+  .chip.active { background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: var(--accent); color: #04211c; }
+  .chip svg { flex: 0 0 auto; }
 
   .btn {
     appearance: none; border: 1px solid var(--line); background: #151a24; color: var(--text);
@@ -127,7 +140,20 @@
   .btn.primary { background: linear-gradient(180deg, var(--accent-2), #6d78e6); border-color: #6d78e6; color: #fff; font-size: 15px; padding: 12px 22px; }
   input[type="file"] { display: none; }
 
-  select.btn { padding-right: 8px; }
+  /* icon-only bar buttons — 44x44 hit area, inline stroke SVGs */
+  #bar .icon-btn { min-width: 44px; min-height: 44px; padding: 0; justify-content: center; }
+  #bar .icon-btn svg { width: 20px; height: 20px; }
+  #bar .exp-shadow:hover, #bar .exp-shadow:focus-visible { border-color: var(--amber); color: var(--amber); }
+  #bar .exp-draw:hover, #bar .exp-draw:focus-visible { border-color: var(--magenta); color: var(--magenta); }
+
+  /* native <select> restyled to match — appearance:none + custom chevron */
+  #mode {
+    appearance: none; -webkit-appearance: none; min-height: 44px;
+    padding: 10px 34px 10px 14px;
+    background-color: #151a24;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2398a2b6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center; background-size: 16px;
+  }
 
   /* ---------- settings popover ---------- */
   #settings {
@@ -222,23 +248,52 @@
 
   <!-- control bar -->
   <div id="bar" hidden>
-    <div class="chips" id="chips"></div>
-    <label class="btn" title="Carregar vídeos próprios">📁 Vídeos<input type="file" id="fileInput" accept="video/*" multiple></label>
-    <select class="btn" id="mode" title="Modo de controlo">
-      <option value="aperture">✌️ Abrir/Fechar</option>
-      <option value="hands">🙏 Afastar as mãos</option>
-      <option value="drag">🤏 Arrastar</option>
-      <!-- gesto próprio da cena 📄 Origami: não aparece na lista (hidden),
-           mas continua a poder ser lido/atribuído via JS como qualquer option -->
-      <option value="squeeze" hidden>📄 Amassar</option>
-    </select>
-    <button class="btn" id="trimBtn" title="Trim da cena">✂️</button>
-    <button class="btn" id="playBtn" title="Reproduzir/Pausar">▶</button>
-    <button class="btn" id="fsBtn" title="Ecrã inteiro (F)">⛶</button>
-    <button class="btn" id="gearBtn" title="Definições">⚙</button>
-<a class="btn" href="index.html" title="Voltar ao início">⌂</a>
-<a class="btn" href="shadow.html" title="Sala de Sombras (beta)">🌑</a>
-<a class="btn" href="draw.html" title="Pinch Draw — pintura de luz">✍️</a>
+    <div class="bar-group" role="group" aria-label="Cenas">
+      <div class="chips" id="chips"></div>
+      <label class="chip" title="Carregar vídeos próprios">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <span>Vídeos</span>
+        <input type="file" id="fileInput" accept="video/*" multiple>
+      </label>
+    </div>
+    <div class="bar-sep"></div>
+    <div class="bar-group" role="group" aria-label="Modo">
+      <select class="btn" id="mode" title="Modo de controlo" aria-label="Modo de controlo">
+        <option value="aperture">✌️ Abrir/Fechar</option>
+        <option value="hands">🙏 Afastar as mãos</option>
+        <option value="drag">🤏 Arrastar</option>
+        <!-- gesto próprio da cena 📄 Origami: não aparece na lista (hidden),
+             mas continua a poder ser lido/atribuído via JS como qualquer option -->
+        <option value="squeeze" hidden>📄 Amassar</option>
+      </select>
+    </div>
+    <div class="bar-sep"></div>
+    <div class="bar-group" role="group" aria-label="Ações">
+      <button class="btn icon-btn" id="trimBtn" title="Trim da cena" aria-label="Trim da cena">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+      </button>
+      <button class="btn icon-btn" id="playBtn" title="Reproduzir/Pausar" aria-label="Reproduzir ou pausar">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+      </button>
+      <button class="btn icon-btn" id="fsBtn" title="Ecrã inteiro (F)" aria-label="Ecrã inteiro">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+      </button>
+      <button class="btn icon-btn" id="gearBtn" title="Definições" aria-label="Definições">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="19" y1="12" x2="21.5" y2="12"/><line x1="15.5" y1="18.06" x2="16.75" y2="20.23"/><line x1="8.5" y1="18.06" x2="7.25" y2="20.23"/><line x1="5" y1="12" x2="2.5" y2="12"/><line x1="8.5" y1="5.94" x2="7.25" y2="3.77"/><line x1="15.5" y1="5.94" x2="16.75" y2="3.77"/></svg>
+      </button>
+    </div>
+    <div class="bar-sep"></div>
+    <div class="bar-group" role="group" aria-label="Experiências">
+      <a class="btn icon-btn exp-home" href="index.html" title="Voltar ao início" aria-label="Voltar ao início">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12 12 4l9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
+      </a>
+      <a class="btn icon-btn exp-shadow" href="shadow.html" title="Sala de Sombras (beta)" aria-label="Sala de Sombras">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      </a>
+      <a class="btn icon-btn exp-draw" href="draw.html" title="Pinch Draw — pintura de luz" aria-label="Pinch Draw">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19 7-7 3 3-7 7-3-3z"/><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="m2 2 7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+      </a>
+    </div>
   </div>
 
   <!-- settings -->
