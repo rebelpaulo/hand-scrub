@@ -399,7 +399,21 @@ function goSelector() { setView("selector"); }
 
 // any click, tap or keypress on the attract screen moves to the selector
 document.addEventListener("click", () => { if (view === "attract") goSelector(); });
-document.addEventListener("keydown", () => { if (view === "attract") goSelector(); });
+document.addEventListener("keydown", (e) => {
+  if (view === "attract") { goSelector(); return; }
+  if (e.key === "Escape" && view === "selector") setView("attract");
+});
+
+/* regresso ao attract: instalação não pode ficar presa no seletor — sem
+   interação (rato/tecla/mão) durante IDLE_MS, volta ao loop de atração. */
+const IDLE_MS = 60000;
+let idleTimer = 0;
+function bumpIdle() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { if (view === "selector" && !navigated) setView("attract"); }, IDLE_MS);
+}
+["pointermove", "pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, bumpIdle, { passive: true }));
+bumpIdle();
 
 /* ================= attract: cycling experience name ================= */
 const EXPERIENCES = [
@@ -416,6 +430,7 @@ function paintExperience(i) {
 paintExperience(expIdx);
 if (!reduceMotion) {
   setInterval(() => {
+    if (view !== "attract") return; // não mexer no DOM escondido
     sceneTag.style.opacity = "0";
     setTimeout(() => {
       expIdx = (expIdx + 1) % EXPERIENCES.length;
@@ -563,6 +578,7 @@ function processHands(res, now) {
   missedHandFrames = 0;
   cursorEl.style.display = "block";
   if (view === "attract") goSelector(); // hand detected on attract -> selector
+  bumpIdle(); // mão presente conta como interação — não voltar ao attract
 
   const lm = pickCursorHand(hands); // stable hand identity
   cursorTrackWrist = { x: lm[0].x, y: lm[0].y, z: lm[0].z };
