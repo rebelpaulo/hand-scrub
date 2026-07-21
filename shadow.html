@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>🌑 Sala de Sombras — instalação de sombra projetada</title>
+<style>
+  :root {
+    --panel: #0f1219cc;
+    --line: #2a3245;
+    --text: #eef2f8;
+    --muted: #98a2b6;
+    --accent: #5eead4;
+    --accent-2: #818cf8;
+    --hot: #fb7185;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: var(--text); }
+
+  /* ---------- fullscreen 3D stage ---------- */
+  #stage {
+    position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; background: #05070a;
+  }
+
+  /* film grain overlay — cheap ambience, no postprocessing pipeline */
+  #grain {
+    position: fixed; inset: 0; z-index: 30; pointer-events: none;
+    opacity: .06; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+  /* vignette to keep eyes on the shadow, not the edges */
+  #vignette {
+    position: fixed; inset: 0; z-index: 29; pointer-events: none;
+    background: radial-gradient(120% 90% at 50% 45%, transparent 45%, #000000aa 100%);
+  }
+
+  /* ---------- draggable PiP (mesma linguagem do index.html) ---------- */
+  #pip {
+    position: fixed; right: 18px; bottom: 64px; width: 280px; z-index: 50;
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    box-shadow: 0 20px 50px -18px #000; cursor: grab; user-select: none;
+    touch-action: none;
+  }
+  #pip.dragging { cursor: grabbing; opacity: .92; }
+  #pip .pip-h {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 7px 11px; font-size: 12px; font-weight: 600;
+    border-bottom: 1px solid var(--line);
+  }
+  #pip .pip-h .fps { color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .pip-x {
+    appearance: none; border: none; background: none; color: var(--muted);
+    font-size: 13px; cursor: pointer; padding: 2px 4px; line-height: 1;
+  }
+  .pip-x:hover { color: var(--hot); }
+  #pipResize {
+    position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; z-index: 3;
+    cursor: nwse-resize; touch-action: none;
+    background: linear-gradient(135deg, transparent 50%, #8b95a8aa 50%);
+    border-bottom-right-radius: 4px;
+  }
+  #pipReopen {
+    position: fixed; right: 18px; bottom: 64px; z-index: 50;
+    width: 48px; height: 48px; border-radius: 50%; font-size: 22px;
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); color: var(--text); cursor: pointer;
+    box-shadow: 0 12px 30px -12px #000; transition: .15s;
+  }
+  #pipReopen:hover { border-color: var(--accent); transform: scale(1.06); }
+  #pipReopen[hidden] { display: none; }
+  #pip .view { position: relative; aspect-ratio: 4/3; background: #05070a; }
+  video#cam, canvas#overlay {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; transform: scaleX(-1);
+  }
+  #pip .hud {
+    position: absolute; left: 8px; top: 8px; display: flex; gap: 6px; z-index: 2;
+  }
+  .pill {
+    background: #0a0d14cc; border: 1px solid var(--line); border-radius: 99px;
+    padding: 3px 9px; font-size: 11px; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .pill b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .pill .led { width: 7px; height: 7px; border-radius: 50%; background: #3a4256; }
+  .pill.on .led { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .pill.hot .led { background: var(--hot); box-shadow: 0 0 8px var(--hot); }
+
+  /* ---------- start overlay ---------- */
+  #startOverlay {
+    position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px;
+    background: radial-gradient(900px 600px at 50% 30%, #241a1e, #05070acc);
+  }
+  #startOverlay h1 { font-size: clamp(26px, 5vw, 44px); margin: 0; letter-spacing: -.02em; }
+  #startOverlay p { color: var(--muted); max-width: 560px; text-align: center; line-height: 1.6; margin: 0; padding: 0 20px; }
+  #startOverlay p b { color: var(--accent); }
+  #startOverlay .err { color: var(--hot); min-height: 18px; font-size: 13px; max-width: 560px; text-align: center; padding: 0 20px; }
+
+  .btn {
+    appearance: none; border: 1px solid var(--line); background: #151a24; color: var(--text);
+    padding: 8px 12px; border-radius: 11px; font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: .15s; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .btn.primary { background: linear-gradient(180deg, var(--accent-2), #6d78e6); border-color: #6d78e6; color: #fff; font-size: 15px; padding: 12px 22px; }
+
+  /* ---------- hint bar (house style) ---------- */
+  #hint {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+    max-width: calc(100vw - 32px); text-align: center;
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 16px; padding: 10px 16px;
+    font-size: 12.5px; color: var(--muted); z-index: 60;
+    transition: opacity .4s, transform .4s;
+  }
+  #hint[hidden] { display: none; }
+  body.ui-hidden #hint { opacity: 0; transform: translateX(-50%) translateY(12px); pointer-events: none; }
+  body.ui-hidden { cursor: none; }
+
+  #toast {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 99px;
+    padding: 8px 16px; font-size: 13px; z-index: 80; opacity: 0; transition: opacity .3s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <a class="btn" href="index.html" style="position:fixed;top:16px;left:16px;z-index:95;text-decoration:none">← voltar</a>
+  <canvas id="stage"></canvas>
+  <div id="vignette"></div>
+  <div id="grain"></div>
+
+  <!-- draggable hand/segmentation preview -->
+  <div id="pip" hidden>
+    <div class="pip-h"><span>🌑 Câmara + máscara</span>
+      <span style="display:flex;align-items:center;gap:8px">
+        <span class="fps" id="fps">— fps</span>
+        <button class="pip-x" id="pipClose" title="Fechar preview">✕</button>
+      </span>
+    </div>
+    <div class="view">
+      <video id="cam" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div class="hud">
+        <span class="pill" id="pillSeg"><span class="led"></span><b id="segState">—</b></span>
+        <span class="pill" id="pillNear"><span class="led"></span><b id="nearVal">—</b></span>
+      </div>
+      <div id="pipResize" title="Redimensionar"></div>
+    </div>
+  </div>
+  <button id="pipReopen" title="Mostrar preview" hidden>🌑</button>
+
+  <!-- start screen -->
+  <div id="startOverlay">
+    <h1>🌑 Sala de Sombras</h1>
+    <p>A tua silhueta é projetada como <b>sombra</b> dentro de uma sala em
+       perspetiva — estica-se pelo chão, sobe pelas paredes e envolve os
+       objetos ao fundo. <b>Aproxima a mão da câmara</b> e a sombra cresce,
+       enorme, como no teatro de sombras.</p>
+    <button class="btn primary" id="startBtn">Ativar câmara</button>
+    <div class="err" id="startErr"></div>
+  </div>
+
+  <div id="hint" hidden>mexe-te — a tua sombra vive dentro da sala · aproxima a mão da câmara</div>
+  <div id="toast"></div>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+const stage = $("stage");
+const cam = $("cam"), overlay = $("overlay"), octx = overlay.getContext("2d");
+
+/* ================= UI helpers ================= */
+let toastT;
+function toast(msg, dur = 1800) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), dur);
+}
+let idleT;
+function wakeUI() {
+  document.body.classList.remove("ui-hidden");
+  clearTimeout(idleT);
+  idleT = setTimeout(() => document.body.classList.add("ui-hidden"), 4500);
+}
+["pointermove", "pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, wakeUI));
+wakeUI();
+
+/* seguro de dia-de-evento: "i" inverte manualmente a polaridade da máscara
+   e trava o ajuste automático (checkMaskPolarity deixa de mexer sozinho) */
+document.addEventListener("keydown", e => {
+  if (e.key !== "i" && e.key !== "I") return;
+  invertMask = !invertMask;
+  manualMaskOverride = true;
+  toast(`máscara invertida: ${invertMask ? "on" : "off"}`, 2000);
+});
+
+/* ================= draggable PiP (copiado do index.html) ================= */
+const pip = $("pip");
+let pipClosed = false;
+(() => {
+  const reopen = $("pipReopen"), closeBtn = $("pipClose"), handle = $("pipResize");
+  function placePip(x, y) {
+    const w = pip.offsetWidth || 280, h = pip.offsetHeight || 240;
+    x = Math.min(Math.max(0, x), Math.max(0, window.innerWidth - w));
+    y = Math.min(Math.max(0, y), Math.max(0, window.innerHeight - h));
+    pip.style.left = x + "px"; pip.style.top = y + "px";
+    pip.style.right = "auto"; pip.style.bottom = "auto";
+  }
+  function saveState() {
+    const r = pip.getBoundingClientRect();
+    try {
+      localStorage.setItem("shadow-pip-state", JSON.stringify({ x: r.left, y: r.top, w: pip.offsetWidth, closed: pipClosed }));
+    } catch { /* persistência é opcional */ }
+  }
+  try {
+    const saved = localStorage.getItem("shadow-pip-state");
+    if (saved) {
+      const { x, y, w, closed } = JSON.parse(saved);
+      if (w) pip.style.width = Math.min(Math.max(200, w), window.innerWidth - 24) + "px";
+      if (typeof x === "number") placePip(x, y);
+      pipClosed = !!closed;
+    }
+  } catch { /* persistência é opcional */ }
+
+  closeBtn.addEventListener("click", e => {
+    e.stopPropagation();
+    pipClosed = true; saveState();
+    pip.hidden = true; reopen.hidden = false;
+  });
+  reopen.addEventListener("click", () => {
+    pipClosed = false; pip.hidden = false; reopen.hidden = true; saveState();
+  });
+  pip.applySavedVisibility = () => {
+    pip.hidden = pipClosed; reopen.hidden = !pipClosed;
+    if (!pipClosed) { const r = pip.getBoundingClientRect(); placePip(r.left, r.top); }
+  };
+
+  let sx, sy, ox, oy, dragging = false;
+  pip.addEventListener("pointerdown", e => {
+    if (e.target.closest(".pip-x, #pipResize")) return;
+    dragging = true; pip.classList.add("dragging");
+    try { pip.setPointerCapture(e.pointerId); } catch { /* ponteiro já inativo */ }
+    const r = pip.getBoundingClientRect();
+    sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+  });
+  pip.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    placePip(ox + e.clientX - sx, oy + e.clientY - sy);
+  });
+  const endDrag = e => {
+    if (!dragging) return;
+    dragging = false; pip.classList.remove("dragging");
+    if (pip.hasPointerCapture?.(e.pointerId)) pip.releasePointerCapture(e.pointerId);
+    saveState();
+  };
+  pip.addEventListener("pointerup", endDrag);
+  pip.addEventListener("pointercancel", endDrag);
+  pip.addEventListener("lostpointercapture", endDrag);
+
+  let rsx, rw, resizing = false;
+  handle.addEventListener("pointerdown", e => {
+    e.stopPropagation();
+    resizing = true; rsx = e.clientX; rw = pip.offsetWidth;
+    try { handle.setPointerCapture(e.pointerId); } catch { /* ponteiro já inativo */ }
+  });
+  handle.addEventListener("pointermove", e => {
+    if (!resizing) return;
+    const w = Math.min(Math.max(200, rw + e.clientX - rsx), window.innerWidth - 24);
+    pip.style.width = w + "px";
+  });
+  const endResize = e => {
+    if (!resizing) return;
+    resizing = false;
+    if (handle.hasPointerCapture?.(e.pointerId)) handle.releasePointerCapture(e.pointerId);
+    const r = pip.getBoundingClientRect();
+    placePip(r.left, r.top);
+    saveState();
+  };
+  handle.addEventListener("pointerup", endResize);
+  handle.addEventListener("pointercancel", endResize);
+  handle.addEventListener("lostpointercapture", endResize);
+
+  window.addEventListener("resize", () => {
+    if (pip.offsetWidth > window.innerWidth - 24) {
+      pip.style.width = Math.max(200, window.innerWidth - 24) + "px";
+    }
+    const r = pip.getBoundingClientRect();
+    placePip(r.left, r.top);
+  });
+})();
+
+/* ================= offscreen segmentation mask canvas =================
+   Baixa resolução propositada: só alimenta uma textura de sombra suave —
+   não precisamos de detalhe, precisamos de silhueta. */
+const MASK_W = 480, MASK_H = 360;
+const maskCanvas = document.createElement("canvas");
+maskCanvas.width = MASK_W; maskCanvas.height = MASK_H;
+const mctx = maskCanvas.getContext("2d", { willReadFrequently: true });
+mctx.imageSmoothingEnabled = true; // o modelo corre a 256x256 — suaviza o upscale
+
+/* canvas minúsculo só para medir cobertura (mão perto da câmara = área grande) */
+const SAMPLE_W = 32, SAMPLE_H = 24;
+const sampleCanvas = document.createElement("canvas");
+sampleCanvas.width = SAMPLE_W; sampleCanvas.height = SAMPLE_H;
+const sctx = sampleCanvas.getContext("2d", { willReadFrequently: true });
+
+let three = null;      // módulo three.js
+let ImageSegmenter = null, FilesetResolver = null;
+let segmenter = null;
+let running = false;
+
+/* ================= arranque ================= */
+$("startBtn").onclick = async () => {
+  const btn = $("startBtn"), err = $("startErr");
+  btn.disabled = true; err.textContent = "";
+  try {
+    btn.textContent = "A carregar motor 3D…";
+    try {
+      three = await import("https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js");
+    } catch (e) {
+      throw new Error("Não foi possível carregar o three.js (CDN indisponível). " + (e?.message || ""));
+    }
+
+    btn.textContent = "A carregar modelo de segmentação…";
+    try {
+      ({ FilesetResolver, ImageSegmenter } = await import(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs"));
+    } catch (e) {
+      throw new Error("Não foi possível carregar o MediaPipe (CDN indisponível). " + (e?.message || ""));
+    }
+
+    try {
+      const fileset = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+      segmenter = await ImageSegmenter.createFromOptions(fileset, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        outputCategoryMask: true,
+        outputConfidenceMasks: false
+      });
+    } catch (e) {
+      throw new Error("Não foi possível iniciar o modelo de segmentação. " + (e?.message || ""));
+    }
+
+    btn.textContent = "A ligar câmara…";
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 960, height: 720, facingMode: "user" } });
+    } catch (e) {
+      throw new Error("Câmara recusada ou indisponível. Autoriza o acesso à câmara e tenta novamente.");
+    }
+    cam.srcObject = stream; await cam.play();
+    overlay.width = cam.videoWidth || 960; overlay.height = cam.videoHeight || 720;
+
+    initScene(three);
+
+    running = true;
+    $("startOverlay").remove();
+    pip.applySavedVisibility(); $("hint").hidden = false;
+    toast("🌑 A tua sombra entrou na sala");
+
+    stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+      running = false;
+      toast("⚠️ Câmara desligada — recarrega a página para retomar");
+    });
+
+    lastSegT = performance.now();
+    requestAnimationFrame(renderLoop);
+    segLoop();
+  } catch (e) {
+    err.textContent = "Erro: " + (e?.message || String(e));
+    btn.disabled = false; btn.textContent = "Ativar câmara";
+  }
+};
+
+/* ================= segmentação → canvas da máscara ================= */
+let lastVideoTime = -1;
+let segEMA = 16;              // tempo médio (ms) de uma segmentação
+let lastSegT = 0;
+let skipNext = false;
+let coverage = 0;             // fração de pixels ocupados (0..1) — proximidade da mão
+
+/* categorias do selfie_multiclass_256x256: 0=fundo, 1=cabelo, 2=pele-corpo,
+   3=pele-rosto, 4=roupa, 5=outros/acessórios — pessoa = qualquer categoria != 0.
+   NÃO confiamos cegamente nesta convenção (o teste ao vivo provou a suposição
+   anterior errada no dispositivo): verificamos a polaridade sozinhos abaixo. */
+let invertMask = false;
+let manualMaskOverride = false;  // depois de "i", para de reajustar sozinho
+let lastPolarityCheck = 0;
+const POLARITY_PATCH = 16;
+
+/* ancoragem ao chão: desloca a silhueta verticalmente (no canvas MASK_W×MASK_H)
+   até a linha de pixels de pessoa mais baixa encostar ao rodapé do canvas —
+   assim, mesmo com a câmara só a ver tronco/cabeça (setup de secretária), a
+   sombra fica sempre "de pé" no chão da sala, nunca a flutuar a meio do ar.
+   Suavizado com EMA para não tremer entre frames de segmentação. */
+let anchorShiftEMA = 0; // em pixels do espaço MASK_H (canvas final da máscara)
+const ANCHOR_EMA_ALPHA = 0.2;
+
+function patchPersonDensity(data, w, h, x0, y0) {
+  const x1 = Math.min(w, x0 + POLARITY_PATCH), y1 = Math.min(h, y0 + POLARITY_PATCH);
+  x0 = Math.max(0, x0); y0 = Math.max(0, y0);
+  let count = 0, total = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      total++;
+      if (data[y * w + x] !== 0) count++;
+    }
+  }
+  return total ? count / total : 0;
+}
+
+function checkMaskPolarity(data, w, h, now) {
+  if (manualMaskOverride) return; // o "i" manual manda a partir daí
+  if (now - lastPolarityCheck < 2000) return;
+  lastPolarityCheck = now;
+
+  const cornerAvg = (
+    patchPersonDensity(data, w, h, 0, 0) +
+    patchPersonDensity(data, w, h, w - POLARITY_PATCH, 0) +
+    patchPersonDensity(data, w, h, 0, h - POLARITY_PATCH) +
+    patchPersonDensity(data, w, h, w - POLARITY_PATCH, h - POLARITY_PATCH)
+  ) / 4;
+  const bottomCenter = patchPersonDensity(data, w, h, Math.floor(w / 2 - POLARITY_PATCH / 2), h - POLARITY_PATCH);
+
+  // esperado: a pessoa domina o centro-inferior e é rara nos 4 cantos;
+  // se estiver ao contrário, a polaridade da máscara está invertida.
+  if (cornerAvg > bottomCenter + 0.15) invertMask = true;
+  else if (bottomCenter > cornerAvg + 0.15) invertMask = false;
+  // zona ambígua: mantém o estado anterior para não oscilar
+}
+
+function paintMask(result) {
+  const mask = result?.categoryMask;
+  if (!mask) return;
+  const data = mask.getAsUint8Array(); // 1 canal por categoria (0 = fundo)
+  const w = mask.width, h = mask.height;
+
+  checkMaskPolarity(data, w, h, performance.now());
+
+  // desenha a silhueta (branco opaco onde há pessoa) num ImageData à resolução
+  // nativa da máscara, depois escala para o canvas final com blur para
+  // suavizar as bordas (sombra de teatro não tem contorno vetorial nítido).
+  const id = mctx.createImageData(w, h);
+  let maxPersonY = -1; // linha (nativa) de pixel de pessoa mais baixa desta frame
+  for (let i = 0; i < w * h; i++) {
+    const isPerson = data[i] !== 0;
+    const show = invertMask ? !isPerson : isPerson;
+    const o = i * 4;
+    id.data[o] = 255; id.data[o + 1] = 255; id.data[o + 2] = 255;
+    id.data[o + 3] = show ? 255 : 0;
+    // reaproveita o loop já existente — sem segunda passagem de pixels
+    if (show) {
+      const y = (i / w) | 0;
+      if (y > maxPersonY) maxPersonY = y;
+    }
+  }
+  // desvio para ancorar ao chão: quanto falta para a linha de pessoa mais
+  // baixa (maxPersonY, resolução nativa h) chegar ao rodapé do canvas final
+  // (MASK_H), convertido para pixels desse canvas. Sem pessoa detetada nesta
+  // frame, mantém o último valor suavizado (não há como recalcular sem 2ª passagem).
+  if (maxPersonY >= 0) {
+    const targetShift = (h - 1 - maxPersonY) * (MASK_H / h);
+    anchorShiftEMA += (targetShift - anchorShiftEMA) * ANCHOR_EMA_ALPHA;
+  }
+  // canvas temporário à resolução nativa, depois copiado (mirrored + blur)
+  let tmp = paintMask._tmp;
+  if (!tmp || tmp.width !== w || tmp.height !== h) {
+    tmp = paintMask._tmp = document.createElement("canvas");
+    tmp.width = w; tmp.height = h;
+  }
+  tmp.getContext("2d").putImageData(id, 0, 0);
+
+  mctx.save();
+  mctx.clearRect(0, 0, MASK_W, MASK_H);
+  mctx.filter = "blur(2px)";
+  mctx.translate(MASK_W, 0); mctx.scale(-1, 1); // espelha (selfie)
+  mctx.translate(0, anchorShiftEMA); // ancoragem ao chão (ver bloco acima)
+  mctx.drawImage(tmp, 0, 0, w, h, 0, 0, MASK_W, MASK_H);
+  mctx.restore();
+
+  // overlay de depuração no PiP (não espelhado outra vez — o <canvas#overlay>
+  // já tem transform:scaleX(-1) em CSS, tal como no index.html)
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  octx.globalAlpha = 0.55;
+  octx.drawImage(tmp, 0, 0, w, h, 0, 0, overlay.width, overlay.height);
+  octx.globalAlpha = 1;
+
+  // cobertura (proximidade): amostra num canvas minúsculo
+  sctx.clearRect(0, 0, SAMPLE_W, SAMPLE_H);
+  sctx.drawImage(tmp, 0, 0, w, h, 0, 0, SAMPLE_W, SAMPLE_H);
+  const sd = sctx.getImageData(0, 0, SAMPLE_W, SAMPLE_H).data;
+  let opaque = 0;
+  for (let i = 3; i < sd.length; i += 4) if (sd[i] > 40) opaque++;
+  coverage = opaque / (SAMPLE_W * SAMPLE_H);
+
+  if (maskTexture) maskTexture.needsUpdate = true;
+}
+
+function segLoop() {
+  if (!running) return;
+  if (cam.currentTime !== lastVideoTime && cam.readyState >= 2) {
+    lastVideoTime = cam.currentTime;
+    if (!skipNext) {
+      const t0 = performance.now();
+      let res = null;
+      try {
+        res = segmenter.segmentForVideo(cam, t0);
+        paintMask(res);
+      } catch { /* frame ocasionalmente instável — ignora e continua */ }
+      finally {
+        // sem callback, a máscara devolvida é um clone nosso: fechar SEMPRE,
+        // senão vaza uma WebGLTexture por frame até perder o contexto
+        try { res?.close(); } catch {}
+      }
+      const dt = performance.now() - t0;
+      segEMA = segEMA * 0.85 + dt * 0.15;
+      // alvo: 30fps de render — se a segmentação por si só já gasta mais de
+      // ~24ms, salta um frame em cada dois para não sufocar o rAF do three.js
+      skipNext = segEMA > 24;
+    } else {
+      skipNext = false; // processa um sim, um não
+    }
+  }
+  const now = performance.now();
+  const dt = now - lastSegT; lastSegT = now;
+  // dt perto de 0 no primeiro tick síncrono dava 1000/dt ~ Infinity ("399 fps");
+  // só atualiza a EMA com amostras minimamente fiáveis (>5ms).
+  if (dt > 5) {
+    fpsEMA = fpsHasSample ? fpsEMA * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
+    fpsHasSample = true;
+  }
+  $("fps").textContent = fpsHasSample
+    ? Math.max(0, Math.min(60, fpsEMA)).toFixed(0) + " fps"
+    : "—";
+  $("segState").textContent = segmenter ? "ativo" : "—";
+  $("pillSeg").className = "pill on";
+  $("nearVal").textContent = (coverage * 100).toFixed(0) + "%";
+  $("pillNear").className = coverage > 0.30 ? "pill hot" : "pill on";
+  requestAnimationFrame(segLoop);
+}
+let fpsEMA = 0;
+let fpsHasSample = false;
+
+/* ================= cena 3D (three.js) ================= */
+let scene, camera3, renderer, casterMesh, maskTexture, spotLight, dustPoints;
+let closeness = 0; // 0..1 suavizado a partir de `coverage` — controla o "crescer" da sombra
+// dimensões-base do caster (módulo, não só initScene): renderLoop precisa
+// da altura para reancorar a base do plano ao chão quando escala.
+/* 4:3 como a máscara da câmara (480×360) — se o rácio do plano divergir do da
+   textura, a silhueta é esticada (o bug das proporções: 2.6×3.6 esticava ~1.85×
+   na vertical). 1.9 m ≈ altura humana com folga. */
+const CASTER_H = 1.9, CASTER_W = CASTER_H * (4 / 3);
+
+function initScene(THREE) {
+  scene = new THREE.Scene();
+  // garagem de betão CLARA (efeito "projetei a minha sombra no ecrã"): sem
+  // nevoeiro escuro a comer o contraste — a sombra tem de ficar nitidamente
+  // mais escura do que qualquer superfície iluminada, não o inverso.
+  scene.fog = null;
+
+  camera3 = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 60);
+  camera3.position.set(0, 1.5, 9);
+  camera3.lookAt(0, 1.6, -6);
+
+  renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  /* ---- sala: garagem de betão clara, iluminada, perspetiva de ponto único ---- */
+  const ROOM_W = 10, ROOM_D = 14, ROOM_H = 6;
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xcfc7ba, roughness: 0.9, metalness: 0 });
+  const wallMat  = new THREE.MeshStandardMaterial({ color: 0xb8b0a4, roughness: 0.92, metalness: 0 });
+  const ceilMat  = new THREE.MeshStandardMaterial({ color: 0x6b655c, roughness: 0.95, metalness: 0 });
+
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat);
+  floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, -ROOM_D / 2 + 5);
+  floor.receiveShadow = true; scene.add(floor);
+
+  const backWall = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_H), wallMat);
+  backWall.position.set(0, ROOM_H / 2, -ROOM_D + 5);
+  backWall.receiveShadow = true; scene.add(backWall);
+
+  const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, ROOM_H), wallMat);
+  leftWall.rotation.y = Math.PI / 2;
+  leftWall.position.set(-ROOM_W / 2, ROOM_H / 2, -ROOM_D / 2 + 5);
+  leftWall.receiveShadow = true; scene.add(leftWall);
+
+  const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, ROOM_H), wallMat);
+  rightWall.rotation.y = -Math.PI / 2;
+  rightWall.position.set(ROOM_W / 2, ROOM_H / 2, -ROOM_D / 2 + 5);
+  rightWall.receiveShadow = true; scene.add(rightWall);
+
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), ceilMat);
+  ceiling.rotation.x = Math.PI / 2; ceiling.position.set(0, ROOM_H, -ROOM_D / 2 + 5);
+  ceiling.receiveShadow = true; scene.add(ceiling);
+
+  /* ---- props: agora lançam a própria sombra comprida (castShadow) além de a
+     receberem — no efeito de referência os objetos da sala também "esticam"
+     pela sala, tal como a silhueta do visitante, e a sombra do visitante
+     deve conseguir sobrepor-se-lhes. ---- */
+
+  /* prop (a): massa baixa tipo carro desportivo, estacionada ao meio-esquerda,
+     em ângulo — corpo + "cabine" para dar silhueta reconhecível. */
+  const carPaint = new THREE.MeshStandardMaterial({ color: 0x15171b, roughness: 0.35, metalness: 0.35 });
+  const carGroup = new THREE.Group();
+  const carBody = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.85, 1.9), carPaint);
+  carBody.position.set(0, 0.425, 0);
+  carBody.castShadow = true; carBody.receiveShadow = true; carGroup.add(carBody);
+  const carCabin = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.45, 1.5), carPaint);
+  carCabin.position.set(-0.3, 0.85 + 0.225, 0);
+  carCabin.castShadow = true; carCabin.receiveShadow = true; carGroup.add(carCabin);
+  carGroup.position.set(-3.0, 0, -1.0);
+  carGroup.rotation.y = 0.32;
+  scene.add(carGroup);
+
+  /* prop (b): figura humanoide fina tipo "estátua-esqueleto", à direita,
+     mais perto do fundo da sala, ~1.8 m de altura em primitivas empilhadas. */
+  const figureMat = new THREE.MeshStandardMaterial({ color: 0x3a3632, roughness: 0.8 });
+  const figureGroup = new THREE.Group();
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.9, 0.32), figureMat);
+  legs.position.set(0, 0.45, 0);
+  legs.castShadow = true; legs.receiveShadow = true; figureGroup.add(legs);
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.65, 0.26), figureMat);
+  torso.position.set(0, 0.9 + 0.325, 0);
+  torso.castShadow = true; torso.receiveShadow = true; figureGroup.add(torso);
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.55, 0.12), figureMat);
+  armL.position.set(-0.27, 1.0, 0);
+  armL.castShadow = true; armL.receiveShadow = true; figureGroup.add(armL);
+  const armR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.55, 0.12), figureMat);
+  armR.position.set(0.27, 1.0, 0);
+  armR.castShadow = true; armR.receiveShadow = true; figureGroup.add(armR);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 12), figureMat);
+  head.position.set(0, 1.55 + 0.17, 0);
+  head.castShadow = true; head.receiveShadow = true; figureGroup.add(head);
+  figureGroup.position.set(3.3, 0, -4.5);
+  scene.add(figureGroup);
+
+  /* ---- luz: baixa e atrás do visitante — como sol de fim de tarde — para as
+     sombras ficarem LONGAS: correm pelo chão primeiro e só depois sobem pela
+     parede do fundo, em vez de baterem direto na parede (projeção de cinema).
+     Ambiente fica baixo de propósito: o contraste luz/sombra é o efeito inteiro. ----
+
+     Verificação geométrica (luz L=(0,1.3,11); caster entre pés (0,0,4.5) e
+     topo (0,1.9,4.5) — magnificação até à parede do fundo (z=-9):
+     (11-(-9)) / (11-4.5) = 20/6.5 ≈ 3.08×; um ponto do caster a altura y
+     projeta na parede a y' = 1.3 + 3.08·(y − 1.3)):
+       • pontos com y < ~0.88 atingem o CHÃO entre z=4.5 (pés, comprimento 0)
+         e z=-9 — sombra comprida pelo chão primeiro, como na referência;
+       • pontos entre y≈0.88 e o topo atingem a PAREDE do fundo: a cabeça
+         (y=1.9) fica a ~3.15 m → sombra ~1.66× a altura real, bem abaixo
+         do teto (6 m). Com o crescimento máximo (escala 1.35, topo ~2.57)
+         a cabeça projeta a ~5.2 m — dramático mas ainda dentro da parede. */
+  const ambient = new THREE.AmbientLight(0xffffff, 0.25);
+  scene.add(ambient);
+
+  spotLight = new THREE.SpotLight(0xfff2dd, 8, 30, Math.PI / 4, 0.25, 1.3);
+  spotLight.position.set(0, 1.3, 11);       // baixa e atrás — ângulo raso, sombra comprida
+  spotLight.target.position.set(0, 0, -5);  // aponta para o chão bem lá no fundo da sala
+  spotLight.castShadow = true;
+  spotLight.shadow.mapSize.set(2048, 2048);
+  spotLight.shadow.camera.near = 0.5;
+  spotLight.shadow.camera.far = 32;         // luz mais recuada + alvo mais fundo → frustum maior (>=30 pedido)
+  spotLight.shadow.radius = 6;              // nota: ignorado pelo PCFSoft em spots (r160) — a suavidade vem do blur da máscara
+  // bias mais negativo que antes (-0.0025 → -0.004): ângulo raso == raios quase
+  // rasantes às superfícies == mais risco de acne de sombra (self-shadowing);
+  // compensa-se com mais offset ao longo da normal.
+  spotLight.shadow.bias = -0.004;
+  scene.add(spotLight, spotLight.target);
+
+  /* ---- o "caster": plano invisível com a máscara da silhueta, entre a luz
+     e a sala — é isto que projeta a sombra do visitante nas paredes/objetos.
+     Rácio 4:3 = o da máscara (sem esticar a anatomia); afastado da luz
+     (z=4.5, magnificação ~3.08×) para a sombra ter escala humana; a base
+     (rodapé) fica exatamente ao nível do chão (y=0) → centro em CASTER_H/2,
+     tal como um visitante de pé. ---- */
+  maskTexture = new THREE.CanvasTexture(maskCanvas);
+  maskTexture.colorSpace = THREE.SRGBColorSpace;
+
+  const casterGeo = new THREE.PlaneGeometry(CASTER_W, CASTER_H);
+  const casterMat = new THREE.MeshBasicMaterial({
+    map: maskTexture, transparent: true, alphaTest: 0.5,
+    colorWrite: false, side: THREE.DoubleSide, depthWrite: false
+  });
+  casterMesh = new THREE.Mesh(casterGeo, casterMat);
+  casterMesh.position.set(0, CASTER_H / 2, 4.5); // pés (rodapé do plano) em y=0, z=4.5
+  casterMesh.castShadow = true;
+  casterMesh.receiveShadow = false;
+  casterMesh.customDepthMaterial = new THREE.MeshDepthMaterial({
+    depthPacking: THREE.RGBADepthPacking,
+    map: maskTexture, alphaTest: 0.5, side: THREE.DoubleSide
+  });
+  scene.add(casterMesh);
+
+  /* ---- poeira lenta em suspensão ---- */
+  const DUST_N = 140;
+  const dustGeo = new THREE.BufferGeometry();
+  const pos = new Float32Array(DUST_N * 3);
+  for (let i = 0; i < DUST_N; i++) {
+    pos[i * 3] = (Math.random() - 0.5) * 9;
+    pos[i * 3 + 1] = Math.random() * 5.5;
+    pos[i * 3 + 2] = -Math.random() * 13 + 5;
+  }
+  dustGeo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const dustMat = new THREE.PointsMaterial({ color: 0xd8c9c2, size: 0.02, transparent: true, opacity: 0.35 });
+  dustPoints = new THREE.Points(dustGeo, dustMat);
+  scene.add(dustPoints);
+
+  window.addEventListener("resize", onResize);
+}
+
+function onResize() {
+  if (!renderer) return;
+  camera3.aspect = window.innerWidth / window.innerHeight;
+  camera3.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function renderLoop() {
+  if (!running) { requestAnimationFrame(renderLoop); return; }
+  // suaviza a proximidade (evita saltos entre frames de segmentação)
+  closeness += ((coverage > 0.30 ? Math.min(1, (coverage - 0.30) / 0.4) : 0) - closeness) * 0.12;
+
+  // dinâmica de "teatro de sombras": aproximar a mão da câmara empurra o
+  // caster ligeiramente para dentro da sala e aumenta-o — mas com os pés
+  // presos ao chão, para nunca virar um blob que engole a sala. Faixa
+  // encolhida (era baseZ=8.6/nearZ=6.6 com escala até 1+1.8=2.8×; agora
+  // baseZ=4.5/nearZ=3.6 — combina com a posição de repouso do caster da
+  // fix de proporções (magnificação ~3.08× em repouso) — e escala máxima 1.35×).
+  const baseZ = 4.5, nearZ = 3.6;
+  casterMesh.position.z = baseZ - closeness * (baseZ - nearZ);
+  const scale = 1 + closeness * 0.35; // 1 .. 1.35 (era 1 .. 1.8)
+  casterMesh.scale.set(scale, scale, 1);
+  // a escala do Three.js parte do centro do plano — sem isto, o plano
+  // "cresceria" para cima e para baixo por igual e os pés descolariam do
+  // chão. Reancora a base (y=0 sem escala) recolocando o centro em
+  // CASTER_H/2 * scale a cada frame.
+  casterMesh.position.y = (CASTER_H / 2) * scale;
+
+  if (dustPoints) dustPoints.rotation.y += 0.0006;
+
+  renderer.render(scene, camera3);
+  requestAnimationFrame(renderLoop);
+}
+</script>
+</body>
+</html>
