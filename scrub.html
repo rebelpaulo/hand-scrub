@@ -396,7 +396,7 @@ function selectScene(i) {
   // re-clicar o chip da cena ativa não deve recarregar o vídeo nem voltar a 0.
   // A guarda do currentSrc protege o arranque (selectScene(pendingScene) corre
   // com o player ainda vazio e TEM de carregar).
-  if (i === activeScene && player.currentSrc) return;
+  if (i === activeScene && player.currentSrc && !player.error) return; // com erro de playback, o clique re-tenta
   activeScene = i;
   // usa o blob já pré-carregado quando existir; nunca troca o src do vídeo ATIVO
   // por trás das costas do utilizador — isto só decide o src de uma cena nova
