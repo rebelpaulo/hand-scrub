@@ -662,16 +662,52 @@ function initScene(THREE) {
          (y=1.9) fica a ~3.15 m → sombra ~1.66× a altura real, bem abaixo
          do teto (6 m). Com o crescimento máximo (escala 1.35, topo ~2.57)
          a cabeça projeta a ~5.2 m — dramático mas ainda dentro da parede. */
-  const ambient = new THREE.AmbientLight(0xffffff, 0.25);
+  /* fix do "corte" do cone de luz (bug em produção): com angle=π/4 (45°) e
+     penumbra=0.25 a fronteira do cone caía A MEIO da sala e cortava a sombra
+     do visitante numa linha diagonal reta — e os dois props (carro/figura)
+     ficavam perto/fora dela, em zona só-ambiente (shadow≈fundo, sem sombra
+     própria visível). Geometria a partir da luz L=(0,1.3,11), eixo até ao
+     alvo T=(0,0,-5), eixo unitário a≈(0,-0.081,-0.997):
+       • canto do chão mais distante (-5,0,-9):     ângulo ao eixo ≈ 13.99°
+       • topo da parede do fundo (±5,6,-9):          ângulo ao eixo ≈ 22.32°
+       • base do carro   (-3,0,-1):                  ângulo ao eixo ≈ 13.98°
+       • base da figura  (3.3,0,-4.5):                ângulo ao eixo ≈ 11.98°
+     Todos < 22.4° — com angle=Math.PI/3 (60°) sobra folga de quase 38° até à
+     fronteira do cone, e mesmo a fronteira do penumbra (60°·(1-0.5)=30°) fica
+     bem acima de qualquer ponto da sala/props: chão, parede do fundo e ambos
+     os props ficam na zona TOTALMENTE iluminada do spot, não no gradiente.
+     penumbra subiu de 0.25→0.5 para a transição (quando existir, nas quinas
+     extremas da sala) ser um gradiente suave em vez de um corte reto.
+     Sombra de cada prop (raio da luz através do topo do prop):
+       • carro:  topo da cabine (~-3.3, 1.3, -1.1) está quase à mesma altura
+         da luz → raio ~horizontal, sombra comprida rasteira que sai do chão
+         perto do carro e a ponta funde-se com o canto traseiro-esquerdo
+         (parede do fundo / parede esquerda, x≈-5.5, y≈1.3).
+       • figura: topo da cabeça (~3.3, 1.89, -4.5) já está ACIMA da luz →
+         sombra sobe e atinge a parede do fundo a meia altura, por volta de
+         (x≈4.26, y≈2.06) — bem visível na parede, não no chão. */
+  const ambient = new THREE.AmbientLight(0xffffff, 0.32); // 0.25→0.32: cantos fora do cone ficam penumbra, não pretos — sem "corte" de luminância
   scene.add(ambient);
 
-  spotLight = new THREE.SpotLight(0xfff2dd, 8, 30, Math.PI / 4, 0.25, 1.3);
+  // intensidade 8→11: com o cone mais largo, o chão/parede do fundo e os
+  // props passam a estar sempre na zona 100% iluminada do spot (antes,
+  // perto do limite do cone antigo, a queda de decay(1.3) a ~12-21 m de
+  // distância deixava-os visualmente escuros); o aumento garante chão
+  // claramente iluminado e sombra de alto contraste mesmo com o ambient
+  // subido para 0.32.
+  spotLight = new THREE.SpotLight(0xfff2dd, 11, 30, Math.PI / 3, 0.5, 1.3);
   spotLight.position.set(0, 1.3, 11);       // baixa e atrás — ângulo raso, sombra comprida
   spotLight.target.position.set(0, 0, -5);  // aponta para o chão bem lá no fundo da sala
   spotLight.castShadow = true;
   spotLight.shadow.mapSize.set(2048, 2048);
   spotLight.shadow.camera.near = 0.5;
-  spotLight.shadow.camera.far = 32;         // luz mais recuada + alvo mais fundo → frustum maior (>=30 pedido)
+  // far=32 continua a chegar: o ponto mais distante da sala (topo da parede
+  // do fundo, ±5,6,-9) está a ~21.14 m da luz — 32 dá >10 m de folga mesmo
+  // com o cone mais largo (o far não depende do angle, só da distância real).
+  // fov da shadow-camera do spot é derivado de `angle` pelo three.js em cada
+  // updateMatrices() — sem override manual de .camera.fov neste ficheiro,
+  // por isso o angle novo já é suficiente, nada mais a ajustar aqui.
+  spotLight.shadow.camera.far = 32;
   spotLight.shadow.radius = 6;              // nota: ignorado pelo PCFSoft em spots (r160) — a suavidade vem do blur da máscara
   // bias mais negativo que antes (-0.0025 → -0.004): ângulo raso == raios quase
   // rasantes às superfícies == mais risco de acne de sombra (self-shadowing);
