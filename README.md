@@ -82,8 +82,11 @@ npx serve -l 8777
 - `shadow.html` — 🌑 Sala de Sombras (beta): a sombra do corpo projetada
   numa sala 3D.
 - `draw.html` — ✍️ Pinch Draw: pintura de luz no ar com o gesto de pinch.
-- `enxame.html` — 🌬️ Enxame: milhares de partículas brancas flutuam sobre a
-  imagem da câmara (espelhada) e são sopradas pelo teu movimento
-  (differencing de luma num grid grosseiro, sem MediaPipe).
+- `enxame.html` — 🌬️ Enxame: milhares de partículas brancas orbitam à tua
+  volta como uma auréola (MediaPipe `FaceDetector` localiza a cabeça).
+  Aperta o polegar e o indicador (`HandLandmarker`) para as atrair como um
+  íman — elas seguem os dedos enquanto o pinch está fechado; ao largar,
+  continuam o movimento em conjunto e voltam, aos poucos e de forma
+  escalonada, à órbita da cabeça.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).
