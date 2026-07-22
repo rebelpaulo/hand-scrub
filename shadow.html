@@ -209,10 +209,27 @@ wakeUI();
 /* seguro de dia-de-evento: "i" inverte manualmente a polaridade da máscara
    e trava o ajuste automático (checkMaskPolarity deixa de mexer sozinho) */
 document.addEventListener("keydown", e => {
-  if (e.key !== "i" && e.key !== "I") return;
-  invertMask = !invertMask;
-  manualMaskOverride = true;
-  toast(`máscara invertida: ${invertMask ? "on" : "off"}`, 2000);
+  if (e.key === "i" || e.key === "I") {
+    invertMask = !invertMask;
+    manualMaskOverride = true;
+    toast(`máscara invertida: ${invertMask ? "on" : "off"}`, 2000);
+  } else if (e.key === "m" || e.key === "M") {
+    // roda a orientação da projeção do gobo (se a montagem da câmara pedir)
+    flipMode = (flipMode + 1) % 4;
+    toast(`projeção: modo ${flipMode}`, 2000);
+  } else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && spotLight) {
+    // afinação ao vivo da altura da luz: mais baixa = mais corpo visível no
+    // ecrã; mais alta = sombra mais deitada no chão. Fixar o valor bom no código.
+    const dir = e.key === "ArrowUp" ? 0.1 : -0.1;
+    spotLight.position.y = Math.min(4.5, Math.max(2.0, spotLight.position.y + dir));
+    toast(`luz: y=${spotLight.position.y.toFixed(1)} m`, 1500);
+  } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && spotLight) {
+    // afinação ao vivo do cone: mais largo = frame maior na sala (sombra
+    // mais longe); mais apertado = feixe de projetor concentrado.
+    const dir = e.key === "ArrowRight" ? 0.02 : -0.02;
+    spotLight.angle = Math.min(0.9, Math.max(0.2, spotLight.angle + dir));
+    toast(`cone: ${(spotLight.angle * 180 / Math.PI).toFixed(0)}°`, 1500);
+  }
 });
 
 /* ================= draggable PiP (copiado do index.html) ================= */
@@ -313,7 +330,13 @@ let pipClosed = false;
 /* ================= offscreen segmentation mask canvas =================
    Baixa resolução propositada: só alimenta uma textura de sombra suave —
    não precisamos de detalhe, precisamos de silhueta. */
-const MASK_W = 480, MASK_H = 360;
+/* o cookie do spot projeta-se num footprint QUADRADO (fov igual nos dois
+   eixos) — o canvas tem de ser quadrado, senão o frame 4:3 estica a anatomia.
+   O frame da câmara desenha-se ENCOSTADO À BASE do quadrado (barras brancas
+   só em cima): preserva as proporções e ancora os pés à base do feixe —
+   a sombra nasce na frente da sala, junto à margem de baixo do ecrã. */
+const MASK_W = 480, MASK_H = 480;
+const FRAME_H = 360, FRAME_Y = MASK_H - FRAME_H; // frame 4:3 bottom-aligned
 const maskCanvas = document.createElement("canvas");
 maskCanvas.width = MASK_W; maskCanvas.height = MASK_H;
 const mctx = maskCanvas.getContext("2d", { willReadFrequently: true });
@@ -430,13 +453,14 @@ let manualMaskOverride = false;  // depois de "i", para de reajustar sozinho
 let lastPolarityCheck = 0;
 const POLARITY_PATCH = 16;
 
-/* ancoragem ao chão: desloca a silhueta verticalmente (no canvas MASK_W×MASK_H)
-   até a linha de pixels de pessoa mais baixa encostar ao rodapé do canvas —
-   assim, mesmo com a câmara só a ver tronco/cabeça (setup de secretária), a
-   sombra fica sempre "de pé" no chão da sala, nunca a flutuar a meio do ar.
-   Suavizado com EMA para não tremer entre frames de segmentação. */
-let anchorShiftEMA = 0; // em pixels do espaço MASK_H (canvas final da máscara)
-const ANCHOR_EMA_ALPHA = 0.2;
+/* A silhueta é um GOBO na própria luz (SpotLight.map, como um slide num
+   projetor): branco deixa a luz passar, preto é a tua sombra. A sombra fica
+   contínua pelo chão→parede→objetos por construção, nasce na base do feixe
+   (margem de baixo do ecrã) e cresce naturalmente quando aproximas a mão da
+   câmara — sem plano fantasma na sala, sem ancoragem que deslize quando o
+   enquadramento muda. Tecla "m" roda a orientação da projeção (espelho/
+   inversão) se a montagem da câmara o pedir. */
+let flipMode = 0; // 0: espelho horizontal (selfie) · 1: sem espelho · 2: h+v · 3: só vertical
 
 function patchPersonDensity(data, w, h, x0, y0) {
   const x1 = Math.min(w, x0 + POLARITY_PATCH), y1 = Math.min(h, y0 + POLARITY_PATCH);
@@ -483,26 +507,14 @@ function paintMask(result) {
   // nativa da máscara, depois escala para o canvas final com blur para
   // suavizar as bordas (sombra de teatro não tem contorno vetorial nítido).
   const id = mctx.createImageData(w, h);
-  let maxPersonY = -1; // linha (nativa) de pixel de pessoa mais baixa desta frame
   for (let i = 0; i < w * h; i++) {
     const isPerson = data[i] !== 0;
     const show = invertMask ? !isPerson : isPerson;
     const o = i * 4;
-    id.data[o] = 255; id.data[o + 1] = 255; id.data[o + 2] = 255;
+    // gobo: pessoa a PRETO (bloqueia a luz), resto transparente — o fundo
+    // branco é pintado no canvas final antes do drawImage.
+    id.data[o] = 0; id.data[o + 1] = 0; id.data[o + 2] = 0;
     id.data[o + 3] = show ? 255 : 0;
-    // reaproveita o loop já existente — sem segunda passagem de pixels
-    if (show) {
-      const y = (i / w) | 0;
-      if (y > maxPersonY) maxPersonY = y;
-    }
-  }
-  // desvio para ancorar ao chão: quanto falta para a linha de pessoa mais
-  // baixa (maxPersonY, resolução nativa h) chegar ao rodapé do canvas final
-  // (MASK_H), convertido para pixels desse canvas. Sem pessoa detetada nesta
-  // frame, mantém o último valor suavizado (não há como recalcular sem 2ª passagem).
-  if (maxPersonY >= 0) {
-    const targetShift = (h - 1 - maxPersonY) * (MASK_H / h);
-    anchorShiftEMA += (targetShift - anchorShiftEMA) * ANCHOR_EMA_ALPHA;
   }
   // canvas temporário à resolução nativa, depois copiado (mirrored + blur)
   let tmp = paintMask._tmp;
@@ -513,18 +525,25 @@ function paintMask(result) {
   tmp.getContext("2d").putImageData(id, 0, 0);
 
   mctx.save();
-  mctx.clearRect(0, 0, MASK_W, MASK_H);
+  mctx.filter = "none";
+  mctx.fillStyle = "#ffffff";
+  mctx.fillRect(0, 0, MASK_W, MASK_H); // branco = luz passa
   mctx.filter = "blur(2px)";
-  mctx.translate(MASK_W, 0); mctx.scale(-1, 1); // espelha (selfie)
-  mctx.translate(0, anchorShiftEMA); // ancoragem ao chão (ver bloco acima)
-  mctx.drawImage(tmp, 0, 0, w, h, 0, 0, MASK_W, MASK_H);
+  // orientação da projeção (tecla "m" roda entre 4 modos)
+  if (flipMode === 0) { mctx.translate(MASK_W, 0); mctx.scale(-1, 1); }        // espelho selfie
+  else if (flipMode === 2) { mctx.translate(MASK_W, MASK_H); mctx.scale(-1, -1); }
+  else if (flipMode === 3) { mctx.translate(0, MASK_H); mctx.scale(1, -1); }
+  // frame 4:3 encostado à base do cookie quadrado (ver comentário em MASK_W/H)
+  mctx.drawImage(tmp, 0, 0, w, h, 0, FRAME_Y, MASK_W, FRAME_H);
   mctx.restore();
 
   // overlay de depuração no PiP (não espelhado outra vez — o <canvas#overlay>
   // já tem transform:scaleX(-1) em CSS, tal como no index.html)
   octx.clearRect(0, 0, overlay.width, overlay.height);
   octx.globalAlpha = 0.55;
+  octx.filter = "invert(1)"; // tmp agora é preto (gobo) — inverte para branco no PiP, legível sobre o vídeo
   octx.drawImage(tmp, 0, 0, w, h, 0, 0, overlay.width, overlay.height);
+  octx.filter = "none";
   octx.globalAlpha = 1;
 
   // cobertura (proximidade): amostra num canvas minúsculo
@@ -585,14 +604,8 @@ let fpsEMA = 0;
 let fpsHasSample = false;
 
 /* ================= cena 3D (three.js) ================= */
-let scene, camera3, renderer, casterMesh, maskTexture, spotLight, dustPoints;
-let closeness = 0; // 0..1 suavizado a partir de `coverage` — controla o "crescer" da sombra
-// dimensões-base do caster (módulo, não só initScene): renderLoop precisa
-// da altura para reancorar a base do plano ao chão quando escala.
-/* 4:3 como a máscara da câmara (480×360) — se o rácio do plano divergir do da
-   textura, a silhueta é esticada (o bug das proporções: 2.6×3.6 esticava ~1.85×
-   na vertical). 1.9 m ≈ altura humana com folga. */
-const CASTER_H = 1.9, CASTER_W = CASTER_H * (4 / 3);
+let scene, camera3, renderer, maskTexture, spotLight, dustPoints;
+// (o pill de proximidade lê `coverage` diretamente — não há estado suavizado) de proximidade
 
 function initScene(THREE) {
   scene = new THREE.Scene();
@@ -745,7 +758,15 @@ camera3.lookAt(0, 0.15, -6);
   // distância deixava-os visualmente escuros); o aumento garante chão
   // claramente iluminado e sombra de alto contraste mesmo com o ambient
   // subido para 0.32.
-  spotLight = new THREE.SpotLight(0xfff2dd, 11, 30, Math.PI / 3, 0.5, 1.3);
+  /* cone APERTADO (0.32 rad ≈ 18.3°): com o gobo, o cone define onde o frame
+   da câmara aterra na sala. Eixo deprime 9.3°; base do feixe = 9.3+18.3 =
+   27.6° abaixo da horizontal → toca o chão a z = 14.5 − 3.2/tan(27.6°) ≈ 8.4,
+   ligeiramente ATRÁS da margem visível do ecrã (z≈6.8) — o frame INTEIRO tem
+   receptor (chão até z=11) e a sombra entra "vinda de fora" só por uma
+   margem pequena (achado P1 do Codex no PR #22: a 60° a base aterrava a
+   z=13.3, sem chão). Feixe apertado = look de projetor, como a referência.
+   Afinável ao vivo com ←/→. */
+spotLight = new THREE.SpotLight(0xfff2dd, 11, 30, 0.32, 0.5, 1.3);
   /* luz recuada de z=11 para z=14.5 em conjunto com o caster avançado para
      z=7: a magnificação até à parede do fundo mantém-se ≈ (14.5+9)/(14.5−7)
      = 3.13× (igual à calibração anterior), mas os pés da sombra passam a
@@ -778,30 +799,14 @@ spotLight.position.set(0, 3.2, 14.5);
   spotLight.shadow.bias = -0.004;
   scene.add(spotLight, spotLight.target);
 
-  /* ---- o "caster": plano invisível com a máscara da silhueta, entre a luz
-     e a sala — é isto que projeta a sombra do visitante nas paredes/objetos.
-     Rácio 4:3 = o da máscara (sem esticar a anatomia); na frente da sala
-     (z=7, com a luz a z=14.5 → magnificação ~3.13×) para a sombra nascer
-     aos pés do visitante com escala humana; a base (rodapé) fica exatamente
-     ao nível do chão (y=0) → centro em CASTER_H/2, tal como um visitante
-     de pé. ---- */
+  /* ---- a silhueta como GOBO da luz (SpotLight.map): a máscara (pessoa a
+     preto, resto branco) é projetada pelo próprio spot, como um slide num
+     projetor — a sombra pinta-se de forma contínua no chão, paredes e
+     objetos, sem plano intermédio nem ancoragem. O r160 suporta light.map
+     em spots com castShadow ativo (uniforms spotLightMap no renderer). ---- */
   maskTexture = new THREE.CanvasTexture(maskCanvas);
   maskTexture.colorSpace = THREE.SRGBColorSpace;
-
-  const casterGeo = new THREE.PlaneGeometry(CASTER_W, CASTER_H);
-  const casterMat = new THREE.MeshBasicMaterial({
-    map: maskTexture, transparent: true, alphaTest: 0.5,
-    colorWrite: false, side: THREE.DoubleSide, depthWrite: false
-  });
-  casterMesh = new THREE.Mesh(casterGeo, casterMat);
-  casterMesh.position.set(0, CASTER_H / 2, 7); // pés (rodapé do plano) em y=0, z=7 — à frente da sala
-  casterMesh.castShadow = true;
-  casterMesh.receiveShadow = false;
-  casterMesh.customDepthMaterial = new THREE.MeshDepthMaterial({
-    depthPacking: THREE.RGBADepthPacking,
-    map: maskTexture, alphaTest: 0.5, side: THREE.DoubleSide
-  });
-  scene.add(casterMesh);
+  spotLight.map = maskTexture;
 
   /* ---- poeira lenta em suspensão ---- */
   const DUST_N = 140;
@@ -829,24 +834,8 @@ function onResize() {
 
 function renderLoop() {
   if (!running) { requestAnimationFrame(renderLoop); return; }
-  // suaviza a proximidade (evita saltos entre frames de segmentação)
-  closeness += ((coverage > 0.30 ? Math.min(1, (coverage - 0.30) / 0.4) : 0) - closeness) * 0.12;
-
-  // dinâmica de "teatro de sombras": aproximar a mão da câmara empurra o
-  // caster ligeiramente para dentro da sala e aumenta-o — mas com os pés
-  // presos ao chão, para nunca virar um blob que engole a sala. Faixa
-  // encolhida (era baseZ=8.6/nearZ=6.6 com escala até 1+1.8=2.8×; agora
-  // baseZ=7/nearZ=6.1 — combina com a posição de repouso do caster (pés na
-  // frente da sala, magnificação ~3.13× em repouso) — e escala máxima 1.35×).
-  const baseZ = 7, nearZ = 6.1;
-  casterMesh.position.z = baseZ - closeness * (baseZ - nearZ);
-  const scale = 1 + closeness * 0.35; // 1 .. 1.35 (era 1 .. 1.8)
-  casterMesh.scale.set(scale, scale, 1);
-  // a escala do Three.js parte do centro do plano — sem isto, o plano
-  // "cresceria" para cima e para baixo por igual e os pés descolariam do
-  // chão. Reancora a base (y=0 sem escala) recolocando o centro em
-  // CASTER_H/2 * scale a cada frame.
-  casterMesh.position.y = (CASTER_H / 2) * scale;
+  // com o gobo, o "crescimento" ao aproximar a mão acontece naturalmente:
+  // mais perto da câmara = maior no frame = maior no feixe.
 
   if (dustPoints) dustPoints.rotation.y += 0.0006;
 
