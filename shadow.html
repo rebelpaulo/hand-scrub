@@ -609,7 +609,11 @@ function initScene(THREE) {
      ⇒ pitch ≈ −6° (lookAt y=−0.4 a z=−6); topo da parede do fundo fica a
      ~21° do eixo, ainda dentro do enquadramento. */
   camera3.position.set(0, 1.2, 9);
-  camera3.lookAt(0, -0.4, -6);
+  /* pitch ~4°: a base do caster (chão a z=7) fica ~2° ABAIXO da margem
+   inferior do enquadramento — a sombra entra vinda de fora do ecrã,
+   como se o visitante estivesse colado a ele. Topo da parede do fundo
+   (~15° acima da horizontal) continua dentro dos 25° de meia-fov. */
+camera3.lookAt(0, 0.15, -6);
 
   renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -746,7 +750,13 @@ function initScene(THREE) {
      z=7: a magnificação até à parede do fundo mantém-se ≈ (14.5+9)/(14.5−7)
      = 3.13× (igual à calibração anterior), mas os pés da sombra passam a
      nascer à frente da sala, na margem de baixo do ecrã. */
-  spotLight.position.set(0, 1.3, 14.5);     // baixa e atrás — ângulo raso, sombra comprida
+  /* luz DESCIDA de 1.3 para 0.65 m: com a luz a 1.3 a parte baixa do corpo
+   comprimia-se numa mancha de ~2 m junto aos pés — quase invisível. A 0.65
+   os raios ficam rasantes: os primeiros 65 cm do corpo varrem o chão INTEIRO
+   (z=7 até à parede) e a sombra nasce visivelmente gorda na margem de baixo,
+   como no teatro de sombras. Cabeça (1.9 m) projeta a 0.65+3.13×1.25 ≈ 4.6 m
+   na parede — dentro dos 6 m de teto. */
+spotLight.position.set(0, 0.65, 14.5);     // baixa e atrás — ângulo raso, sombra comprida
   spotLight.target.position.set(0, 0, -5);  // aponta para o chão bem lá no fundo da sala
   spotLight.castShadow = true;
   spotLight.shadow.mapSize.set(2048, 2048);
