@@ -177,6 +177,18 @@ function faceBoxToPixels(bb, vw, vh) {
     ? { ox: bb.originX * vw, oy: bb.originY * vh, w: bb.width * vw, h: bb.height * vh }
     : { ox: bb.originX, oy: bb.originY, w: bb.width, h: bb.height };
 }
+/* Transformação "cover": o vídeo de fundo usa object-fit:cover, que RECORTA
+   a fonte para encher o viewport. Mapear coordenadas da câmara para o ecrã
+   exige a escala única do cover + os offsets do recorte — escalas X/Y
+   independentes esticam o não-recortado e desalinham auréola e íman
+   (achado P1 do Codex no PR #24). Espelho (selfie) incluído aqui, num só sítio. */
+function camToScreen(nx, ny) {
+  const vw = camBg.videoWidth || 960, vh = camBg.videoHeight || 720;
+  const s = Math.max(W / vw, H / vh);
+  const offX = (W - vw * s) / 2, offY = (H - vh * s) / 2;
+  return { x: W - (offX + nx * vw * s), y: offY + ny * vh * s, s };
+}
+
 function processFace(res) {
   const dets = res.detections || [];
   if (!dets.length) { head = null; return; }
@@ -187,11 +199,9 @@ function processFace(res) {
   }
   const vw = camBg.videoWidth || 960, vh = camBg.videoHeight || 720;
   const { ox, oy, w, h } = faceBoxToPixels(best.boundingBox, vw, vh);
-  const scaleX = W / vw, scaleY = H / vh;
-  const cxRaw = ox + w / 2, cyRaw = oy + h / 2;
-  const cx = (vw - cxRaw) * scaleX; // mirrored to match the selfie view
-  const cy = cyRaw * scaleY;
-  const rPx = (Math.max(w, h) / 2) * ((scaleX + scaleY) / 2);
+  const p = camToScreen((ox + w / 2) / vw, (oy + h / 2) / vh); // cover + espelho
+  const cx = p.x, cy = p.y;
+  const rPx = (Math.max(w, h) / 2) * p.s; // escala única do cover
   if (!head) head = { cx, cy, r: rPx };
   else {
     head.cx += (cx - head.cx) * HEAD_EMA;
@@ -215,7 +225,8 @@ function processHands(res) {
     st.pinching = st.pinching ? ratio < PINCH_EXIT : ratio < PINCH_ENTER;
     if (st.pinching) {
       const midXn = (lm[4].x + lm[8].x) / 2, midYn = (lm[4].y + lm[8].y) / 2;
-      pts.push({ x: (1 - midXn) * W, y: midYn * H }); // mirrored to match the selfie view
+      const p = camToScreen(midXn, midYn); // cover + espelho — alinha o íman com os dedos VISÍVEIS
+      pts.push({ x: p.x, y: p.y });
     }
   }
   pinchPoints = pts;
