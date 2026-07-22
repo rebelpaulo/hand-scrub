@@ -568,8 +568,14 @@ function initScene(THREE) {
   scene.fog = null;
 
   camera3 = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 60);
-  camera3.position.set(0, 1.5, 9);
-  camera3.lookAt(0, 1.6, -6);
+  /* câmara ligeiramente descida e inclinada para baixo: o rodapé do caster
+     (pés da sombra, chão a z=7) tem de cair na margem INFERIOR do ecrã —
+     a sombra nasce "aos teus pés" e estica dali para dentro da sala.
+     fov 50° → meia-altura 25°; pés a atan(1.2/2)≈31° abaixo da horizontal
+     ⇒ pitch ≈ −6° (lookAt y=−0.4 a z=−6); topo da parede do fundo fica a
+     ~21° do eixo, ainda dentro do enquadramento. */
+  camera3.position.set(0, 1.2, 9);
+  camera3.lookAt(0, -0.4, -6);
 
   renderer = new THREE.WebGLRenderer({ canvas: stage, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -584,8 +590,14 @@ function initScene(THREE) {
   const wallMat  = new THREE.MeshStandardMaterial({ color: 0xb8b0a4, roughness: 0.92, metalness: 0 });
   const ceilMat  = new THREE.MeshStandardMaterial({ color: 0x6b655c, roughness: 0.95, metalness: 0 });
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat);
-  floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, -ROOM_D / 2 + 5);
+  /* o chão estende-se 6 m para lá da boca da sala (até z=11): o caster está
+     a z=7 e os pés da sombra precisam de receptor DEBAIXO deles — sem esta
+     extensão, os raios da parte baixa da silhueta passavam por baixo de y=0
+     sem tocar em nada e a sombra ficava cortada a partir de z=5 (achado do
+     review do Codex no PR #19). A extensão fica fora do enquadramento normal. */
+  const FLOOR_EXT = 6;
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D + FLOOR_EXT), floorMat);
+  floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, -(ROOM_D + FLOOR_EXT) / 2 + 5 + FLOOR_EXT);
   floor.receiveShadow = true; scene.add(floor);
 
   const backWall = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_H), wallMat);
@@ -696,7 +708,11 @@ function initScene(THREE) {
   // claramente iluminado e sombra de alto contraste mesmo com o ambient
   // subido para 0.32.
   spotLight = new THREE.SpotLight(0xfff2dd, 11, 30, Math.PI / 3, 0.5, 1.3);
-  spotLight.position.set(0, 1.3, 11);       // baixa e atrás — ângulo raso, sombra comprida
+  /* luz recuada de z=11 para z=14.5 em conjunto com o caster avançado para
+     z=7: a magnificação até à parede do fundo mantém-se ≈ (14.5+9)/(14.5−7)
+     = 3.13× (igual à calibração anterior), mas os pés da sombra passam a
+     nascer à frente da sala, na margem de baixo do ecrã. */
+  spotLight.position.set(0, 1.3, 14.5);     // baixa e atrás — ângulo raso, sombra comprida
   spotLight.target.position.set(0, 0, -5);  // aponta para o chão bem lá no fundo da sala
   spotLight.castShadow = true;
   spotLight.shadow.mapSize.set(2048, 2048);
@@ -717,10 +733,11 @@ function initScene(THREE) {
 
   /* ---- o "caster": plano invisível com a máscara da silhueta, entre a luz
      e a sala — é isto que projeta a sombra do visitante nas paredes/objetos.
-     Rácio 4:3 = o da máscara (sem esticar a anatomia); afastado da luz
-     (z=4.5, magnificação ~3.08×) para a sombra ter escala humana; a base
-     (rodapé) fica exatamente ao nível do chão (y=0) → centro em CASTER_H/2,
-     tal como um visitante de pé. ---- */
+     Rácio 4:3 = o da máscara (sem esticar a anatomia); na frente da sala
+     (z=7, com a luz a z=14.5 → magnificação ~3.13×) para a sombra nascer
+     aos pés do visitante com escala humana; a base (rodapé) fica exatamente
+     ao nível do chão (y=0) → centro em CASTER_H/2, tal como um visitante
+     de pé. ---- */
   maskTexture = new THREE.CanvasTexture(maskCanvas);
   maskTexture.colorSpace = THREE.SRGBColorSpace;
 
@@ -730,7 +747,7 @@ function initScene(THREE) {
     colorWrite: false, side: THREE.DoubleSide, depthWrite: false
   });
   casterMesh = new THREE.Mesh(casterGeo, casterMat);
-  casterMesh.position.set(0, CASTER_H / 2, 4.5); // pés (rodapé do plano) em y=0, z=4.5
+  casterMesh.position.set(0, CASTER_H / 2, 7); // pés (rodapé do plano) em y=0, z=7 — à frente da sala
   casterMesh.castShadow = true;
   casterMesh.receiveShadow = false;
   casterMesh.customDepthMaterial = new THREE.MeshDepthMaterial({
@@ -772,9 +789,9 @@ function renderLoop() {
   // caster ligeiramente para dentro da sala e aumenta-o — mas com os pés
   // presos ao chão, para nunca virar um blob que engole a sala. Faixa
   // encolhida (era baseZ=8.6/nearZ=6.6 com escala até 1+1.8=2.8×; agora
-  // baseZ=4.5/nearZ=3.6 — combina com a posição de repouso do caster da
-  // fix de proporções (magnificação ~3.08× em repouso) — e escala máxima 1.35×).
-  const baseZ = 4.5, nearZ = 3.6;
+  // baseZ=7/nearZ=6.1 — combina com a posição de repouso do caster (pés na
+  // frente da sala, magnificação ~3.13× em repouso) — e escala máxima 1.35×).
+  const baseZ = 7, nearZ = 6.1;
   casterMesh.position.z = baseZ - closeness * (baseZ - nearZ);
   const scale = 1 + closeness * 0.35; // 1 .. 1.35 (era 1 .. 1.8)
   casterMesh.scale.set(scale, scale, 1);
