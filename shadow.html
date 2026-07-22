@@ -590,8 +590,14 @@ function initScene(THREE) {
   const wallMat  = new THREE.MeshStandardMaterial({ color: 0xb8b0a4, roughness: 0.92, metalness: 0 });
   const ceilMat  = new THREE.MeshStandardMaterial({ color: 0x6b655c, roughness: 0.95, metalness: 0 });
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat);
-  floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, -ROOM_D / 2 + 5);
+  /* o chão estende-se 6 m para lá da boca da sala (até z=11): o caster está
+     a z=7 e os pés da sombra precisam de receptor DEBAIXO deles — sem esta
+     extensão, os raios da parte baixa da silhueta passavam por baixo de y=0
+     sem tocar em nada e a sombra ficava cortada a partir de z=5 (achado do
+     review do Codex no PR #19). A extensão fica fora do enquadramento normal. */
+  const FLOOR_EXT = 6;
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D + FLOOR_EXT), floorMat);
+  floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, -(ROOM_D + FLOOR_EXT) / 2 + 5 + FLOOR_EXT);
   floor.receiveShadow = true; scene.add(floor);
 
   const backWall = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_H), wallMat);
@@ -727,10 +733,11 @@ function initScene(THREE) {
 
   /* ---- o "caster": plano invisível com a máscara da silhueta, entre a luz
      e a sala — é isto que projeta a sombra do visitante nas paredes/objetos.
-     Rácio 4:3 = o da máscara (sem esticar a anatomia); afastado da luz
-     (z=4.5, magnificação ~3.08×) para a sombra ter escala humana; a base
-     (rodapé) fica exatamente ao nível do chão (y=0) → centro em CASTER_H/2,
-     tal como um visitante de pé. ---- */
+     Rácio 4:3 = o da máscara (sem esticar a anatomia); na frente da sala
+     (z=7, com a luz a z=14.5 → magnificação ~3.13×) para a sombra nascer
+     aos pés do visitante com escala humana; a base (rodapé) fica exatamente
+     ao nível do chão (y=0) → centro em CASTER_H/2, tal como um visitante
+     de pé. ---- */
   maskTexture = new THREE.CanvasTexture(maskCanvas);
   maskTexture.colorSpace = THREE.SRGBColorSpace;
 
