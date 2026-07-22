@@ -217,6 +217,12 @@ document.addEventListener("keydown", e => {
     // roda a orientação da projeção do gobo (se a montagem da câmara pedir)
     flipMode = (flipMode + 1) % 4;
     toast(`projeção: modo ${flipMode}`, 2000);
+  } else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && spotLight) {
+    // afinação ao vivo da altura da luz: mais baixa = mais corpo visível no
+    // ecrã; mais alta = sombra mais deitada no chão. Fixar o valor bom no código.
+    const dir = e.key === "ArrowUp" ? 0.1 : -0.1;
+    spotLight.position.y = Math.min(4.5, Math.max(2.0, spotLight.position.y + dir));
+    toast(`luz: y=${spotLight.position.y.toFixed(1)} m`, 1500);
   }
 });
 
@@ -529,7 +535,9 @@ function paintMask(result) {
   // já tem transform:scaleX(-1) em CSS, tal como no index.html)
   octx.clearRect(0, 0, overlay.width, overlay.height);
   octx.globalAlpha = 0.55;
+  octx.filter = "invert(1)"; // tmp agora é preto (gobo) — inverte para branco no PiP, legível sobre o vídeo
   octx.drawImage(tmp, 0, 0, w, h, 0, 0, overlay.width, overlay.height);
+  octx.filter = "none";
   octx.globalAlpha = 1;
 
   // cobertura (proximidade): amostra num canvas minúsculo
@@ -591,7 +599,7 @@ let fpsHasSample = false;
 
 /* ================= cena 3D (three.js) ================= */
 let scene, camera3, renderer, maskTexture, spotLight, dustPoints;
-let closeness = 0; // 0..1 suavizado a partir de `coverage` — alimenta o pill de proximidade
+// (o pill de proximidade lê `coverage` diretamente — não há estado suavizado) de proximidade
 
 function initScene(THREE) {
   scene = new THREE.Scene();
@@ -812,12 +820,8 @@ function onResize() {
 
 function renderLoop() {
   if (!running) { requestAnimationFrame(renderLoop); return; }
-  // suaviza a proximidade (evita saltos entre frames de segmentação)
-  closeness += ((coverage > 0.30 ? Math.min(1, (coverage - 0.30) / 0.4) : 0) - closeness) * 0.12;
-
   // com o gobo, o "crescimento" ao aproximar a mão acontece naturalmente:
-  // mais perto da câmara = maior no frame = maior no feixe. closeness fica
-  // só para o pill de proximidade do PiP.
+  // mais perto da câmara = maior no frame = maior no feixe.
 
   if (dustPoints) dustPoints.rotation.y += 0.0006;
 
