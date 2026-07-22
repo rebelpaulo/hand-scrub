@@ -135,6 +135,7 @@
   .chips { display: flex; gap: 8px; overflow-x: auto; flex: 1 1 auto; min-width: 0; max-width: 40vw; scrollbar-width: none; }
   .chips::-webkit-scrollbar { display: none; }
   .chip {
+    position: relative;
     flex: 0 0 auto; border: 1px solid var(--line); background: #151a24;
     color: var(--text); border-radius: 11px; padding: 10px 14px; font-size: 13px;
     font-weight: 600; cursor: pointer; transition: .15s; white-space: nowrap; min-height: 44px;
@@ -143,6 +144,11 @@
   .chip:hover { border-color: var(--accent); transform: translateY(-1px); }
   .chip.active { background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: var(--accent); color: #04211c; }
   .chip svg { flex: 0 0 auto; width: 18px; height: 18px; }
+  /* cena preset já em cache local (blob): pontinho no canto — operador vê o que está "quente" */
+  .chip.cached::after {
+    content: ""; position: absolute; top: 5px; right: 5px; width: 5px; height: 5px;
+    border-radius: 50%; background: var(--accent); box-shadow: 0 0 4px var(--accent);
+  }
 
   .btn {
     appearance: none; border: 1px solid var(--line); background: #151a24; color: var(--text);
@@ -378,7 +384,9 @@ function renderChips() {
   SCENES.forEach((s, i) => {
     if (s.hidden) return; // cena secreta: entra-se pelo modo 🙏
     const c = document.createElement("button");
-    c.className = "chip" + (i === activeScene ? " active" : "");
+    // "cached" deriva sempre da Map (não de um atributo próprio) — sobrevive a re-renders (ex: upload)
+    c.className = "chip" + (i === activeScene ? " active" : "") + (videoCache.has(s.src) ? " cached" : "");
+    c.dataset.sceneId = s.id;
     c.textContent = s.name;
     c.onclick = () => selectScene(i);
     chipsEl.appendChild(c);
@@ -386,7 +394,9 @@ function renderChips() {
 }
 function selectScene(i) {
   activeScene = i;
-  player.src = SCENES[i].src;
+  // usa o blob já pré-carregado quando existir; nunca troca o src do vídeo ATIVO
+  // por trás das costas do utilizador — isto só decide o src de uma cena nova
+  player.src = videoCache.get(SCENES[i].src) ?? SCENES[i].src;
   player.load();
   displayedTime = 0;
   targetTime = 0;
@@ -411,6 +421,38 @@ $("fileInput").onchange = e => {
   });
   selectScene(SCENES.length - files.length); // first of the newly added
 };
+
+/* ================= blob prefetch (cenas preset) =================
+   Instalação em wi-fi de evento: descarrega cada preset uma vez para um blob
+   e guarda o object URL — trocar de cena passa a ser leitura local, sem rede.
+   Sequencial (uma de cada vez) para não competir com o resto da rede; os
+   uploads (src já é object URL local) nunca entram aqui. */
+const videoCache = new Map(); // scene.src -> objectURL
+function isUpload(s) { return s.id.startsWith("upload:"); }
+async function prefetchOne(scene) {
+  if (videoCache.has(scene.src)) return true;
+  try {
+    const res = await fetch(scene.src);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    videoCache.set(scene.src, URL.createObjectURL(blob));
+    const chip = chipsEl.querySelector(`[data-scene-id="${CSS.escape(scene.id)}"]`);
+    if (chip) chip.classList.add("cached"); // renderChips() também deriva isto da Map em cada render
+    return true;
+  } catch (e) {
+    console.warn("[video-cache] falhou pré-carregamento:", scene.src, e);
+    return false;
+  }
+}
+async function prefetchAllScenes() {
+  const presets = SCENES.filter(s => !isUpload(s));
+  const activeSrc = SCENES[activeScene]?.src;
+  // a cena atualmente a tocar fica para o fim — não interessa competir com ela primeiro
+  const ordered = [...presets].sort((a, b) => (a.src === activeSrc) - (b.src === activeSrc));
+  const failed = [];
+  for (const scene of ordered) if (!(await prefetchOne(scene))) failed.push(scene);
+  for (const scene of failed) await prefetchOne(scene); // uma passagem de retry no fim
+}
 
 /* ================= UI helpers ================= */
 let toastT;
@@ -823,6 +865,7 @@ async function startExperience() {
     cam.srcObject = stream; await cam.play();
     overlay.width = cam.videoWidth; overlay.height = cam.videoHeight;
     running = true;
+    prefetchAllScenes(); // aquecimento em background — sequencial, não bloqueia nem compete com a câmara/modelo
     setLoadStatus("a preparar o primeiro frame");
     pip.applySavedVisibility(); $("bar").hidden = false;
     toast("✌️ Abre e fecha os dedos");
