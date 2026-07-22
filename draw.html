@@ -33,9 +33,32 @@
     background: var(--panel); backdrop-filter: blur(10px);
     border: 1px solid var(--line); border-radius: 99px;
     padding: 9px 18px; font-size: 13px; color: var(--hot);
-    z-index: 60; white-space: nowrap;
+    z-index: 96; max-width: calc(100vw - 32px);
+    white-space: normal; overflow-wrap: anywhere;
   }
   #notice[hidden] { display: none; }
+
+  /* ---------- start overlay (loader shown until hand tracking is ready) ---------- */
+  #startOverlay {
+    position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px;
+    background: radial-gradient(900px 600px at 50% 30%, #171226, #05070acc);
+    transition: opacity .4s;
+  }
+  #startOverlay h1 { font-size: clamp(26px, 5vw, 44px); margin: 0; letter-spacing: -.02em; }
+  #startOverlay p { color: var(--muted); max-width: 560px; text-align: center; line-height: 1.6; margin: 0; padding: 0 20px; }
+  #startOverlay .loading { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+  #startOverlay .loading-dots { display: inline-flex; gap: 4px; }
+  #startOverlay .loading-dots span {
+    width: 4px; height: 4px; border-radius: 50%; background: var(--muted);
+    animation: startDot 1.4s infinite both;
+  }
+  #startOverlay .loading-dots span:nth-child(2) { animation-delay: .2s; }
+  #startOverlay .loading-dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes startDot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    #startOverlay .loading-dots span { animation: none; opacity: .6; }
+  }
 
   /* ---------- tiny camera PiP ---------- */
   #pipWrap {
@@ -54,6 +77,17 @@
 
   <div id="hint">🤏 aperta o polegar e o indicador para escrever no ar</div>
   <div id="notice" hidden></div>
+
+  <!-- start / loader overlay -->
+  <div id="startOverlay">
+    <h1>✍️ Pinch Draw</h1>
+    <p>Aperta o polegar e o indicador para escrever no ar — larga para
+       acabar o traço; duas mãos, duas cores.</p>
+    <div class="loading" role="status" aria-live="polite" aria-atomic="true">
+      <span id="loadStatus">a preparar a câmara e o modelo</span>
+      <span class="loading-dots"><span></span><span></span><span></span></span>
+    </div>
+  </div>
 
   <div id="pipWrap">
     <video id="pipVideo" playsinline muted></video>
@@ -294,6 +328,22 @@ let landmarker = null, running = false, lastVideoTime = -1;
 
 function showNotice(msg) { notice.textContent = msg; notice.hidden = false; }
 
+function setLoadStatus(msg) {
+  const s = $("loadStatus");
+  if (s) s.textContent = msg;
+}
+
+let overlayDismissed = false;
+function dismissOverlay() {
+  if (overlayDismissed) return;
+  overlayDismissed = true;
+  const ov = $("startOverlay");
+  if (!ov) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { ov.remove(); return; }
+  ov.style.opacity = "0";
+  setTimeout(() => ov.remove(), 400);
+}
+
 async function initModel() {
   const { FilesetResolver, HandLandmarker } =
     await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
@@ -315,23 +365,28 @@ function loop() {
     lastVideoTime = pipVideo.currentTime;
     const res = landmarker.detectForVideo(pipVideo, now);
     processHands(res, now);
+    dismissOverlay(); // primeira deteção: o tracking já está a funcionar
   }
   drawPip();
   requestAnimationFrame(loop);
 }
 
 async function start() {
+  setLoadStatus("a carregar o modelo de mãos");
   try {
     await initModel();
   } catch (e) {
-    showNotice("📷 câmara indisponível — falha ao carregar o modelo de mãos");
+    showNotice("⚠️ não foi possível carregar o modelo de mãos — verifica a ligação e recarrega");
+    setLoadStatus("falhou — recarrega a página para tentar de novo");
     return;
   }
   try {
+    setLoadStatus("a ligar câmara");
     const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 960, height: 720, facingMode: "user" } });
     pipVideo.srcObject = stream; await pipVideo.play();
     pipCanvas.width = 160; pipCanvas.height = Math.round(160 * (pipVideo.videoHeight / pipVideo.videoWidth || 0.75));
     running = true;
+    setLoadStatus("a preparar a primeira deteção");
     stream.getVideoTracks()[0]?.addEventListener("ended", () => {
       running = false;
       handState.forEach(st => { st.visible = false; st.pinching = false; if (st.stroke) st.stroke.active = false; st.stroke = null; });
@@ -340,6 +395,7 @@ async function start() {
     loop();
   } catch (e) {
     showNotice("📷 câmara indisponível — verifica as permissões");
+    setLoadStatus("falhou — recarrega a página para tentar de novo");
   }
 }
 start();

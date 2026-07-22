@@ -90,16 +90,29 @@
   .pill.on .led { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
   .pill.hot .led { background: var(--hot); box-shadow: 0 0 8px var(--hot); }
 
-  /* ---------- start overlay ---------- */
+  /* ---------- start overlay (doubles as the ready-up loader) ---------- */
   #startOverlay {
     position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 18px;
     background: radial-gradient(900px 600px at 50% 30%, #131a2a, #05070acc);
+    transition: opacity .4s;
   }
   #startOverlay h1 { font-size: clamp(26px, 5vw, 44px); margin: 0; letter-spacing: -.02em; }
   #startOverlay p { color: var(--muted); max-width: 560px; text-align: center; line-height: 1.6; margin: 0; padding: 0 20px; }
   #startOverlay p b { color: var(--accent); }
   #startOverlay .err { color: var(--hot); min-height: 18px; font-size: 13px; }
+  #startOverlay .loading { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+  #startOverlay .loading-dots { display: inline-flex; gap: 4px; }
+  #startOverlay .loading-dots span {
+    width: 4px; height: 4px; border-radius: 50%; background: var(--muted);
+    animation: startDot 1.4s infinite both;
+  }
+  #startOverlay .loading-dots span:nth-child(2) { animation-delay: .2s; }
+  #startOverlay .loading-dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes startDot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    #startOverlay .loading-dots span { animation: none; opacity: .6; }
+  }
 
   /* ---------- bottom control bar ---------- */
   #bar {
@@ -242,7 +255,10 @@
        <b>afasta-as</b> — as águas separam-se contigo; junta-as e voltam.
        Na cena 📄 <b>Origami</b>: fecha a mão — de <b>palma aberta</b> a
        <b>punho cerrado</b> — como se estivesses a <b>amarrotar</b> a cara.</p>
-    <button class="btn primary" id="startBtn">Ativar câmara</button>
+    <div class="loading" role="status" aria-live="polite" aria-atomic="true">
+      <span id="loadStatus">a preparar a câmara e o modelo</span>
+      <span class="loading-dots"><span></span><span></span><span></span></span>
+    </div>
     <div class="err" id="startErr"></div>
   </div>
 
@@ -769,13 +785,32 @@ async function initModel() {
   });
 }
 
-$("startBtn").onclick = async () => {
-  const btn = $("startBtn"), err = $("startErr");
-  btn.disabled = true; btn.textContent = "A carregar modelo…";
-  // arranca a música SÍNCRONO com o clique (a ativação de autoplay expira
+function setLoadStatus(msg) {
+  const s = $("loadStatus");
+  if (s) s.textContent = msg;
+}
+
+let overlayDismissed = false;
+function dismissOverlay() {
+  if (overlayDismissed) return;
+  overlayDismissed = true;
+  const ov = $("startOverlay");
+  if (!ov) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { ov.remove(); return; }
+  ov.style.opacity = "0";
+  setTimeout(() => ov.remove(), 400);
+}
+
+async function startExperience() {
+  const err = $("startErr");
+  setLoadStatus("a carregar modelo");
+  // arranca a música SÍNCRONO com o arranque (a ativação de autoplay expira
   // durante o carregamento do modelo); se falhar, tenta no próximo toque
   if ($("musicOn").checked) {
     music.play().catch(() => {
+      // autoplay bloqueado (sem gesto — o botão de arranque já não existe):
+      // avisa em vez de ficar em silêncio misterioso, e retoma ao 1.º toque
+      toast("🔊 toca no ecrã para ativar o som");
       document.addEventListener("pointerdown",
         () => { if ($("musicOn").checked) music.play().catch(() => {}); },
         { once: true });
@@ -783,12 +818,12 @@ $("startBtn").onclick = async () => {
   }
   try {
     if (!landmarker) await initModel();
-    btn.textContent = "A ligar câmara…";
+    setLoadStatus("a ligar câmara");
     const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 960, height: 720, facingMode: "user" } });
     cam.srcObject = stream; await cam.play();
     overlay.width = cam.videoWidth; overlay.height = cam.videoHeight;
     running = true;
-    $("startOverlay").remove();
+    setLoadStatus("a preparar o primeiro frame");
     pip.applySavedVisibility(); $("bar").hidden = false;
     toast("✌️ Abre e fecha os dedos");
     lastFrameTime = performance.now(); lastCamFrameAt = lastFrameTime;
@@ -803,9 +838,9 @@ $("startBtn").onclick = async () => {
     loop();
   } catch (e) {
     err.textContent = "Erro: " + e.message;
-    btn.disabled = false; btn.textContent = "Ativar câmara";
+    setLoadStatus("falhou — recarrega a página para tentar de novo");
   }
-};
+}
 
 function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
 
@@ -816,6 +851,7 @@ function loop() {
     lastVideoTime = cam.currentTime;
     const res = landmarker.detectForVideo(cam, now);
     processHands(res);
+    dismissOverlay(); // primeiro frame processado: já há tracking a funcionar
     lastCamFrameAt = now;
   } else if (now - lastCamFrameAt > 1500 && (handVisible || anyHand)) {
     // câmara congelada/terminada: solta o gesto para não fazer scrub eterno
@@ -1063,6 +1099,7 @@ function applyTime(now) {
 renderChips();
 selectScene(pendingScene);
 cloudLoad();
+startExperience();
 </script>
 </body>
 </html>
