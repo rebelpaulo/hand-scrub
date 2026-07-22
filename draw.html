@@ -33,7 +33,8 @@
     background: var(--panel); backdrop-filter: blur(10px);
     border: 1px solid var(--line); border-radius: 99px;
     padding: 9px 18px; font-size: 13px; color: var(--hot);
-    z-index: 96; white-space: nowrap;
+    z-index: 96; max-width: calc(100vw - 32px);
+    white-space: normal; overflow-wrap: anywhere;
   }
   #notice[hidden] { display: none; }
 
@@ -82,7 +83,7 @@
     <h1>✍️ Pinch Draw</h1>
     <p>Aperta o polegar e o indicador para escrever no ar — larga para
        acabar o traço; duas mãos, duas cores.</p>
-    <div class="loading">
+    <div class="loading" role="status" aria-live="polite" aria-atomic="true">
       <span id="loadStatus">a preparar a câmara e o modelo</span>
       <span class="loading-dots"><span></span><span></span><span></span></span>
     </div>
@@ -375,7 +376,7 @@ async function start() {
   try {
     await initModel();
   } catch (e) {
-    showNotice("📷 câmara indisponível — falha ao carregar o modelo de mãos");
+    showNotice("⚠️ não foi possível carregar o modelo de mãos — verifica a ligação e recarrega");
     setLoadStatus("falhou — recarrega a página para tentar de novo");
     return;
   }
