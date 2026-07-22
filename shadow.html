@@ -223,6 +223,12 @@ document.addEventListener("keydown", e => {
     const dir = e.key === "ArrowUp" ? 0.1 : -0.1;
     spotLight.position.y = Math.min(4.5, Math.max(2.0, spotLight.position.y + dir));
     toast(`luz: y=${spotLight.position.y.toFixed(1)} m`, 1500);
+  } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && spotLight) {
+    // afinação ao vivo do cone: mais largo = frame maior na sala (sombra
+    // mais longe); mais apertado = feixe de projetor concentrado.
+    const dir = e.key === "ArrowRight" ? 0.02 : -0.02;
+    spotLight.angle = Math.min(0.9, Math.max(0.2, spotLight.angle + dir));
+    toast(`cone: ${(spotLight.angle * 180 / Math.PI).toFixed(0)}°`, 1500);
   }
 });
 
@@ -752,7 +758,15 @@ camera3.lookAt(0, 0.15, -6);
   // distância deixava-os visualmente escuros); o aumento garante chão
   // claramente iluminado e sombra de alto contraste mesmo com o ambient
   // subido para 0.32.
-  spotLight = new THREE.SpotLight(0xfff2dd, 11, 30, Math.PI / 3, 0.5, 1.3);
+  /* cone APERTADO (0.32 rad ≈ 18.3°): com o gobo, o cone define onde o frame
+   da câmara aterra na sala. Eixo deprime 9.3°; base do feixe = 9.3+18.3 =
+   27.6° abaixo da horizontal → toca o chão a z = 14.5 − 3.2/tan(27.6°) ≈ 8.4,
+   ligeiramente ATRÁS da margem visível do ecrã (z≈6.8) — o frame INTEIRO tem
+   receptor (chão até z=11) e a sombra entra "vinda de fora" só por uma
+   margem pequena (achado P1 do Codex no PR #22: a 60° a base aterrava a
+   z=13.3, sem chão). Feixe apertado = look de projetor, como a referência.
+   Afinável ao vivo com ←/→. */
+spotLight = new THREE.SpotLight(0xfff2dd, 11, 30, 0.32, 0.5, 1.3);
   /* luz recuada de z=11 para z=14.5 em conjunto com o caster avançado para
      z=7: a magnificação até à parede do fundo mantém-se ≈ (14.5+9)/(14.5−7)
      = 3.13× (igual à calibração anterior), mas os pés da sombra passam a
