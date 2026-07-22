@@ -808,6 +808,9 @@ async function startExperience() {
   // durante o carregamento do modelo); se falhar, tenta no próximo toque
   if ($("musicOn").checked) {
     music.play().catch(() => {
+      // autoplay bloqueado (sem gesto — o botão de arranque já não existe):
+      // avisa em vez de ficar em silêncio misterioso, e retoma ao 1.º toque
+      toast("🔊 toca no ecrã para ativar o som");
       document.addEventListener("pointerdown",
         () => { if ($("musicOn").checked) music.play().catch(() => {}); },
         { once: true });
