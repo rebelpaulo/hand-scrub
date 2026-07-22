@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Enxame — partículas sopradas pelo movimento</title>
+<style>
+  :root {
+    --panel: #0f1219cc;
+    --line: #2a3245;
+    --text: #eef2f8;
+    --muted: #98a2b6;
+    --hot: #fb7185;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: var(--text); }
+
+  /* ---------- fullscreen mirrored camera background ---------- */
+  video#camBg {
+    position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0;
+    object-fit: cover; transform: scaleX(-1); background: #000;
+  }
+  /* ---------- particle canvas, layered above the camera ---------- */
+  canvas#stage {
+    position: fixed; inset: 0; width: 100%; height: 100%; z-index: 1;
+    pointer-events: none;
+  }
+
+  /* ---------- hint pill ---------- */
+  #hint {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 99px;
+    padding: 9px 18px; font-size: 13px; color: var(--text);
+    z-index: 50; white-space: nowrap; pointer-events: none;
+  }
+
+  /* ---------- camera-fail notice ---------- */
+  #notice {
+    position: fixed; left: 50%; top: 18px; transform: translateX(-50%);
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 99px;
+    padding: 9px 18px; font-size: 13px; color: var(--hot);
+    z-index: 96; max-width: calc(100vw - 32px);
+    white-space: normal; overflow-wrap: anywhere;
+  }
+  #notice[hidden] { display: none; }
+
+  /* ---------- start overlay (loader shown until the first camera frame is processed) ---------- */
+  #startOverlay {
+    position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px;
+    background: radial-gradient(900px 600px at 50% 30%, #101722, #05070acc);
+    transition: opacity .4s;
+  }
+  #startOverlay h1 { font-size: clamp(26px, 5vw, 44px); margin: 0; letter-spacing: -.02em; }
+  #startOverlay p { color: var(--muted); max-width: 560px; text-align: center; line-height: 1.6; margin: 0; padding: 0 20px; }
+  #startOverlay .loading { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+  #startOverlay .loading-dots { display: inline-flex; gap: 4px; }
+  #startOverlay .loading-dots span {
+    width: 4px; height: 4px; border-radius: 50%; background: var(--muted);
+    animation: startDot 1.4s infinite both;
+  }
+  #startOverlay .loading-dots span:nth-child(2) { animation-delay: .2s; }
+  #startOverlay .loading-dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes startDot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    #startOverlay .loading-dots span { animation: none; opacity: .6; }
+  }
+</style>
+</head>
+<body>
+  <a href="index.html" style="position:fixed;top:16px;left:16px;z-index:95;text-decoration:none;color:#eef2f8;background:#0f1219cc;border:1px solid #2a3245;border-radius:11px;padding:8px 14px;font-size:13px;font-weight:600">← voltar</a>
+
+  <video id="camBg" playsinline muted></video>
+  <canvas id="stage"></canvas>
+
+  <div id="hint">🌬️ mexe-te — o teu movimento sopra as partículas</div>
+  <div id="notice" hidden></div>
+
+  <!-- start / loader overlay -->
+  <div id="startOverlay">
+    <h1>🌬️ Enxame</h1>
+    <p>mexe-te — o teu movimento sopra as partículas</p>
+    <div class="loading" role="status" aria-live="polite" aria-atomic="true">
+      <span id="loadStatus">a preparar a câmara</span>
+      <span class="loading-dots"><span></span><span></span><span></span></span>
+    </div>
+  </div>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+const camBg = $("camBg"), stage = $("stage"), sctx = stage.getContext("2d");
+const notice = $("notice");
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ================= tunables ================= */
+const GRID_W = 64, GRID_H = 48;        // coarse motion-energy grid (mirror-aligned with the view)
+const ENERGY_EMA = 0.5;                // temporal smoothing on the energy grid, avoids flicker
+const FORCE_SCALE = 8;                 // energy-gradient units -> px/s^2 pushed on a particle
+const SWIRL_AMP = 22;                  // px/s^2, cheap sin/cos turbulence
+const DRIFT_AMP = 6;                   // px/s^2, tiny random settle jitter
+const DRAG = 0.94;                     // per-frame velocity damping
+const MAX_DT = 0.05;                   // s, clamp so a tab-suspend gap can't fling particles
+const STREAK_K = 0.06;                 // trail length factor (streak = velocity * STREAK_K)
+const BASE_PARTICLES = 3500;
+const PARTICLE_FLOOR = 1200;
+const PERF_FRAME_MS = 24;              // rAF EMA above this triggers a 25% particle-count step-down
+const PERF_STEP = 0.75;
+const PERF_COOLDOWN_MS = 2000;
+
+/* ================= pure motion-force math (also covered by the node harness) ================= */
+// Force on a particle sitting in grid cell (gx,gy): the negative gradient of
+// the energy field, i.e. push AWAY from the cell(s) where motion just
+// happened (energy is high) toward where it's calmer (energy is low).
+function gradientForce(grid, gw, gh, gx, gy) {
+  const cx = Math.min(gw - 1, Math.max(0, gx));
+  const cy = Math.min(gh - 1, Math.max(0, gy));
+  const xL = grid[cy * gw + Math.max(0, cx - 1)];
+  const xR = grid[cy * gw + Math.min(gw - 1, cx + 1)];
+  const yT = grid[Math.max(0, cy - 1) * gw + cx];
+  const yB = grid[Math.min(gh - 1, cy + 1) * gw + cx];
+  const gxGrad = (xR - xL) / 2; // energy increasing to the right
+  const gyGrad = (yB - yT) / 2; // energy increasing downward
+  return { fx: -gxGrad, fy: -gyGrad };
+}
+function clampDt(dt, maxDt) { return Math.min(dt, maxDt); }
+
+/* ================= canvas sizing (DPR-aware, capped) ================= */
+let W = 0, H = 0;
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  stage.width = Math.round(W * dpr); stage.height = Math.round(H * dpr);
+  stage.style.width = W + "px"; stage.style.height = H + "px";
+  sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* ================= offscreen motion-energy grid ================= */
+const gridCanvas = document.createElement("canvas");
+gridCanvas.width = GRID_W; gridCanvas.height = GRID_H;
+const gctx = gridCanvas.getContext("2d", { willReadFrequently: true });
+let lumaPrev = new Float32Array(GRID_W * GRID_H);
+let energyGrid = new Float32Array(GRID_W * GRID_H);
+let firstFrameProcessed = false;
+
+function updateMotionGrid() {
+  // draw the current camera frame mirrored into the coarse grid so grid
+  // space lines up 1:1 with the mirrored view the visitor sees on screen.
+  gctx.save();
+  gctx.translate(GRID_W, 0);
+  gctx.scale(-1, 1);
+  gctx.drawImage(camBg, 0, 0, GRID_W, GRID_H);
+  gctx.restore();
+
+  const data = gctx.getImageData(0, 0, GRID_W, GRID_H).data;
+  for (let i = 0, p = 0; i < GRID_W * GRID_H; i++, p += 4) {
+    const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+    const energy = Math.abs(luma - lumaPrev[i]);
+    energyGrid[i] = energyGrid[i] * (1 - ENERGY_EMA) + energy * ENERGY_EMA;
+    lumaPrev[i] = luma;
+  }
+  if (!firstFrameProcessed) { firstFrameProcessed = true; dismissOverlay(); }
+}
+
+/* ================= particles ================= */
+function computeParticleCount() {
+  const isMobile = matchMedia("(max-width: 720px)").matches || matchMedia("(pointer: coarse)").matches;
+  let n = isMobile ? BASE_PARTICLES / 2 : BASE_PARTICLES;
+  const areaFactor = Math.min(1.4, Math.max(0.6, (window.innerWidth * window.innerHeight) / (1280 * 800)));
+  return Math.max(PARTICLE_FLOOR, Math.round(n * areaFactor));
+}
+
+let particles = [];
+function spawnParticle(p) {
+  p.x = Math.random() * W; p.y = Math.random() * H;
+  p.vx = 0; p.vy = 0;
+  p.alpha = 0.25 + Math.random() * 0.45;
+  p.width = 1 + Math.random() * 0.5;
+  p.seed = Math.random() * 1000;
+  return p;
+}
+function buildParticles(count) {
+  particles = new Array(count).fill(null).map(() => spawnParticle({}));
+}
+buildParticles(computeParticleCount());
+
+function stepParticles(dt, now) {
+  const gw = GRID_W, gh = GRID_H;
+  for (const p of particles) {
+    const gx = Math.floor((p.x / W) * gw);
+    const gy = Math.floor((p.y / H) * gh);
+    const { fx, fy } = gradientForce(energyGrid, gw, gh, gx, gy);
+
+    const swirlX = Math.cos(p.y * 0.01 + now * 0.0005 + p.seed) * SWIRL_AMP;
+    const swirlY = Math.sin(p.x * 0.01 + now * 0.0005 + p.seed) * SWIRL_AMP;
+    const driftX = (Math.random() - 0.5) * DRIFT_AMP;
+    const driftY = (Math.random() - 0.5) * DRIFT_AMP;
+
+    p.vx += (fx * FORCE_SCALE + swirlX + driftX) * dt;
+    p.vy += (fy * FORCE_SCALE + swirlY + driftY) * dt;
+    p.vx *= DRAG; p.vy *= DRAG;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+
+    // wrap at edges instead of a hard respawn pop
+    if (p.x < 0) p.x += W; else if (p.x > W) p.x -= W;
+    if (p.y < 0) p.y += H; else if (p.y > H) p.y -= H;
+  }
+}
+
+function drawParticles() {
+  sctx.clearRect(0, 0, W, H);
+  sctx.globalCompositeOperation = "lighter";
+  sctx.strokeStyle = "#fff";
+  sctx.lineCap = "round";
+  for (const p of particles) {
+    sctx.globalAlpha = p.alpha;
+    sctx.lineWidth = p.width;
+    sctx.beginPath();
+    sctx.moveTo(p.x - p.vx * STREAK_K, p.y - p.vy * STREAK_K);
+    sctx.lineTo(p.x, p.y);
+    sctx.stroke();
+  }
+  sctx.globalAlpha = 1; sctx.globalCompositeOperation = "source-over";
+}
+
+/* ================= perf guard: shrink the swarm if frames run slow ================= */
+let frameTimeEMA = 16, lastPerfStepAt = 0, perfSteps = 0;
+function perfGuard(rawDtMs, now) {
+  frameTimeEMA = frameTimeEMA * 0.9 + rawDtMs * 0.1;
+  if (frameTimeEMA > PERF_FRAME_MS && particles.length > PARTICLE_FLOOR && now - lastPerfStepAt > PERF_COOLDOWN_MS) {
+    const next = Math.max(PARTICLE_FLOOR, Math.round(particles.length * PERF_STEP));
+    if (next < particles.length) {
+      particles.length = next;
+      lastPerfStepAt = now; perfSteps++;
+      console.info(`enxame: perf step ${perfSteps} — frame EMA ${frameTimeEMA.toFixed(1)}ms, particles -> ${next}`);
+    }
+  }
+}
+
+/* ================= render loop ================= */
+let lastVideoTime = -1, lastRawT = performance.now(), lastPhysT = performance.now();
+function frame(now) {
+  const rawDtMs = now - lastRawT; lastRawT = now;
+  perfGuard(rawDtMs, now);
+
+  if (running && camBg.currentTime !== lastVideoTime) {
+    lastVideoTime = camBg.currentTime;
+    updateMotionGrid();
+  }
+
+  const dt = clampDt((now - lastPhysT) / 1000, MAX_DT);
+  lastPhysT = now;
+  stepParticles(dt, now);
+  drawParticles();
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ================= camera ================= */
+let running = false;
+
+function showNotice(msg) { notice.textContent = msg; notice.hidden = false; }
+function setLoadStatus(msg) { const s = $("loadStatus"); if (s) s.textContent = msg; }
+
+let overlayDismissed = false;
+function dismissOverlay() {
+  if (overlayDismissed) return;
+  overlayDismissed = true;
+  const ov = $("startOverlay");
+  if (!ov) return;
+  if (reduceMotion) { ov.remove(); return; }
+  ov.style.opacity = "0";
+  setTimeout(() => ov.remove(), 400);
+}
+
+async function start() {
+  try {
+    setLoadStatus("a ligar câmara");
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 960, height: 720, facingMode: "user" } });
+    camBg.srcObject = stream; await camBg.play();
+    running = true;
+    setLoadStatus("a preparar a primeira leitura de movimento");
+    stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+      running = false;
+      showNotice("📷 câmara indisponível — câmara desligada");
+    });
+  } catch (e) {
+    showNotice("📷 câmara indisponível — verifica as permissões");
+    setLoadStatus("falhou — recarrega a página para tentar de novo");
+  }
+}
+start();
+</script>
+</body>
+</html>

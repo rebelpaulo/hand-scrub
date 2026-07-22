@@ -17,6 +17,7 @@
     --hot: #fb7185;
     --amber: #f59e0b;    /* Sala de Sombras */
     --magenta: #ff4dd2;  /* Pinch Draw */
+    --ice: #cbd5e1;      /* Enxame */
     --bg-0: #000;
     --bg-1: #05070a;
   }
@@ -150,7 +151,7 @@
     letter-spacing: -0.01em; color: var(--text);
   }
   .cards {
-    display: flex; gap: clamp(16px, 2vw, 32px); width: 100%; max-width: 1400px;
+    display: flex; gap: clamp(16px, 2vw, 32px); width: 100%; max-width: 920px;
     justify-content: center; flex-wrap: wrap;
   }
   .card {
@@ -164,10 +165,12 @@
   .card[data-accent="teal"]:hover, .card[data-accent="teal"]:focus-visible, .card[data-accent="teal"].hover { border-color: var(--accent); }
   .card[data-accent="amber"]:hover, .card[data-accent="amber"]:focus-visible, .card[data-accent="amber"].hover { border-color: var(--amber); }
   .card[data-accent="magenta"]:hover, .card[data-accent="magenta"]:focus-visible, .card[data-accent="magenta"].hover { border-color: var(--magenta); }
+  .card[data-accent="ice"]:hover, .card[data-accent="ice"]:focus-visible, .card[data-accent="ice"].hover { border-color: var(--ice); }
   .card.selected { transform: translateY(-6px) scale(1.02); }
   .card[data-accent="teal"].selected    { border-color: var(--accent);  box-shadow: 0 0 0 2px #5eead455, 0 30px 70px -20px #5eead433; }
   .card[data-accent="amber"].selected   { border-color: var(--amber);   box-shadow: 0 0 0 2px #f59e0b55, 0 30px 70px -20px #f59e0b33; }
   .card[data-accent="magenta"].selected { border-color: var(--magenta); box-shadow: 0 0 0 2px #ff4dd255, 0 30px 70px -20px #ff4dd233; }
+  .card[data-accent="ice"].selected     { border-color: var(--ice);     box-shadow: 0 0 0 2px #cbd5e155, 0 30px 70px -20px #cbd5e133; }
 
   .card .preview { position: relative; aspect-ratio: 16/10; overflow: hidden; }
   .card[data-accent="teal"] .preview {
@@ -182,9 +185,14 @@
     background: radial-gradient(120% 120% at 30% 80%, #3a0c34, #10041e 70%);
     animation: previewShiftMagenta 9s ease-in-out infinite alternate;
   }
+  .card[data-accent="ice"] .preview {
+    background: radial-gradient(120% 120% at 50% 20%, #1c2836, #070a0e 70%);
+    animation: previewShiftIce 9s ease-in-out infinite alternate;
+  }
   @keyframes previewShiftTeal    { from { background-position: 0% 0%; } to { background-position: 40% 60%; } }
   @keyframes previewShiftAmber   { from { background-position: 100% 0%; } to { background-position: 60% 50%; } }
   @keyframes previewShiftMagenta { from { background-position: 0% 100%; } to { background-position: 55% 30%; } }
+  @keyframes previewShiftIce     { from { background-position: 20% 0%; } to { background-position: 65% 45%; } }
   .card .preview .icon {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     filter: drop-shadow(0 10px 30px #0008);
@@ -194,6 +202,7 @@
   .card[data-accent="teal"] .preview .icon svg    { color: var(--accent); }
   .card[data-accent="amber"] .preview .icon svg   { color: var(--amber); }
   .card[data-accent="magenta"] .preview .icon svg { color: var(--magenta); }
+  .card[data-accent="ice"] .preview .icon svg     { color: var(--ice); }
   @keyframes iconFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 
   /* dwell ring — filled by real mouse :hover (CSS) or by gesture dwell (JS) */
@@ -210,6 +219,7 @@
   .card[data-accent="teal"] .dwell circle.fill    { stroke: var(--accent); }
   .card[data-accent="amber"] .dwell circle.fill   { stroke: var(--amber); }
   .card[data-accent="magenta"] .dwell circle.fill { stroke: var(--magenta); }
+  .card[data-accent="ice"] .dwell circle.fill     { stroke: var(--ice); }
   .card:hover .dwell circle.fill { stroke-dashoffset: 0; }
   /* gesture-driven dwell writes stroke-dashoffset inline (JS) — no CSS transition then */
   .card.gesture-dwelling .dwell circle.fill { transition: none; }
@@ -351,6 +361,19 @@
           </div>
         </button>
 
+        <button class="card" type="button" data-accent="ice" data-href="enxame.html">
+          <div class="preview"><span class="icon">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.59 4.59A2 2 0 1 1 11 8H2"/><path d="M12.59 11.59A2 2 0 1 1 14 15H2"/><path d="M17.6 6.6A1 1 0 1 1 19 8H2"/></svg>
+          </span></div>
+          <div class="dwell">
+            <svg aria-hidden="true" viewBox="0 0 46 46"><circle class="track" cx="23" cy="23" r="20"/><circle class="fill" cx="23" cy="23" r="20"/></svg>
+          </div>
+          <div class="body">
+            <h3 class="title">🌬️ Enxame</h3>
+            <p class="desc">o teu movimento sopra milhares de partículas</p>
+          </div>
+        </button>
+
       </div>
     </section>
   </div>
@@ -420,6 +443,7 @@ const EXPERIENCES = [
   { name: "🦋 BUTTERFLY EFFECT", accent: "#5eead4" },
   { name: "🌑 SALA DE SOMBRAS",  accent: "#f59e0b" },
   { name: "✍️ PINCH DRAW",       accent: "#ff4dd2" },
+  { name: "🌬️ ENXAME",          accent: "#cbd5e1" },
 ];
 let expIdx = 0;
 function paintExperience(i) {
