@@ -82,19 +82,28 @@ npx serve -l 8777
 - `shadow.html` — 🌑 Sala de Sombras (beta): a sombra do corpo projetada
   numa sala 3D.
 - `draw.html` — ✍️ Pinch Draw: pintura de luz no ar com o gesto de pinch.
-- `enxame.html` — 🌬️ Enxame: milhares de partículas brancas orbitam num
-  **cilindro** à volta do eixo vertical da cabeça (MediaPipe `FaceDetector`
-  localiza a cabeça), cada uma com o seu raio, deslocamento vertical e
-  velocidade angular (sentidos opostos). A profundidade (`z = sin(theta)`)
-  faz as partículas do lado de trás passarem **atrás da cabeça** — uma
-  elipse suave, recortada da caixa do `FaceDetector`, apaga-as onde se
-  cruzam com a cara (não é um modelo de segmentação; é o compromisso
-  escolhido). Aperta o polegar e o indicador (`HandLandmarker`, em
-  qualquer das mãos) para as atrair como um íman rápido — elas seguem os
-  dedos enquanto o pinch está fechado; ao largar, cada partícula recupera
-  o seu ângulo a partir da posição onde ficou (mantendo raio e altura) e o
-  enxame retoma logo a órbita, ainda agrupado — as velocidades angulares
-  diferentes espalham-no de novo por todo o cilindro ao longo de alguns
-  segundos.
+- `enxame.html` — 🌬️ Enxame: milhares (9000, 2500 no mínimo) de partículas
+  brancas orbitam num **cilindro que enche o ecrã todo**, à volta do eixo
+  vertical da cabeça (MediaPipe `FaceDetector` localiza a cabeça). O raio de
+  cada partícula vai de `head.r×1.15` até à distância ao canto mais afastado
+  do ecrã (`×1.05`), com densidade **areal** (`r = sqrt(lerp(rMin², rMax²,
+  seed))`) para encher o ecrã de forma uniforme em vez de se amontoar junto à
+  cabeça; a altura (`hOff`) também é relativa ao ecrã (`±0.48×H`). Todas
+  giram no **mesmo sentido** (velocidade angular sempre positiva, banda
+  estreita 0.22–0.38 rad/s) — o lado de trás do cilindro (`sin(theta)<0`)
+  desloca-se sempre da **esquerda para a direita** atrás da cabeça. A
+  profundidade (`z = sin(theta)`) faz as partículas do lado de trás passarem
+  **atrás da cabeça** — uma elipse suave, recortada da caixa do
+  `FaceDetector` (só ativa quando há cara real detetada, nunca no fallback
+  de ecrã-centro), apaga-as onde se cruzam com a cara (não é um modelo de
+  segmentação; é o compromisso escolhido); a tecla **`o`** tinge essa elipse
+  de vermelho durante 3s para conferir o alinhamento. Aperta o polegar e o
+  indicador (`HandLandmarker`, em qualquer das mãos) para as atrair como um
+  íman rápido — elas seguem os dedos enquanto o pinch está fechado; ao
+  largar, cada partícula recupera o seu ângulo a partir da posição onde
+  ficou e volta primeiro como um **grupo compacto** (raio apertado, ~1.6×
+  a cabeça) que se vai **espalhando lentamente ao longo de ~9s** até
+  reocupar todo o cilindro — como giram todas no mesmo sentido, o grupo
+  viaja-se visivelmente junto antes de se dispersar.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).
