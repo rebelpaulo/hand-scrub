@@ -699,7 +699,12 @@ function stepParticles(dt, now) {
     if (Math.hypot(p.x - W / 2, p.y - H / 2) > screenDiag * FUGITIVE_DIST_FACTOR) {
       const anchor = cylinderAnchor(p.theta, rParticle, particleHOffPx(p, H), h);
       p.x = anchor.x; p.y = anchor.y; p.z = anchor.z;
-      const tHatX = -Math.sin(p.theta) * tornadoSign, tHatY = Math.cos(p.theta) * tornadoSign;
+      // mesma tangente REAL do anel do fix do PR #28 (inclui CYL_WOBBLE no y,
+      // normalizada) — sem isto o re-snap perto de θ=0/π relançava a partícula
+      // com velocidade vertical a mais.
+      let tHatX = -Math.sin(p.theta) * tornadoSign, tHatY = CYL_WOBBLE * Math.cos(p.theta) * tornadoSign;
+      const tLen = Math.hypot(tHatX, tHatY) || 1;
+      tHatX /= tLen; tHatY /= tLen;
       const ambientTanSpeed = p.angularSpeed * vortexFactor(rParticle, rRef) * rParticle;
       p.vx = tHatX * ambientTanSpeed;
       p.vy = tHatY * ambientTanSpeed;
