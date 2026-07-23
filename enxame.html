@@ -101,6 +101,12 @@ const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 /* ================= tunables ================= */
 // hand tracking (pinch hysteresis — exact pattern from draw.html)
 const PINCH_ENTER = 0.35, PINCH_EXIT = 0.5;
+// ENTRY DEBOUNCE: landmark noise during fast hand motion can dip the ratio
+// below PINCH_ENTER for a frame or two even though the user never pinched --
+// require it to stay below PINCH_ENTER continuously for this long before the
+// pinch actually activates (hysteresis EXIT is unaffected -- once pinching,
+// it still exits at ratio >= PINCH_EXIT with no debounce).
+const PINCH_DEBOUNCE_MS = 120;
 
 // head/face tracking
 const FACE_EVERY_N = 3;                // run face detection every 3rd tracked frame (cheap; hands run every frame)
@@ -208,8 +214,13 @@ const RELEASE_HOME_TOL = 0.05; // 5% of home value (floored at 1px so a near-zer
 // volta no tornado a partir de onde ficou (mesmo caminho de largada honesta
 // de sempre, correndo mais tarde e por partícula -- ver adoptAndReabsorb).
 // Largada lenta (< THROW_MIN) continua a ser exatamente o caminho v7.
-const VEL_EMA_ALPHA = 0.5;      // suavização da velocidade do pinch (0..1, maior = menos suave)
+const VEL_EMA_ALPHA = 0.5;      // suavização da velocidade da palma (0..1, maior = menos suave)
 const THROW_MIN = 350;          // px/s -- abaixo disto é largada lenta normal (v7)
+// THROW MIN HOLD: um micro-pinch (falso positivo por ruído durante um
+// movimento rápido da mão) nunca pode arremessar o enxame, mesmo que a mão
+// esteja rápida -- só conta como arremesso se o pinch durou pelo menos isto
+// (pinchStart já é rastreado por mão, ver processHands).
+const THROW_MIN_HOLD_MS = 200;
 const THROW_GAIN = 0.85;        // fração da velocidade da mão herdada por cada partícula
 const SPREAD_K = 0.35;          // magnitude do espalhamento (fração de |v_hand|) -- separa mais quanto mais rápido
 const THROW_CONE_RAD = 35 * Math.PI / 180; // cone de espalhamento em torno da direção do arremesso
@@ -601,7 +612,7 @@ let pinchPoints = [];
 // não Left/Right -- a SEGUNDA a ser processada nesse frame vence o empate
 // (aproximação razoável de "a mão que largou por último" quando não há
 // ordem sub-frame disponível).
-let lastReleaseHand = null, lastReleaseVX = 0, lastReleaseVY = 0;
+let lastReleaseHand = null, lastReleaseVX = 0, lastReleaseVY = 0, lastReleaseHoldMs = 0;
 function processHands(res, now) {
   const hands = res.landmarks || [];
   const pts = [];
@@ -620,38 +631,59 @@ function processHands(res, now) {
     const handSize = dist(lm[0], lm[9]) || 0.0001;
     const ratio = dist(lm[4], lm[8]) / handSize;
     const was = st.pinching;
-    st.pinching = st.pinching ? ratio < PINCH_EXIT : ratio < PINCH_ENTER;
+    if (st.pinching) {
+      st.pinching = ratio < PINCH_EXIT; // hysteresis EXIT unchanged, no debounce
+    } else if (ratio < PINCH_ENTER) {
+      // ENTRY DEBOUNCE: only activate once the ratio has stayed below ENTER
+      // continuously for PINCH_DEBOUNCE_MS -- filters transient landmark noise
+      // (fast hand motion) from a real pinch gesture.
+      if (st.belowSince === undefined) st.belowSince = now;
+      st.pinching = (now - st.belowSince) >= PINCH_DEBOUNCE_MS;
+    } else {
+      st.belowSince = undefined; // ratio rose back above ENTER before debounce elapsed -- reset
+    }
     if (st.pinching && !was) {
       st.pinchStart = performance.now();
       tornadoSign = HAND_SWIRL[userHand] ?? tornadoSign; // most recent pinch START wins, persists after release
       // ARREMESSO: começa um pinch novo -- limpa a velocidade rastreada para
       // não sobreviver nenhuma velocidade "presa" de um pinch anterior.
-      st.vx = undefined; st.vy = undefined; st.prevPt = undefined;
+      st.vx = undefined; st.vy = undefined; st.prevPalm = undefined;
     }
     if (st.pinching) {
       const midXn = (lm[4].x + lm[8].x) / 2, midYn = (lm[4].y + lm[8].y) / 2;
-      const p = camToScreen(midXn, midYn); // cover + espelho — alinha o íman com os dedos VISÍVEIS
+      const p = camToScreen(midXn, midYn); // cover + espelho — alinha o íman com os dedos VISÍVEIS (alvo de atração)
       pts.push({ x: p.x, y: p.y, userHand, since: st.pinchStart || 0 });
-      // ARREMESSO: EMA da velocidade do ponto de pinch enquanto está a apertar.
-      if (st.prevPt !== undefined) {
-        const ema = velocityEMAStep(st.prevPt.x, st.prevPt.y, st.prevPt.t, p.x, p.y, now, st.vx, st.vy, VEL_EMA_ALPHA);
+      // ARREMESSO: EMA da velocidade rastreada na PALMA (ponto médio do pulso
+      // lm[0] e da base do dedo médio lm[9]), NÃO no ponto de pinch -- abrir os
+      // dedos desloca o ponto médio polegar-indicador mesmo com a mão parada,
+      // gerando uma velocidade de largada ilógica; a palma só se move quando a
+      // mão inteira se move, o que é um sinal real de arremesso.
+      const palmXn = (lm[0].x + lm[9].x) / 2, palmYn = (lm[0].y + lm[9].y) / 2;
+      const palm = camToScreen(palmXn, palmYn);
+      if (st.prevPalm !== undefined) {
+        const ema = velocityEMAStep(st.prevPalm.x, st.prevPalm.y, st.prevPalm.t, palm.x, palm.y, now, st.vx, st.vy, VEL_EMA_ALPHA);
         st.vx = ema.vx; st.vy = ema.vy;
       }
-      st.prevPt = { x: p.x, y: p.y, t: now };
+      st.prevPalm = { x: palm.x, y: palm.y, t: now };
     }
     if (was && !st.pinching) {
       // ARREMESSO: esta mão acabou de largar -- guarda-a como candidata a
-      // "mão que largou" (ver comentário de lastReleaseHand acima).
+      // "mão que largou" (ver comentário de lastReleaseHand acima), incluindo
+      // há quanto tempo esteve em pinch (THROW MIN HOLD, ver stepParticles).
       lastReleaseHand = userHand;
       lastReleaseVX = st.vx || 0; lastReleaseVY = st.vy || 0;
+      lastReleaseHoldMs = st.pinchStart !== undefined ? now - st.pinchStart : 0;
     }
   }
   // mão não detetada este frame enquanto apertava = largada também (saiu do
-  // enquadramento a meio do pinch) -- mesma captação de velocidade acima.
+  // enquadramento a meio do pinch) -- mesma captação de velocidade/duração acima.
   for (const name of ["Left", "Right"]) {
     if (seen[name]) continue;
     const st = handState[name];
-    if (st.pinching) { lastReleaseHand = name; lastReleaseVX = st.vx || 0; lastReleaseVY = st.vy || 0; }
+    if (st.pinching) {
+      lastReleaseHand = name; lastReleaseVX = st.vx || 0; lastReleaseVY = st.vy || 0;
+      lastReleaseHoldMs = st.pinchStart !== undefined ? now - st.pinchStart : 0;
+    }
     st.pinching = false;
   }
   pinchPoints = pts;
@@ -727,8 +759,11 @@ function stepParticles(dt, now) {
   if (wasPinching && !anyPinch) {
     releaseAt = now;
     // ARREMESSO: velocidade da mão que largou por último (ver processHands).
+    // THROW MIN HOLD: um pinch curto de mais (< THROW_MIN_HOLD_MS) nunca conta
+    // como arremesso, seja qual for a velocidade da mão -- filtra o micro-pinch
+    // + micro-arremesso que o ruído de landmarks durante um gesto rápido cria.
     const vHandX = lastReleaseVX, vHandY = lastReleaseVY;
-    const isThrow = Math.hypot(vHandX, vHandY) >= THROW_MIN;
+    const isThrow = Math.hypot(vHandX, vHandY) >= THROW_MIN && lastReleaseHoldMs >= THROW_MIN_HOLD_MS;
     for (const p of particles) {
       delete p.ballisticUntil; // limpa qualquer voo balístico de um arremesso anterior
       if (isThrow) {

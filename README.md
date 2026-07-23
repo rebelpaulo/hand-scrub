@@ -135,11 +135,17 @@ npx serve -l 8777
   chegam (a 5% de distância); uma partícula apanhada a meio do caminho na
   largada quase não se mexe, e o ecrã reenche-se organicamente ao longo de
   ~10–20s — só as que tiveram tempo de lá chegar é que se veem espalhadas.
-  **Arremesso**: se a mão estiver a mover-se rápido (≥350px/s) no instante em
-  que larga o pinch, o enxame é atirado nessa direção — cada partícula ganha
-  velocidade da mão mais um espalhamento em cone que abre mais quanto mais
-  rápido o gesto, voa livre por ~0,7s e só depois aterra e derrete de volta
-  no tornado a partir de onde ficou; uma largada lenta continua a comportar-se
-  como antes (sem arremesso).
+  **Arremesso**: se a **palma** (ponto médio pulso↔base do dedo médio, não o
+  ponto de pinch) estiver a mover-se rápido (≥350px/s) no instante em que
+  larga o pinch — e o pinch tiver durado pelo menos 200ms —, o enxame é
+  atirado nessa direção — cada partícula ganha velocidade da mão mais um
+  espalhamento em cone que abre mais quanto mais rápido o gesto, voa livre
+  por ~0,7s e só depois aterra e derrete de volta no tornado a partir de onde
+  ficou; uma largada lenta, ou um pinch demasiado curto, continuam a
+  comportar-se como antes (sem arremesso). Rastrear a velocidade na palma em
+  vez do ponto de pinch evita um "arremesso fantasma" quando só se abrem os
+  dedos com a mão parada; um pequeno atraso (120ms) a ativar o pinch e a
+  exigência dos 200ms filtram falsos pinches causados por ruído da câmara
+  durante um movimento rápido da mão.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).
