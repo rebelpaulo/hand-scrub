@@ -415,7 +415,11 @@ function velocityEMAStep(px, py, pt, x, y, now, prevVx, prevVy, alpha) {
 function throwVelocityDelta(vHandX, vHandY, gain, spreadK, coneRad, jitterPxS, rand1, rand2, rand3) {
   const vMag = Math.hypot(vHandX, vHandY);
   const dirAngle = vMag > 1e-6 ? Math.atan2(vHandY, vHandX) : 0;
-  const coneAngle = dirAngle + (rand1 * 2 - 1) * coneRad;
+  // a ABERTURA do cone também escala com a força (achado do Codex, PR #31):
+  // ~0.6× a 480 px/s, 1× a 800, até 1.6× em arremessos violentos — leque
+  // apertado num lance suave, rebentação larga num lance forte.
+  const coneScale = Math.min(1.6, Math.max(0.6, vMag / 800));
+  const coneAngle = dirAngle + (rand1 * 2 - 1) * coneRad * coneScale;
   const spreadMag = vMag * spreadK * rand2;
   const jitterAngle = rand3 * Math.PI * 2;
   return {
