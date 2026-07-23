@@ -215,6 +215,13 @@ const PERF_RECOVER_MS = 18;      // frameTimeEMA below this counts as "cheap"
 const PERF_RECOVER_HOLD_MS = 10000; // ...for this long straight before a recovery step
 const PERF_RECOVER_STEP = 1.15;  // +15% per recovery step, capped at ORIGINAL_PARTICLE_COUNT
 const FUGITIVE_DIST_FACTOR = 1.5; // px multiple of the screen diagonal, from screen center, before a silent re-snap
+// o sentido do remoinho no pinch segue a MÃO que aperta (pedido do utilizador):
+// mão DIREITA → remoinho -1 (direita→esquerda no topo da órbita) · mão ESQUERDA → +1.
+// HAND_LABEL_MIRRORED corrige o rótulo do MediaPipe para a vista selfie espelhada.
+const HAND_LABEL_MIRRORED = true;
+// +1 é direita→esquerda no topo da órbita (ver comentário do spiralForce) —
+// logo mão DIREITA = +1 (achado do CodeRabbit no PR #29: estava invertido).
+const HAND_SWIRL = { Right: 1, Left: -1 };
 
 /* ================= pure physics helpers (also covered by the node harness) ================= */
 function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
@@ -453,24 +460,40 @@ function tintedPersonMask() {
 }
 
 /* ================= hand tracking -> pinch points (exact pattern from draw.html) ================= */
-const handState = [{ pinching: false }, { pinching: false }];
+// estado do pinch INDEXADO PELA MÃO resolvida, não pelo índice do array de
+// deteções — o MediaPipe reordena deteções entre frames (mãos a cruzarem-se)
+// e por índice o estado/timestamp saltava para a mão física errada
+// (achado P2 do Codex, PR #29).
+const handState = { Left: { pinching: false }, Right: { pinching: false } };
 let pinchPoints = [];
 function processHands(res) {
   const hands = res.landmarks || [];
   const pts = [];
-  for (let i = 0; i < 2; i++) {
-    const st = handState[i];
+  const seen = { Left: false, Right: false };
+  for (let i = 0; i < hands.length && i < 2; i++) {
     const lm = hands[i];
-    if (!lm) { st.pinching = false; continue; }
+    // handedness do MediaPipe refere-se à imagem NÃO espelhada; como mostramos
+    // a vista selfie espelhada, o rótulo "Left" do modelo é a mão DIREITA do
+    // utilizador (e vice-versa). HAND_LABEL_MIRRORED permite inverter se a
+    // montagem da câmara for outra.
+    const label = res.handednesses?.[i]?.[0]?.categoryName || "Right";
+    const userHand = HAND_LABEL_MIRRORED ? (label === "Left" ? "Right" : "Left") : label;
+    if (seen[userHand]) continue; // duas deteções com o mesmo rótulo: fica a primeira
+    seen[userHand] = true;
+    const st = handState[userHand];
     const handSize = dist(lm[0], lm[9]) || 0.0001;
     const ratio = dist(lm[4], lm[8]) / handSize;
+    const was = st.pinching;
     st.pinching = st.pinching ? ratio < PINCH_EXIT : ratio < PINCH_ENTER;
+    if (st.pinching && !was) st.pinchStart = performance.now();
     if (st.pinching) {
       const midXn = (lm[4].x + lm[8].x) / 2, midYn = (lm[4].y + lm[8].y) / 2;
       const p = camToScreen(midXn, midYn); // cover + espelho — alinha o íman com os dedos VISÍVEIS
-      pts.push({ x: p.x, y: p.y });
+      pts.push({ x: p.x, y: p.y, userHand, since: st.pinchStart || 0 });
     }
   }
+  if (!seen.Left) handState.Left.pinching = false;
+  if (!seen.Right) handState.Right.pinching = false;
   pinchPoints = pts;
 }
 
@@ -585,13 +608,14 @@ function stepParticles(dt, now) {
     const blen = Math.hypot(bdx, bdy) || 1;
     perpx = -bdy / blen; perpy = bdx / blen;
   }
-  // CHIRALITY BY PINCH SIDE: which half of the screen the pinch (or the band
-  // midpoint, for double pinch) sits on picks the spiral's rotation sign --
-  // see the CHIRALITY comment on spiralForce() for the verified direction.
+  // CHIRALITY BY HAND (pedido do utilizador): o sentido do remoinho segue a
+  // MÃO que aperta — direita → -1, esquerda → +1 (ver HAND_SWIRL). Com as
+  // duas mãos em pinch (banda), manda a que apertou MAIS RECENTEMENTE.
   let swirlSign = 1;
   if (anyPinch) {
-    const swirlRefX = twoHands ? (A.x + B.x) / 2 : pinchPoints[0].x;
-    swirlSign = swirlRefX > W / 2 ? 1 : -1;
+    let ref = pinchPoints[0];
+    for (const pt of pinchPoints) if ((pt.since || 0) > (ref.since || 0)) ref = pt;
+    swirlSign = HAND_SWIRL[ref.userHand] ?? 1;
   }
 
   for (const p of particles) {
