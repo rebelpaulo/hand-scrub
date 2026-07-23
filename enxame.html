@@ -665,29 +665,43 @@ let handLandmarker = null, faceDetector = null, segmenter = null, trackersReady 
 let segFrameCount = 0;
 function processTracking(now) {
   segFrameCount++;
-  processHands(handLandmarker.detectForVideo(camBg, now));
-  if (segFrameCount % FACE_EVERY_N === 0) processFace(faceDetector.detectForVideo(camBg, now));
-  if (segFrameCount % SEG_EVERY_N === 0) processSeg(segmenter.segmentForVideo(camBg, now));
+  // frames instáveis acontecem (câmara a estabilizar, tab a acordar): cada
+  // detetor falha isoladamente e o frame seguinte recupera — nunca deixar a
+  // exceção escapar (mataria o rAF; achado P1 do Codex no PR #27).
+  try { processHands(handLandmarker.detectForVideo(camBg, now)); }
+  catch (e) { console.warn("enxame: hands falhou neste frame", e); }
+  if (segFrameCount % FACE_EVERY_N === 0) {
+    try { processFace(faceDetector.detectForVideo(camBg, now)); }
+    catch (e) { console.warn("enxame: face falhou neste frame", e); }
+  }
+  if (segFrameCount % SEG_EVERY_N === 0) {
+    try { processSeg(segmenter.segmentForVideo(camBg, now)); }
+    catch (e) { console.warn("enxame: segmentação falhou neste frame", e); }
+  }
   dismissOverlay(); // first tracked frame: camera + models are both live
 }
 
 /* ================= render loop ================= */
 let lastVideoTime = -1, lastRawT = performance.now(), lastPhysT = performance.now();
 function frame(now) {
-  const rawDtMs = now - lastRawT; lastRawT = now;
-  perfGuard(rawDtMs, now);
+  // cinto e suspensórios: o próximo rAF agenda-se SEMPRE, mesmo que algo
+  // inesperado rebente no corpo do frame — o loop nunca morre.
+  try {
+    const rawDtMs = now - lastRawT; lastRawT = now;
+    perfGuard(rawDtMs, now);
 
-  if (running && trackersReady && camBg.currentTime !== lastVideoTime) {
-    lastVideoTime = camBg.currentTime;
-    processTracking(now);
+    if (running && trackersReady && camBg.currentTime !== lastVideoTime) {
+      lastVideoTime = camBg.currentTime;
+      processTracking(now);
+    }
+
+    const dt = clampDt((now - lastPhysT) / 1000, MAX_DT);
+    lastPhysT = now;
+    stepParticles(dt, now);
+    drawParticles(now);
+  } finally {
+    requestAnimationFrame(frame);
   }
-
-  const dt = clampDt((now - lastPhysT) / 1000, MAX_DT);
-  lastPhysT = now;
-  stepParticles(dt, now);
-  drawParticles(now);
-
-  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
