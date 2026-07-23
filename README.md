@@ -82,11 +82,19 @@ npx serve -l 8777
 - `shadow.html` — 🌑 Sala de Sombras (beta): a sombra do corpo projetada
   numa sala 3D.
 - `draw.html` — ✍️ Pinch Draw: pintura de luz no ar com o gesto de pinch.
-- `enxame.html` — 🌬️ Enxame: milhares de partículas brancas orbitam à tua
-  volta como uma auréola (MediaPipe `FaceDetector` localiza a cabeça).
-  Aperta o polegar e o indicador (`HandLandmarker`) para as atrair como um
-  íman — elas seguem os dedos enquanto o pinch está fechado; ao largar,
-  continuam o movimento em conjunto e voltam, aos poucos e de forma
-  escalonada, à órbita da cabeça.
+- `enxame.html` — 🌬️ Enxame: milhares de partículas brancas orbitam num
+  **cilindro** à volta do eixo vertical da cabeça (MediaPipe `FaceDetector`
+  localiza a cabeça), cada uma com o seu raio, deslocamento vertical e
+  velocidade angular (sentidos opostos). A profundidade (`z = sin(theta)`)
+  faz as partículas do lado de trás passarem **atrás da cabeça** — uma
+  elipse suave, recortada da caixa do `FaceDetector`, apaga-as onde se
+  cruzam com a cara (não é um modelo de segmentação; é o compromisso
+  escolhido). Aperta o polegar e o indicador (`HandLandmarker`, em
+  qualquer das mãos) para as atrair como um íman rápido — elas seguem os
+  dedos enquanto o pinch está fechado; ao largar, cada partícula recupera
+  o seu ângulo a partir da posição onde ficou (mantendo raio e altura) e o
+  enxame retoma logo a órbita, ainda agrupado — as velocidades angulares
+  diferentes espalham-no de novo por todo o cilindro ao longo de alguns
+  segundos.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).
