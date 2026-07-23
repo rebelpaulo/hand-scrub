@@ -135,5 +135,11 @@ npx serve -l 8777
   chegam (a 5% de distância); uma partícula apanhada a meio do caminho na
   largada quase não se mexe, e o ecrã reenche-se organicamente ao longo de
   ~10–20s — só as que tiveram tempo de lá chegar é que se veem espalhadas.
+  **Arremesso**: se a mão estiver a mover-se rápido (≥350px/s) no instante em
+  que larga o pinch, o enxame é atirado nessa direção — cada partícula ganha
+  velocidade da mão mais um espalhamento em cone que abre mais quanto mais
+  rápido o gesto, voa livre por ~0,7s e só depois aterra e derrete de volta
+  no tornado a partir de onde ficou; uma largada lenta continua a comportar-se
+  como antes (sem arremesso).
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).

@@ -198,6 +198,26 @@ const RELAX_TAU = 8;          // s
 const RELEASE_HOME_TOL = 0.05; // 5% of home value (floored at 1px so a near-zero
                                 // home hOff doesn't demand an impossible tolerance)
 
+// ARREMESSO (THROW): "o pinch agarra as partículas -- se a mão está a fazer um
+// movimento de lançar, as partículas devem ser atiradas para o lado que a mão
+// atira, e devem separar mais quando se larga o pinch". Ao largar o ÚLTIMO
+// pinch ativo, se a velocidade da mão que largou >= THROW_MIN, cada partícula
+// ganha um impulso na direção da mão + um espalhamento em cone (mais largo
+// quanto mais rápida a mão) e voa livre (só arrasto + cap de velocidade, sem
+// mola nem reabsorção) durante ~BALLISTIC_MS antes de aterrar e derreter de
+// volta no tornado a partir de onde ficou (mesmo caminho de largada honesta
+// de sempre, correndo mais tarde e por partícula -- ver adoptAndReabsorb).
+// Largada lenta (< THROW_MIN) continua a ser exatamente o caminho v7.
+const VEL_EMA_ALPHA = 0.5;      // suavização da velocidade do pinch (0..1, maior = menos suave)
+const THROW_MIN = 350;          // px/s -- abaixo disto é largada lenta normal (v7)
+const THROW_GAIN = 0.85;        // fração da velocidade da mão herdada por cada partícula
+const SPREAD_K = 0.35;          // magnitude do espalhamento (fração de |v_hand|) -- separa mais quanto mais rápido
+const THROW_CONE_RAD = 35 * Math.PI / 180; // cone de espalhamento em torno da direção do arremesso
+const THROW_JITTER_PX_S = 40;   // px/s, jitter isotrópico pequeno somado ao cone
+const BALLISTIC_MS = 700;       // duração base do voo balístico
+const BALLISTIC_JITTER_FRAC = 0.3; // +-30% aleatório por partícula
+const BALLISTIC_DRAG = 0.99;    // arrasto leve durante o voo balístico (por frame)
+
 // render / perf (kept from v1)
 // WARP STRETCH: trail length is now PROPORTIONAL TO SPEED (not a fixed streak) --
 // fast particles (spiralling into a pinch, or flung out on release) read as long
@@ -377,6 +397,63 @@ function relaxOverride(value, home, dt, tau) {
 function overrideAtHome(value, home, tolFrac) {
   return Math.abs(value - home) <= tolFrac * Math.max(Math.abs(home), 1);
 }
+// THROW: EMA da velocidade do ponto de pinch (px/s). prevVx/prevVy
+// undefined = primeira amostra desde o início do pinch -- sem blend (evita o
+// undershoot de um lerp(0, inst, alpha) na primeira amostra).
+function velocityEMAStep(px, py, pt, x, y, now, prevVx, prevVy, alpha) {
+  const dtS = Math.max((now - pt) / 1000, 1e-3);
+  const instVx = (x - px) / dtS, instVy = (y - py) / dtS;
+  if (prevVx === undefined || prevVy === undefined) return { vx: instVx, vy: instVy };
+  return { vx: lerp(prevVx, instVx, alpha), vy: lerp(prevVy, instVy, alpha) };
+}
+// THROW: impulso de velocidade dado a cada partícula no momento do arremesso --
+// ganho na direção da mão + espalhamento num cone em torno dessa direção, com
+// magnitude proporcional a |v_hand| ("separa mais quando se larga o pinch":
+// mão mais rápida = cone mais largo = rebentação maior), mais um jitter
+// isotrópico pequeno. rand1/rand2/rand3 in [0,1) são injetados pelo chamador
+// (Math.random em produção, deterministas no harness).
+function throwVelocityDelta(vHandX, vHandY, gain, spreadK, coneRad, jitterPxS, rand1, rand2, rand3) {
+  const vMag = Math.hypot(vHandX, vHandY);
+  const dirAngle = vMag > 1e-6 ? Math.atan2(vHandY, vHandX) : 0;
+  // a ABERTURA do cone também escala com a força (achado do Codex, PR #31):
+  // ~0.6× a 480 px/s, 1× a 800, até 1.6× em arremessos violentos — leque
+  // apertado num lance suave, rebentação larga num lance forte.
+  const coneScale = Math.min(1.6, Math.max(0.6, vMag / 800));
+  const coneAngle = dirAngle + (rand1 * 2 - 1) * coneRad * coneScale;
+  const spreadMag = vMag * spreadK * rand2;
+  const jitterAngle = rand3 * Math.PI * 2;
+  return {
+    dvx: vHandX * gain + Math.cos(coneAngle) * spreadMag + Math.cos(jitterAngle) * jitterPxS,
+    dvy: vHandY * gain + Math.sin(coneAngle) * spreadMag + Math.sin(jitterAngle) * jitterPxS
+  };
+}
+// THROW: duração do voo balístico desta partícula, +-jitterFrac aleatório
+// (rand in [0,1)) para o punhado não aterrar todo no mesmo instante.
+function ballisticDurationMs(baseMs, jitterFrac, rand) {
+  return baseMs * (1 + (rand * 2 - 1) * jitterFrac);
+}
+// HONEST RELEASE / THROW LANDING (helper comum -- extraído do bloco de largada
+// original, PR #30, para ser reutilizável): adota a posição/velocidade ATUAL
+// da partícula como novo ponto de órbita -- o mesmo caminho de θ único
+// (adoptReleaseOverrides -> thetaEst -> tangent-clamp da velocidade CORRENTE
+// nesse θ) usado por: (a) largada lenta, para TODAS as partículas, de
+// imediato; (b) expiração do voo balístico, POR PARTÍCULA, sempre que o
+// temporizador dessa partícula acaba -- ela aterra onde o arremesso a levou e
+// derrete de volta no tornado a partir daí.
+function adoptAndReabsorb(p, h, vh, rMinPx, rMaxCeil, rRef, sign) {
+  const ov = adoptReleaseOverrides(p.x, p.y, h, vh, rMinPx, rMaxCeil);
+  p.theta = ov.thetaEst;
+  p.hOverridePx = ov.hOverridePx;
+  p.rOverridePx = ov.rOverridePx;
+  let tHatX = -Math.sin(p.theta) * sign, tHatY = CYL_WOBBLE * Math.cos(p.theta) * sign;
+  const tLen = Math.hypot(tHatX, tHatY) || 1;
+  tHatX /= tLen; tHatY /= tLen;
+  const vTan = p.vx * tHatX + p.vy * tHatY;
+  const ambientTanSpeed = p.angularSpeed * vortexFactor(p.rOverridePx, rRef) * p.rOverridePx;
+  const clampedTan = Math.max(0, Math.min(vTan, ambientTanSpeed * TORNADO_REABSORB_MAX_MUL));
+  p.vx = tHatX * clampedTan;
+  p.vy = tHatY * clampedTan;
+}
 
 /* ================= canvas sizing (DPR-aware, capped) ================= */
 let W = 0, H = 0;
@@ -517,7 +594,15 @@ function tintedPersonMask() {
 // (achado P2 do Codex, PR #29).
 const handState = { Left: { pinching: false }, Right: { pinching: false } };
 let pinchPoints = [];
-function processHands(res) {
+// ARREMESSO: a mão que largou por último + a sua velocidade no instante da
+// largada (px/s) -- lida em stepParticles() quando anyPinch cai a zero. Num
+// double->zero no mesmo frame (ambas as mãos largam no mesmo frame de
+// deteção) o loop abaixo processa as mãos por ordem de deteção do MediaPipe,
+// não Left/Right -- a SEGUNDA a ser processada nesse frame vence o empate
+// (aproximação razoável de "a mão que largou por último" quando não há
+// ordem sub-frame disponível).
+let lastReleaseHand = null, lastReleaseVX = 0, lastReleaseVY = 0;
+function processHands(res, now) {
   const hands = res.landmarks || [];
   const pts = [];
   const seen = { Left: false, Right: false };
@@ -539,15 +624,36 @@ function processHands(res) {
     if (st.pinching && !was) {
       st.pinchStart = performance.now();
       tornadoSign = HAND_SWIRL[userHand] ?? tornadoSign; // most recent pinch START wins, persists after release
+      // ARREMESSO: começa um pinch novo -- limpa a velocidade rastreada para
+      // não sobreviver nenhuma velocidade "presa" de um pinch anterior.
+      st.vx = undefined; st.vy = undefined; st.prevPt = undefined;
     }
     if (st.pinching) {
       const midXn = (lm[4].x + lm[8].x) / 2, midYn = (lm[4].y + lm[8].y) / 2;
       const p = camToScreen(midXn, midYn); // cover + espelho — alinha o íman com os dedos VISÍVEIS
       pts.push({ x: p.x, y: p.y, userHand, since: st.pinchStart || 0 });
+      // ARREMESSO: EMA da velocidade do ponto de pinch enquanto está a apertar.
+      if (st.prevPt !== undefined) {
+        const ema = velocityEMAStep(st.prevPt.x, st.prevPt.y, st.prevPt.t, p.x, p.y, now, st.vx, st.vy, VEL_EMA_ALPHA);
+        st.vx = ema.vx; st.vy = ema.vy;
+      }
+      st.prevPt = { x: p.x, y: p.y, t: now };
+    }
+    if (was && !st.pinching) {
+      // ARREMESSO: esta mão acabou de largar -- guarda-a como candidata a
+      // "mão que largou" (ver comentário de lastReleaseHand acima).
+      lastReleaseHand = userHand;
+      lastReleaseVX = st.vx || 0; lastReleaseVY = st.vy || 0;
     }
   }
-  if (!seen.Left) handState.Left.pinching = false;
-  if (!seen.Right) handState.Right.pinching = false;
+  // mão não detetada este frame enquanto apertava = largada também (saiu do
+  // enquadramento a meio do pinch) -- mesma captação de velocidade acima.
+  for (const name of ["Left", "Right"]) {
+    if (seen[name]) continue;
+    const st = handState[name];
+    if (st.pinching) { lastReleaseHand = name; lastReleaseVX = st.vx || 0; lastReleaseVY = st.vy || 0; }
+    st.pinching = false;
+  }
   pinchPoints = pts;
 }
 
@@ -620,41 +726,43 @@ function stepParticles(dt, now) {
 
   if (wasPinching && !anyPinch) {
     releaseAt = now;
+    // ARREMESSO: velocidade da mão que largou por último (ver processHands).
+    const vHandX = lastReleaseVX, vHandY = lastReleaseVY;
+    const isThrow = Math.hypot(vHandX, vHandY) >= THROW_MIN;
     for (const p of particles) {
-      // UMA única derivação de θ para todo o caminho de largada: o thetaEst
-      // do adoptReleaseOverrides é calculado com o MESMO rGuess que deriva o
-      // rOverridePx — âncora ≡ posição atual. (Antes havia dois θ diferentes:
-      // um re-seed com o raio-seed aqui e um thetaEst descartado no helper —
-      // a âncora caía noutro sítio e a mola voltava a criar o snap; achado
-      // P2 do Codex, PR #30.)
-      const ov = adoptReleaseOverrides(p.x, p.y, h, H, rMinPx, rMaxCeil);
-      p.theta = ov.thetaEst;
-      p.hOverridePx = ov.hOverridePx;
-      p.rOverridePx = ov.rOverridePx;
-      // TORNADO REABSORPTION: project the velocity onto the ring's own signed
-      // tangent at the new theta and clamp to [0, 1.5x] the local ambient
-      // tangential speed (angularSpeed_efetiva * raio, vortex-adjusted, in the
-      // tornadoSign direction). No radial leftover, and nothing against the
-      // current spin direction, survives the clamp, so on release the swarm is
-      // pulled straight back into the tornado flow instead of "exploding"
-      // outward from the release point ("quando solta voltam para o efeito
-      // tornado, não precisa explodir o círculo").
-      // a tangente REAL do anel inclui o CYL_WOBBLE no eixo y (a âncora é
-      // y = hOff + r·WOBBLE·sinθ ⇒ dy/dθ = r·WOBBLE·cosθ) — sem isto, perto
-      // de θ=0/π a projeção atirava ~8× velocidade vertical a mais e recriava
-      // a explosão (achado P2 do Codex, PR #28). Normalizada. Sinal de
-      // tornadoSign: tHat = tornadoSign · (-sinθ, WOBBLE·cosθ).
-      let tHatX = -Math.sin(p.theta) * tornadoSign, tHatY = CYL_WOBBLE * Math.cos(p.theta) * tornadoSign;
-      const tLen = Math.hypot(tHatX, tHatY) || 1;
-      tHatX /= tLen; tHatY /= tLen;
-      const vTan = p.vx * tHatX + p.vy * tHatY;
-      // velocidade ambiente local calculada no raio REAL da órbita adotada
-      // (rOverridePx), não no raio-seed — é onde a partícula está de facto.
-      const ambientTanSpeed = p.angularSpeed * vortexFactor(p.rOverridePx, rRef) * p.rOverridePx;
-      const clampedTan = Math.max(0, Math.min(vTan, ambientTanSpeed * TORNADO_REABSORB_MAX_MUL));
-      p.vx = tHatX * clampedTan;
-      p.vy = tHatY * clampedTan;
-      // p.x/p.y intocados — zero salto no instante da largada.
+      delete p.ballisticUntil; // limpa qualquer voo balístico de um arremesso anterior
+      if (isThrow) {
+        // ARREMESSO: impulso na direção da mão + espalhamento em cone (mais
+        // largo quanto mais rápida a mão) -- a partícula voa livre (sem mola,
+        // sem reabsorção da tangente -- ver ramo ballistic em stepParticles)
+        // durante ~BALLISTIC_MS e só então adota/reabsorve, a partir de onde
+        // ficou (mesmo bloco adoptAndReabsorb usado pela largada lenta abaixo).
+        const { dvx, dvy } = throwVelocityDelta(vHandX, vHandY, THROW_GAIN, SPREAD_K, THROW_CONE_RAD, THROW_JITTER_PX_S, Math.random(), Math.random(), Math.random());
+        p.vx += dvx; p.vy += dvy;
+        p.ballisticUntil = now + ballisticDurationMs(BALLISTIC_MS, BALLISTIC_JITTER_FRAC, Math.random());
+      } else {
+        // LARGADA LENTA: caminho v7 exato, para todas as partículas de
+        // imediato -- UMA única derivação de θ para todo o caminho de
+        // largada: o thetaEst do adoptReleaseOverrides é calculado com o
+        // MESMO rGuess que deriva o rOverridePx — âncora ≡ posição atual.
+        // (Antes havia dois θ diferentes: um re-seed com o raio-seed aqui e
+        // um thetaEst descartado no helper — a âncora caía noutro sítio e a
+        // mola voltava a criar o snap; achado P2 do Codex, PR #30.)
+        // TORNADO REABSORPTION: project the velocity onto the ring's own
+        // signed tangent at the new theta and clamp to [0, 1.5x] the local
+        // ambient tangential speed (angularSpeed_efetiva * raio,
+        // vortex-adjusted, in the tornadoSign direction). No radial leftover,
+        // and nothing against the current spin direction, survives the
+        // clamp, so on release the swarm is pulled straight back into the
+        // tornado flow instead of "exploding" outward from the release point
+        // ("quando solta voltam para o efeito tornado, não precisa explodir
+        // o círculo"). A tangente REAL do anel inclui o CYL_WOBBLE no eixo y
+        // (a âncora é y = hOff + r·WOBBLE·sinθ ⇒ dy/dθ = r·WOBBLE·cosθ) —
+        // sem isto, perto de θ=0/π a projeção atirava ~8× velocidade
+        // vertical a mais e recriava a explosão (achado P2 do Codex, PR #28).
+        // p.x/p.y intocados — zero salto no instante da largada.
+        adoptAndReabsorb(p, h, H, rMinPx, rMaxCeil, rRef, tornadoSign);
+      }
     }
   }
   wasPinching = anyPinch;
@@ -728,7 +836,21 @@ function stepParticles(dt, now) {
       p.vx *= SPIRAL_DRAG; p.vy *= SPIRAL_DRAG;
       const capped = capSpeed(p.vx, p.vy, SPIRAL_SPEED_CAP);
       p.vx = capped.vx; p.vy = capped.vy;
+    } else if (p.ballisticUntil !== undefined && now < p.ballisticUntil) {
+      // ARREMESSO: voo balístico -- sem mola, sem reabsorção da tangente, só
+      // arrasto leve + o cap de velocidade; o punhado voa livre até o
+      // temporizador desta partícula acabar (ver bloco de largada acima).
+      p.vx *= BALLISTIC_DRAG; p.vy *= BALLISTIC_DRAG;
+      const capped = capSpeed(p.vx, p.vy, SPIRAL_SPEED_CAP);
+      p.vx = capped.vx; p.vy = capped.vy;
     } else {
+      if (p.ballisticUntil !== undefined) {
+        // ATERRAGEM: o voo balístico desta partícula acabou -- adota a
+        // posição/velocidade ATUAL (onde o arremesso a levou) e derrete de
+        // volta no tornado a partir daí (mesmo caminho de largada honesta).
+        adoptAndReabsorb(p, h, H, rMinPx, rMaxCeil, rRef, tornadoSign);
+        delete p.ballisticUntil;
+      }
       // HONEST RELEASE, no teleport: while an override is present, relax it
       // toward the particle's own seed-derived home value (RELAX_TAU seconds);
       // once both are back within RELEASE_HOME_TOL of home, drop the overrides
@@ -875,7 +997,7 @@ function processTracking(now) {
   // frames instáveis acontecem (câmara a estabilizar, tab a acordar): cada
   // detetor falha isoladamente e o frame seguinte recupera — nunca deixar a
   // exceção escapar (mataria o rAF; achado P1 do Codex no PR #27).
-  try { processHands(handLandmarker.detectForVideo(camBg, now)); }
+  try { processHands(handLandmarker.detectForVideo(camBg, now), now); }
   catch (e) { console.warn("enxame: hands falhou neste frame", e); }
   if (segFrameCount % FACE_EVERY_N === 0) {
     try { processFace(faceDetector.detectForVideo(camBg, now)); }
