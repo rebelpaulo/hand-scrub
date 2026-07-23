@@ -273,10 +273,13 @@ let particles = [];
 function spawnParticle(p) {
   const h = currentHead();
   p.theta = Math.random() * Math.PI * 2;
-  p.radius = h.r * (CYL_RADIUS_MIN_FACTOR + Math.random() * (CYL_RADIUS_MAX_FACTOR - CYL_RADIUS_MIN_FACTOR));
-  p.hOff = (Math.random() * 2 - 1) * h.r * CYL_HOFF_FACTOR;
+  // FATORES relativos à cabeça, não píxeis: o raio real deriva-se de
+  // currentHead().r a cada frame — o cilindro reescala quando a cara é
+  // detetada ou o visitante muda de distância (achado P2 do Codex, PR #25).
+  p.radiusFactor = CYL_RADIUS_MIN_FACTOR + Math.random() * (CYL_RADIUS_MAX_FACTOR - CYL_RADIUS_MIN_FACTOR);
+  p.hOffFactor = (Math.random() * 2 - 1) * CYL_HOFF_FACTOR;
   p.angularSpeed = (ANGULAR_SPEED_MIN + Math.random() * (ANGULAR_SPEED_MAX - ANGULAR_SPEED_MIN)) * (Math.random() < 0.5 ? -1 : 1);
-  const a = cylinderAnchor(p.theta, p.radius, p.hOff, h);
+  const a = cylinderAnchor(p.theta, h.r * p.radiusFactor, h.r * p.hOffFactor, h);
   p.x = a.x; p.y = a.y; p.z = a.z;
   p.vx = 0; p.vy = 0;
   p.alpha = 0.3 + Math.random() * 0.5;
@@ -301,7 +304,7 @@ function stepParticles(dt, now) {
   // seconds ("lentamente deixam de estar todas juntas e voltamos ao cilindro").
   if (wasPinching && !anyPinch) {
     releaseAt = now;
-    for (const p of particles) p.theta = reseedTheta(p.x, h, p.radius);
+    for (const p of particles) p.theta = reseedTheta(p.x, h, h.r * p.radiusFactor);
   }
   wasPinching = anyPinch;
 
@@ -326,7 +329,7 @@ function stepParticles(dt, now) {
       p.vx += fx * dt; p.vy += fy * dt;
       p.vx *= ATTRACT_DRAG; p.vy *= ATTRACT_DRAG;
     } else {
-      const a = cylinderAnchor(p.theta, p.radius, p.hOff, h);
+      const a = cylinderAnchor(p.theta, h.r * p.radiusFactor, h.r * p.hOffFactor, h);
       const { fx, fy } = springForce(p.x, p.y, a.x, a.y, springK);
       p.vx += (fx + (Math.random() - 0.5) * AMBIENT_JITTER) * dt;
       p.vy += (fy + (Math.random() - 0.5) * AMBIENT_JITTER) * dt;
