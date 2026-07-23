@@ -84,8 +84,8 @@
     <h1>🌬️ Enxame</h1>
     <p>Milhares de partículas circulam à tua volta como uma auréola. Aperta o
        polegar e o indicador para as atrair como um íman e leva-as contigo;
-       larga e elas continuam o movimento juntas antes de voltarem, aos
-       poucos, à órbita.</p>
+       larga e cada partícula retoma a órbita a partir de onde ficou,
+       preenchendo o ecrã aos poucos.</p>
     <div class="loading" role="status" aria-live="polite" aria-atomic="true">
       <span id="loadStatus">a preparar a câmara e os modelos</span>
       <span class="loading-dots"><span></span><span></span><span></span></span>
@@ -117,13 +117,15 @@ const CYL_RADIUS_MIN_FACTOR = 1.15;        // radius floor = head.r * this
 const CYL_RADIUS_MAX_CORNER_FACTOR = 1.05; // radius ceiling = dist(head center, farthest screen corner) * this
 const CYL_HOFF_SCREEN_FACTOR = 0.48;       // hOff = seed[-1,1] * H * this -- SCREEN-height relative, not head-relative
 const CYL_WOBBLE = 0.12;                                         // y perspective wobble = radius * this * sin(theta)
-// ANGULAR_SPEED is ALL POSITIVE -> every particle turns the same physical way.
-// anchor: x = h.cx + radius*cos(theta), so dx/dtheta = -radius*sin(theta).
-// back half of the cylinder has z = sin(theta) < 0, so dx/dtheta = -radius*(neg) > 0:
-// with theta increasing (angularSpeed > 0), dx/dt > 0 -> screen motion is LEFT -> RIGHT
-// behind the head, exactly the "mesmo sentido, esquerda para a direita por trás" ask.
-// (front half, sin(theta) > 0, then moves right -> left -- a cylinder rotating one way
-// always shows opposite screen motion front vs back; that's the single shared direction.)
+// ANGULAR_SPEED is ALL POSITIVE -> every particle shares the same RELATIVE spin.
+// The actual on-screen direction is theta += angularSpeed*vortexFactor*tornadoSign*dt
+// (see stepParticles) -- tornadoSign (+-1, global, see below) flips the whole ring
+// at once. With tornadoSign=+1: anchor x = h.cx + radius*cos(theta), so
+// dx/dtheta = -radius*sin(theta); back half of the cylinder has z=sin(theta)<0, so
+// dx/dtheta > 0 -> screen motion is LEFT -> RIGHT behind the head. tornadoSign=-1
+// reverses every one of those directions together (still ONE shared chirality across
+// the whole swarm, just the other way). z=sin(theta) itself is unaffected by the sign
+// -- it's a pure function of theta's current value, not of which way theta is moving.
 const ANGULAR_SPEED_MIN = 0.35, ANGULAR_SPEED_MAX = 0.6; // rad/s, base band (raised for the tornado profile below)
 // TORNADO profile: effective angular speed rises the closer a particle's cylinder
 // radius is to the head (vortex core spins faster than its rim), so the whole
@@ -160,10 +162,9 @@ const DEBUG_MASK_MS = 3000, DEBUG_MASK_ALPHA = 0.2;        // "o" key: tint the 
 // particles curve in and settle into a tight orbit around the pinch instead of
 // collapsing onto a point. F = SPIRAL_G / (d + SPIRAL_D_OFFSET)^SPIRAL_POW along
 // r_hat (toward the target), PLUS a tangential term SPIRAL_SWIRL_K * |F| along
-// t_hat (r_hat rotated 90 deg BY swirlSign -- see the CHIRALITY comment on
-// spiralForce() below: which side of the screen the pinch is on decides the
-// rotation sign, so every particle attracted to a given pinch still shares ONE
-// chirality, just not the same one for a left-side vs right-side pinch).
+// t_hat (r_hat rotated 90 deg BY swirlSign). swirlSign = the global tornadoSign
+// (see below) -- ONE coherent rotation system: the pinch swirl always turns the
+// same way the tornado ring is currently turning, not a separate per-pinch sign.
 // SPIRAL_G tuned (see harness) so a particle starting at a "far corner" distance
 // of ~755px (half-diagonal of the 1280x800 baseline viewport -- corner-to-center,
 // the realistic worst case since a pinch sits somewhere on screen, not literally
@@ -181,15 +182,21 @@ const SPIRAL_DRAG = 0.985;      // momentum-preserving -- the swirl keeps partic
 // spawn) offset sideways by a small stable perpendicular jitter (band thickness).
 const BAND_PERP_FACTOR = 0.15; // perpendicular offset = head.r * this * bandPerp[-1,1]
 
-// release -> resume orbit clustered (spring ramps up so the snap-back isn't abrupt)
+// release -> resume orbit from wherever the particle actually is (spring ramps
+// up so the snap-back isn't abrupt)
 const RELEASE_RAMP_MS = 1500;
 const RELEASE_RAMP_START_MUL = 1.2; // spring K starts at this multiple of AMBIENT_SPRING_K right after release
-// release -> SLOW REGROUP: on release each particle also gets a temporary tight
-// radius/hOff (releaseBlend 1 -> 0) so the swarm leaves the fingers as a compact
-// band and only spreads back out to the full-screen cylinder over ~9s.
-const RELEASE_SPREAD_MS = 9000;
-const RELEASE_SPREAD_STAGGER = 0.3;   // per-particle duration jitter, +/-30%
-const CLUSTER_RADIUS_FACTOR = 1.6;    // tight post-release radius = head.r * this
+// HONEST RELEASE (no teleport cluster): on release each particle ADOPTS its
+// current screen position as a temporary orbit override (rOverridePx/hOverridePx,
+// see adoptReleaseOverrides()) instead of being blended toward a tight cluster.
+// The override then relaxes EXPONENTIALLY toward the particle's own seed-derived
+// home slot (RELAX_TAU seconds to fold ~63% of the remaining gap), so a particle
+// mid-journey at release barely moves and the screen refills organically over
+// several RELAX_TAU -- no cluster, no snap. Once both overrides are within
+// RELEASE_HOME_TOL of home, they're deleted (pure seed derivation resumes).
+const RELAX_TAU = 8;          // s
+const RELEASE_HOME_TOL = 0.05; // 5% of home value (floored at 1px so a near-zero
+                                // home hOff doesn't demand an impossible tolerance)
 
 // render / perf (kept from v1)
 // WARP STRETCH: trail length is now PROPORTIONAL TO SPEED (not a fixed streak) --
@@ -215,13 +222,23 @@ const PERF_RECOVER_MS = 18;      // frameTimeEMA below this counts as "cheap"
 const PERF_RECOVER_HOLD_MS = 10000; // ...for this long straight before a recovery step
 const PERF_RECOVER_STEP = 1.15;  // +15% per recovery step, capped at ORIGINAL_PARTICLE_COUNT
 const FUGITIVE_DIST_FACTOR = 1.5; // px multiple of the screen diagonal, from screen center, before a silent re-snap
-// o sentido do remoinho no pinch segue a MÃO que aperta (pedido do utilizador):
-// mão DIREITA → remoinho -1 (direita→esquerda no topo da órbita) · mão ESQUERDA → +1.
+// GLOBAL TORNADO DIRECTION (pedido do utilizador: "inverte o sentido da rotação
+// do tornado mesmo"): a mão que INICIA um pinch decide o sentido de TODO o
+// remoinho -- não só da própria mão. tornadoSign é global, começa em +1, e é
+// reatribuído a partir de HAND_SWIRL[userHand] sempre que um pinch COMEÇA
+// (edge detectado em processHands via o mesmo pinchStart já existente; a mão
+// mais recente a apertar vence). O sinal PERSISTE depois de largar -- o
+// tornado continua a girar no último sentido escolhido até outra mão apertar.
 // HAND_LABEL_MIRRORED corrige o rótulo do MediaPipe para a vista selfie espelhada.
 const HAND_LABEL_MIRRORED = true;
 // +1 é direita→esquerda no topo da órbita (ver comentário do spiralForce) —
 // logo mão DIREITA = +1 (achado do CodeRabbit no PR #29: estava invertido).
 const HAND_SWIRL = { Right: 1, Left: -1 };
+// global sign applied to EVERY place ring direction matters: theta advance,
+// the release-reabsorption tangent, the fugitive re-snap tangent, and the
+// pinch swirl. z = sin(theta) is unaffected -- it's a function of theta's
+// current value, not of which way theta is moving.
+let tornadoSign = 1;
 
 /* ================= pure physics helpers (also covered by the node harness) ================= */
 function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
@@ -234,15 +251,13 @@ function springForce(px, py, ax, ay, k = AMBIENT_SPRING_K) {
 // SPIRAL MAGNET: gravity toward the target (r_hat, falloff 1/(d+offset)^pow)
 // PLUS a tangential swirl (t_hat = r_hat rotated 90 deg BY swirlSign) so
 // particles curve in and orbit the target instead of collapsing onto it.
-// CHIRALITY BY PINCH SIDE: swirlSign picks which way t_hat rotates from r_hat.
-// swirlSign=+1 (unrotated: tx_=-ry, ty_=rx) -- verified by hand: at the TOP of
-// the orbit r_hat=(0,1) (particle above the target, pointing straight down at
-// it, screen y grows downward) so t_hat=(-1,0), a LEFTWARD tangential push ->
-// the particle sweeps right-to-left across the top of the orbit. That is the
-// RIGHT-side-pinch look the ticket asks for, so callers pass swirlSign=+1
-// when pinch.x > W/2.
-// swirlSign=-1 flips it (tx_=ry, ty_=-rx): at the top t_hat=(1,0), a
-// RIGHTWARD push -> left-to-right across the top -- the LEFT-side-pinch case.
+// swirlSign picks which way t_hat rotates from r_hat -- callers pass the
+// global tornadoSign here, so the pinch swirl always matches whichever way
+// the tornado ring itself is currently turning (one coherent rotation system).
+// swirlSign=+1 (unrotated: tx_=-ry, ty_=rx) -- at the TOP of the orbit
+// r_hat=(0,1) (particle above the target, screen y grows downward) so
+// t_hat=(-1,0), a LEFTWARD push -> right-to-left across the top of the orbit.
+// swirlSign=-1 flips it (tx_=ry, ty_=-rx) -> left-to-right across the top.
 function spiralForce(px, py, tx, ty, swirlSign = 1) {
   const dx = tx - px, dy = ty - py;
   const d = Math.hypot(dx, dy);
@@ -325,6 +340,42 @@ function reseedTheta(px, h, radius) {
   const cosTheta = Math.min(1, Math.max(-1, (px - h.cx) / radius));
   const theta = Math.acos(cosTheta);
   return Math.random() < 0.5 ? theta : -theta;
+}
+// HONEST RELEASE ADOPTION ("só afetou as que tiveram tempo de lá chegar"): on
+// release, each particle keeps its CURRENT screen position as a temporary orbit
+// override instead of teleporting into a cluster.
+//   hOverridePx = clamp(py - h.cy, +-vh*CYL_HOFF_SCREEN_FACTOR) -- the vertical
+//     offset is already screen-relative, same band spawnParticle uses, so this
+//     is an exact readback (clamp only clips the (rare) off-band case).
+//   rOverridePx: radius is coupled to theta, which we don't know for an
+//     arbitrary screen point, so we estimate one via the SAME reseedTheta
+//     approach used for the tornado-reabsorption theta: rGuess floors at rMin
+//     (same floor every seed-derived radius uses) and feeds reseedTheta to get
+//     a thetaEst, then rNow is solved backwards so cos(thetaEst)*rNow lands
+//     back on px. Exact whenever |px-h.cx| >= 0.3*rGuess (the dominant case --
+//     cos(thetaEst) saturates to +-1 there); in the narrow near-axis band
+//     (|px-h.cx| < 0.3*rGuess, thetaEst near +-90deg) the 0.3 floor on the
+//     denominator caps worst-case error at ~0.075*rGuess (~30px for a
+//     realistic head.r), an accepted wobble-order error per the ticket.
+function adoptReleaseOverrides(px, py, h, vh, rMin, rMaxPx) {
+  const hOverridePx = Math.max(-vh * CYL_HOFF_SCREEN_FACTOR, Math.min(vh * CYL_HOFF_SCREEN_FACTOR, py - h.cy));
+  const dx = px - h.cx;
+  const rGuess = Math.max(Math.abs(dx), rMin);
+  const thetaEst = reseedTheta(px, h, rGuess);
+  const cosT = Math.max(0.3, Math.abs(Math.cos(thetaEst)));
+  const rOverridePx = Math.max(rMin, Math.min(rMaxPx, Math.abs(dx) / cosT));
+  return { hOverridePx, rOverridePx, thetaEst };
+}
+// exponential relax of an override toward its seed-derived home value; dt/tau
+// step so a 60fps and a 30fps tab converge at the same real-world rate.
+function relaxOverride(value, home, dt, tau) {
+  return value + (home - value) * (dt / tau);
+}
+// true once a relaxing override is close enough to home to drop it (percent
+// tolerance, floored at 1px so a near-zero home target -- e.g. hOff seed ~0 --
+// doesn't demand an unreachable tolerance).
+function overrideAtHome(value, home, tolFrac) {
+  return Math.abs(value - home) <= tolFrac * Math.max(Math.abs(home), 1);
 }
 
 /* ================= canvas sizing (DPR-aware, capped) ================= */
@@ -485,7 +536,10 @@ function processHands(res) {
     const ratio = dist(lm[4], lm[8]) / handSize;
     const was = st.pinching;
     st.pinching = st.pinching ? ratio < PINCH_EXIT : ratio < PINCH_ENTER;
-    if (st.pinching && !was) st.pinchStart = performance.now();
+    if (st.pinching && !was) {
+      st.pinchStart = performance.now();
+      tornadoSign = HAND_SWIRL[userHand] ?? tornadoSign; // most recent pinch START wins, persists after release
+    }
     if (st.pinching) {
       const midXn = (lm[4].x + lm[8].x) / 2, midYn = (lm[4].y + lm[8].y) / 2;
       const p = camToScreen(midXn, midYn); // cover + espelho — alinha o íman com os dedos VISÍVEIS
@@ -524,7 +578,10 @@ function spawnParticle(p) {
   // instead of a shapeless cloud jittering between the two pinches every frame.
   p.bandT = Math.random();
   p.bandPerp = Math.random() * 2 - 1;
-  p.releaseDurMs = 0; // 0 = never released yet, no cluster blend applied
+  // rOverridePx/hOverridePx: absent until a release adopts the particle's
+  // current position (see adoptReleaseOverrides()); while present they replace
+  // the seed-derived radius/hOff for the ambient anchor, and relax back toward
+  // seed-derived values over RELAX_TAU seconds (see stepParticles()).
   const a = cylinderAnchor(p.theta, particleRadiusPx(p, h, W, H), particleHOffPx(p, H), h);
   p.x = a.x; p.y = a.y; p.z = a.z;
   p.vx = 0; p.vy = 0;
@@ -559,23 +616,27 @@ function stepParticles(dt, now) {
   const rRef = h.r * VORTEX_R_REF_FACTOR; // needed both by the tornado profile below and the release reabsorption right below
   const screenDiag = Math.hypot(W, H);    // FUGITIVAS: re-snap threshold is 1.5x this, from screen center
 
+  const rMinPx = h.r * CYL_RADIUS_MIN_FACTOR; // same floor particleRadiusPx uses, needed by adoptReleaseOverrides
+
   if (wasPinching && !anyPinch) {
     releaseAt = now;
     for (const p of particles) {
       const rParticle = particleRadiusPx(p, h, W, H, rMaxCeil);
       p.theta = reseedTheta(p.x, h, rParticle);
-      // TORNADO REABSORPTION: project the velocity onto the ring's own θ+
-      // tangent at the new theta and clamp to <=1.5x the local ambient
-      // tangential speed (angularSpeed_efetiva * raio, vortex-adjusted). No
-      // radial leftover survives the clamp (min 0), so on release the swarm
-      // is pulled straight back into the tornado flow instead of "exploding"
+      // TORNADO REABSORPTION: project the velocity onto the ring's own signed
+      // tangent at the new theta and clamp to [0, 1.5x] the local ambient
+      // tangential speed (angularSpeed_efetiva * raio, vortex-adjusted, in the
+      // tornadoSign direction). No radial leftover, and nothing against the
+      // current spin direction, survives the clamp, so on release the swarm is
+      // pulled straight back into the tornado flow instead of "exploding"
       // outward from the release point ("quando solta voltam para o efeito
       // tornado, não precisa explodir o círculo").
       // a tangente REAL do anel inclui o CYL_WOBBLE no eixo y (a âncora é
       // y = hOff + r·WOBBLE·sinθ ⇒ dy/dθ = r·WOBBLE·cosθ) — sem isto, perto
       // de θ=0/π a projeção atirava ~8× velocidade vertical a mais e recriava
-      // a explosão (achado P2 do Codex, PR #28). Normalizada.
-      let tHatX = -Math.sin(p.theta), tHatY = CYL_WOBBLE * Math.cos(p.theta);
+      // a explosão (achado P2 do Codex, PR #28). Normalizada. Sinal de
+      // tornadoSign: tHat = tornadoSign · (-sinθ, WOBBLE·cosθ).
+      let tHatX = -Math.sin(p.theta) * tornadoSign, tHatY = CYL_WOBBLE * Math.cos(p.theta) * tornadoSign;
       const tLen = Math.hypot(tHatX, tHatY) || 1;
       tHatX /= tLen; tHatY /= tLen;
       const vTan = p.vx * tHatX + p.vy * tHatY;
@@ -583,10 +644,14 @@ function stepParticles(dt, now) {
       const clampedTan = Math.max(0, Math.min(vTan, ambientTanSpeed * TORNADO_REABSORB_MAX_MUL));
       p.vx = tHatX * clampedTan;
       p.vy = tHatY * clampedTan;
-      // SLOW REGROUP: start each particle at a tight cluster radius/hOff and
-      // let it decay back to its own full-screen slot over ~RELEASE_SPREAD_MS,
-      // staggered +/-30% per particle so the swarm doesn't snap open in lockstep.
-      p.releaseDurMs = RELEASE_SPREAD_MS * (1 + (Math.random() * 2 - 1) * RELEASE_SPREAD_STAGGER);
+
+      // HONEST RELEASE ("só afetou as que tiveram tempo de lá chegar"): adopt
+      // the particle's CURRENT position as its orbit state instead of
+      // teleporting it into a cluster -- p.x/p.y are untouched here, so there
+      // is no jump at the release instant itself.
+      const ov = adoptReleaseOverrides(p.x, p.y, h, H, rMinPx, rMaxCeil);
+      p.hOverridePx = ov.hOverridePx;
+      p.rOverridePx = ov.rOverridePx;
     }
   }
   wasPinching = anyPinch;
@@ -608,31 +673,30 @@ function stepParticles(dt, now) {
     const blen = Math.hypot(bdx, bdy) || 1;
     perpx = -bdy / blen; perpy = bdx / blen;
   }
-  // CHIRALITY BY HAND (pedido do utilizador): o sentido do remoinho segue a
-  // MÃO que aperta — direita → -1, esquerda → +1 (ver HAND_SWIRL). Com as
-  // duas mãos em pinch (banda), manda a que apertou MAIS RECENTEMENTE.
-  let swirlSign = 1;
-  if (anyPinch) {
-    let ref = pinchPoints[0];
-    for (const pt of pinchPoints) if ((pt.since || 0) > (ref.since || 0)) ref = pt;
-    swirlSign = HAND_SWIRL[ref.userHand] ?? 1;
-  }
+  // GLOBAL TORNADO DIRECTION: the pinch swirl always turns the same way the
+  // tornado ring itself is currently turning -- one coherent rotation system,
+  // no separate per-pinch sign (tornadoSign is set on pinch START, see
+  // processHands, and persists across releases).
+  const swirlSign = tornadoSign;
 
   for (const p of particles) {
     // TORNADO: spin faster the closer the particle's own cylinder radius is to
-    // the head (vortex core), slower at the rim -- reads as a vortex, not a drift.
+    // the head (vortex core), slower at the rim -- reads as a vortex, not a
+    // drift. tornadoSign flips the whole ring's direction together.
     const rParticle = particleRadiusPx(p, h, W, H, rMaxCeil);
-    p.theta += p.angularSpeed * vortexFactor(rParticle, rRef) * dt; // orbit phase always advances
-    p.z = Math.sin(p.theta);        // depth cue, independent of screen position
+    p.theta += p.angularSpeed * vortexFactor(rParticle, rRef) * tornadoSign * dt; // orbit phase always advances
+    p.z = Math.sin(p.theta);        // depth cue -- a function of theta's value, NOT of tornadoSign
 
     // FUGITIVAS: a particle flung past 1.5x the screen diagonal from center
     // never stays lost off-screen after a fling -- silently re-snap it to its
-    // own ambient cylinder anchor (position + tangential ambient velocity)
-    // before any force this frame gets a chance to push it further.
+    // own ambient cylinder anchor (position + tangential ambient velocity,
+    // signed by tornadoSign so a re-snapped particle doesn't spin backwards
+    // relative to the rest of the ring) before any force this frame gets a
+    // chance to push it further.
     if (Math.hypot(p.x - W / 2, p.y - H / 2) > screenDiag * FUGITIVE_DIST_FACTOR) {
       const anchor = cylinderAnchor(p.theta, rParticle, particleHOffPx(p, H), h);
       p.x = anchor.x; p.y = anchor.y; p.z = anchor.z;
-      const tHatX = -Math.sin(p.theta), tHatY = Math.cos(p.theta);
+      const tHatX = -Math.sin(p.theta) * tornadoSign, tHatY = Math.cos(p.theta) * tornadoSign;
       const ambientTanSpeed = p.angularSpeed * vortexFactor(rParticle, rRef) * rParticle;
       p.vx = tHatX * ambientTanSpeed;
       p.vy = tHatY * ambientTanSpeed;
@@ -657,13 +721,20 @@ function stepParticles(dt, now) {
       const capped = capSpeed(p.vx, p.vy, SPIRAL_SPEED_CAP);
       p.vx = capped.vx; p.vy = capped.vy;
     } else {
-      // releaseBlend: 1 right at release (tight cluster), decays to 0 over the
-      // particle's own releaseDurMs (0 outside of a release => always full radius/hOff).
-      const relElapsed = now - releaseAt;
-      const releaseBlend = p.releaseDurMs ? Math.max(0, Math.min(1, 1 - relElapsed / p.releaseDurMs)) : 0;
-      const t = 1 - releaseBlend; // 0 = tight cluster, 1 = own full-screen slot
-      const r = lerp(h.r * CLUSTER_RADIUS_FACTOR, rParticle, t);
-      const hOffPx = lerp(0, particleHOffPx(p, H), t);
+      // HONEST RELEASE, no teleport: while an override is present, relax it
+      // toward the particle's own seed-derived home value (RELAX_TAU seconds);
+      // once both are back within RELEASE_HOME_TOL of home, drop the overrides
+      // (pure seed derivation resumes). No cluster blend, no snap.
+      const homeR = rParticle, homeH = particleHOffPx(p, H);
+      if (p.rOverridePx !== undefined) {
+        p.rOverridePx = relaxOverride(p.rOverridePx, homeR, dt, RELAX_TAU);
+        p.hOverridePx = relaxOverride(p.hOverridePx, homeH, dt, RELAX_TAU);
+        if (overrideAtHome(p.rOverridePx, homeR, RELEASE_HOME_TOL) && overrideAtHome(p.hOverridePx, homeH, RELEASE_HOME_TOL)) {
+          delete p.rOverridePx; delete p.hOverridePx;
+        }
+      }
+      const r = p.rOverridePx !== undefined ? p.rOverridePx : homeR;
+      const hOffPx = p.hOverridePx !== undefined ? p.hOverridePx : homeH;
       const a = cylinderAnchor(p.theta, r, hOffPx, h);
       const { fx, fy } = springForce(p.x, p.y, a.x, a.y, springK);
       p.vx += (fx + (Math.random() - 0.5) * AMBIENT_JITTER) * dt;

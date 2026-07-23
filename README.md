@@ -89,14 +89,19 @@ npx serve -l 8777
   canto mais afastado do ecrã (`×1.05`), com densidade **areal** (`r =
   sqrt(lerp(rMin², rMax², seed))`) para encher o ecrã de forma uniforme em
   vez de se amontoar junto à cabeça; a altura (`hOff`) também é relativa ao
-  ecrã (`±0.48×H`). Todas giram no **mesmo sentido** (velocidade angular
-  sempre positiva, banda base 0.35–0.6 rad/s) — o lado de trás do cilindro
-  (`sin(theta)<0`) desloca-se sempre da **esquerda para a direita** atrás da
-  cabeça — mas com um perfil de **tornado**: a velocidade angular efetiva
-  sobe perto do eixo da cabeça e cai para a periferia
+  ecrã (`±0.48×H`). Todas giram sempre no **mesmo sentido entre si**
+  (velocidade angular base sempre positiva, banda 0.35–0.6 rad/s) mas o
+  sentido GLOBAL do tornado (`tornadoSign`, ±1) é decidido pela **mão que
+  inicia o pinch** — direita ou esquerda, ver `HAND_SWIRL` — e persiste depois
+  de largar: o tornado continua a girar nesse sentido até outra mão apertar de
+  novo. Com `tornadoSign=+1` o lado de trás do cilindro (`sin(theta)<0`)
+  desloca-se da **esquerda para a direita** atrás da cabeça; com `-1` inverte.
+  A profundidade (`z=sin(theta)`) não depende do sinal — mas com um perfil de
+  **tornado**: a velocidade angular efetiva sobe perto do eixo da cabeça e cai
+  para a periferia
   (`baseSpeed·(rRef/max(r,rRef))^0.6`, `rRef = head.r×2`), pelo que os anéis
   interiores giram visivelmente mais depressa do que os exteriores, como um
-  vórtice, não uma deriva plana. A profundidade (`z = sin(theta)`) faz as
+  vórtice, não uma deriva plana. Essa profundidade faz as
   partículas do lado de trás passarem **atrás da cabeça/corpo** — agora com
   **oclusão pixel-a-pixel**: MediaPipe `ImageSegmenter`
   (`selfie_multiclass_256x256`, a cada 2ª frame trackeada) segmenta a pessoa
@@ -111,7 +116,8 @@ npx serve -l 8777
   feixe de luz "quase warp". Aperta o polegar e o indicador
   (`HandLandmarker`, em qualquer das mãos) para as atrair com **física real**
   em vez de uma reta: gravidade + espiral (`F = G/(d+40)^1.5` radial mais uma
-  componente tangencial `swirlK×|F|`, sempre com a mesma quiralidade) faz as
+  componente tangencial `swirlK×|F|`, com a quiralidade do `tornadoSign`
+  global — o remoinho do pinch gira sempre no mesmo sentido do tornado) faz as
   partículas curvarem para dentro e **orbitar** o dedo em vez de colapsarem
   num ponto (velocidade capada a ~1400px/s, atrito 0.985 que preserva o
   momento angular do giro). Com as **duas mãos em pinch**, o enxame estica-se
@@ -119,12 +125,15 @@ npx serve -l 8777
   estável (`bandT∈[0,1]`, atribuída no spawn) ao longo do segmento entre as
   mãos, com um pequeno deslocamento lateral estável (±`head.r×0.15`) que dá
   espessura à banda; larga uma mão e volta ao comportamento de pinch único
-  em direção à que resta. Ao largar, cada partícula recupera o seu ângulo a
-  partir da posição onde ficou (já com a inércia tangencial da espiral, que
-  alimenta bem a rotação de regresso) e volta primeiro como um **grupo
-  compacto** (raio apertado, ~1.6× a cabeça) que se vai **espalhando
-  lentamente ao longo de ~9s** até reocupar todo o cilindro — como giram
-  todas no mesmo sentido, o grupo viaja-se visivelmente junto antes de se
-  dispersar.
+  em direção à que resta. **Largada honesta, sem teleporte**: ao largar, cada
+  partícula recupera o seu ângulo a partir da posição onde ficou (já com a
+  inércia tangencial da espiral projetada no sentido do `tornadoSign`, que
+  alimenta bem a rotação de regresso) e **adota essa mesma posição** como o
+  seu raio/altura de órbita (`rOverridePx`/`hOverridePx`) — nada de cluster
+  nem de salto. Esses valores relaxam exponencialmente (constante de tempo de
+  8s) de volta ao seu lugar próprio no cilindro, e são descartados quando lá
+  chegam (a 5% de distância); uma partícula apanhada a meio do caminho na
+  largada quase não se mexe, e o ecrã reenche-se organicamente ao longo de
+  ~10–20s — só as que tiveram tempo de lá chegar é que se veem espalhadas.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).
