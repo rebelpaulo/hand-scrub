@@ -111,8 +111,8 @@ const FALLBACK_RADIUS_FACTOR = 0.28;   // no face detected -> anchor cloud drift
 // full-screen swarm: each particle stores a 0..1 SEED, never a baked pixel value
 // (same pattern as the P2 fix, PR #25) -- px radius/hOff are derived every frame
 // from the CURRENT head + viewport so the cylinder rescales live.
-const BASE_PARTICLES = 9000;
-const PARTICLE_FLOOR = 2500;
+const BASE_PARTICLES = 12000;
+const PARTICLE_FLOOR = 3000;
 const CYL_RADIUS_MIN_FACTOR = 1.15;        // radius floor = head.r * this
 const CYL_RADIUS_MAX_CORNER_FACTOR = 1.05; // radius ceiling = dist(head center, farthest screen corner) * this
 const CYL_HOFF_SCREEN_FACTOR = 0.48;       // hOff = seed[-1,1] * H * this -- SCREEN-height relative, not head-relative
@@ -124,29 +124,52 @@ const CYL_WOBBLE = 0.12;                                         // y perspectiv
 // behind the head, exactly the "mesmo sentido, esquerda para a direita por trás" ask.
 // (front half, sin(theta) > 0, then moves right -> left -- a cylinder rotating one way
 // always shows opposite screen motion front vs back; that's the single shared direction.)
-const ANGULAR_SPEED_MIN = 0.22, ANGULAR_SPEED_MAX = 0.38; // rad/s, narrow band -> slow post-release separation
+const ANGULAR_SPEED_MIN = 0.35, ANGULAR_SPEED_MAX = 0.6; // rad/s, base band (raised for the tornado profile below)
+// TORNADO profile: effective angular speed rises the closer a particle's cylinder
+// radius is to the head (vortex core spins faster than its rim), so the whole
+// ambient halo reads as a vortex centred on the head rather than a flat drift.
+// vortexFactor = (rRef / max(rParticle, rRef))^VORTEX_EXP, rRef = head.r * VORTEX_R_REF_FACTOR
+// -- always positive, so the single-shared-direction invariant above is untouched.
+const VORTEX_R_REF_FACTOR = 2;
+const VORTEX_EXP = 0.6;
 
 // ambient spring (halo hugging its cylinder anchor)
 const AMBIENT_SPRING_K = 3.2;  // px/s^2 accel per px of offset from anchor
 const AMBIENT_JITTER = 5;      // px/s^2, light random jitter
 const AMBIENT_DRAG = 0.92;
 
-// head occlusion (back-half particles pass behind an ellipse over the FaceDetector box --
-// ponytail: deliberately not a segmentation model, tradeoff accepted for perf/simplicity)
-// erase only fires when a REAL face is tracked (see hasRealFace in drawParticles) --
-// with the fallback head (screen-center placeholder) there is no face to hide behind,
-// so erasing there would just read as a rendering bug.
-const OCCLUDE_RX_FACTOR = 1.25, OCCLUDE_RY_FACTOR = 1.55; // ellipse radii = head.r * factor
-const OCCLUDE_CY_FACTOR = 0.15;                            // ellipse center y offset = head.r * factor (upward)
-const OCCLUDE_SOFT_EDGE = 0.15;                            // fraction of radius over which alpha fades 1 -> 0
+// head occlusion -- PIXEL-PERFECT via MediaPipe ImageSegmenter (selfie_multiclass_256x256),
+// same proven pattern as shadow.html: category 0 = background, anything else = person.
+// Replaces the old FaceDetector-box ellipse: the mask is painted into an offscreen
+// canvas at its native (mask) resolution, then erased into the stage through the
+// SAME cover transform as camToScreen (see coverTransform/drawMaskThroughCover) so
+// it lands pixel-exact on the visible (mirrored) person, not an approximated oval.
+const SEG_EVERY_N = 2;              // run segmentation every 2nd tracked frame (hands every frame, face every 3rd)
 const DEPTH_WIDTH_MUL = 0.8, DEPTH_ALPHA_MUL = 0.7;        // back-half (z<0) render de-emphasis
-const DEBUG_MASK_MS = 3000, DEBUG_MASK_ALPHA = 0.2;        // "o" key: tint the erase ellipse red so its position is visible
+const DEBUG_MASK_MS = 3000, DEBUG_MASK_ALPHA = 0.2;        // "o" key: tint the person mask red so its position is visible
 
-// attract (pinch = magnet)
-const ATTRACT_K = 4200;        // 1/d^0.5-style falloff numerator
-const ATTRACT_MAX = 1600;      // px/s^2 cap, avoids a spike as d -> 0
-const ATTRACT_MIN_D = 6;       // px, distance floor so ATTRACT_K/sqrt(d) never divides by ~0
-const ATTRACT_DRAG = 0.88;
+// SPIRAL MAGNET (pinch): gravity + swirl instead of a straight-line pull --
+// particles curve in and settle into a tight orbit around the pinch instead of
+// collapsing onto a point. F = SPIRAL_G / (d + SPIRAL_D_OFFSET)^SPIRAL_POW along
+// r_hat (toward the target), PLUS a tangential term SPIRAL_SWIRL_K * |F| along
+// t_hat (r_hat rotated +90 deg, ALWAYS the same fixed rotation -- one shared
+// chirality for every particle every frame, same "single direction" convention
+// as the ambient ANGULAR_SPEED being all-positive above).
+// SPIRAL_G tuned (see harness) so a particle starting at a "far corner" distance
+// of ~755px (half-diagonal of the 1280x800 baseline viewport -- corner-to-center,
+// the realistic worst case since a pinch sits somewhere on screen, not literally
+// in the opposite corner) settles inside a ~40px orbit shell around the pinch in
+// ~1s, under SPIRAL_DRAG and the SPIRAL_SPEED_CAP below.
+const SPIRAL_G = 6.0e7;
+const SPIRAL_D_OFFSET = 40;     // px, denominator offset -- avoids a singularity as d -> 0
+const SPIRAL_POW = 1.5;
+const SPIRAL_SWIRL_K = 0.5;     // tangential force = this fraction of the radial magnitude
+const SPIRAL_SPEED_CAP = 1400;  // px/s
+const SPIRAL_DRAG = 0.985;      // momentum-preserving -- the swirl keeps particles circulating, not stalling
+// DOUBLE PINCH = BAND: with both hands pinching, each particle's target becomes a
+// point on the segment between the two pinches (its own stable bandT, assigned at
+// spawn) offset sideways by a small stable perpendicular jitter (band thickness).
+const BAND_PERP_FACTOR = 0.15; // perpendicular offset = head.r * this * bandPerp[-1,1]
 
 // release -> resume orbit clustered (spring ramps up so the snap-back isn't abrupt)
 const RELEASE_RAMP_MS = 1500;
@@ -159,7 +182,13 @@ const RELEASE_SPREAD_STAGGER = 0.3;   // per-particle duration jitter, +/-30%
 const CLUSTER_RADIUS_FACTOR = 1.6;    // tight post-release radius = head.r * this
 
 // render / perf (kept from v1)
-const STREAK_K = 0.06;                 // trail length factor (streak = velocity * STREAK_K)
+// WARP STRETCH: trail length is now PROPORTIONAL TO SPEED (not a fixed streak) --
+// fast particles (spiralling into a pinch, or flung out on release) read as long
+// beams of light; slow ones stay short dashes/dots. Clamped so it never vanishes
+// (min) or streaks off-screen (max). See trailVector().
+const TRAIL_K = 0.06;                  // s, kTrail
+const TRAIL_MIN_PX = 4;
+const TRAIL_MAX_PX = 70;
 const MAX_DT = 0.05;                   // s, clamp so a tab-suspend gap can't fling particles
 const PERF_FRAME_MS = 24;              // rAF EMA above this triggers a 25% particle-count step-down
 const PERF_STEP = 0.75;
@@ -173,12 +202,28 @@ function clampDt(dt, maxDt) { return Math.min(dt, maxDt); }
 function springForce(px, py, ax, ay, k = AMBIENT_SPRING_K) {
   return { fx: (ax - px) * k, fy: (ay - py) * k };
 }
-// magnet accel toward the nearest pinch point: 1/sqrt(d) falloff, capped
-function attractForce(px, py, tx, ty) {
+// SPIRAL MAGNET: gravity toward the target (r_hat, falloff 1/(d+offset)^pow)
+// PLUS a tangential swirl (t_hat = r_hat rotated +90 deg, ALWAYS the same
+// rotation -- one fixed chirality shared by every particle every frame) so
+// particles curve in and orbit the target instead of collapsing onto it.
+function spiralForce(px, py, tx, ty) {
   const dx = tx - px, dy = ty - py;
-  const d = Math.max(ATTRACT_MIN_D, Math.hypot(dx, dy));
-  const mag = Math.min(ATTRACT_MAX, ATTRACT_K / Math.sqrt(d));
-  return { fx: (dx / d) * mag, fy: (dy / d) * mag };
+  const d = Math.hypot(dx, dy);
+  if (d < 1e-6) return { fx: 0, fy: 0 }; // already at the target -- no direction to push
+  const mag = SPIRAL_G / Math.pow(d + SPIRAL_D_OFFSET, SPIRAL_POW);
+  const rx = dx / d, ry = dy / d;      // r_hat: radial, toward the target
+  const tx_ = -ry, ty_ = rx;           // t_hat: r_hat rotated +90 deg (fixed chirality)
+  return {
+    fx: rx * mag + tx_ * (SPIRAL_SWIRL_K * mag),
+    fy: ry * mag + ty_ * (SPIRAL_SWIRL_K * mag)
+  };
+}
+// caps a velocity vector's magnitude in place-safe fashion (returns a new {vx,vy})
+function capSpeed(vx, vy, maxSpeed) {
+  const spd = Math.hypot(vx, vy);
+  if (spd <= maxSpeed || spd < 1e-6) return { vx, vy };
+  const k = maxSpeed / spd;
+  return { vx: vx * k, vy: vy * k };
 }
 // cylinder anchor for a particle at (theta, radius, hOff) around the head's
 // vertical axis; z = sin(theta) is the depth cue (z<0 = back half of the orbit)
@@ -207,11 +252,32 @@ function maxRadiusPx(h, w, vh) {
 function radiusFromSeed(seed, rMin, rMax) {
   return Math.sqrt(lerp(rMin * rMin, rMax * rMax, seed));
 }
-function particleRadiusPx(p, h, w, vh) {
-  return radiusFromSeed(p.radiusSeed, h.r * CYL_RADIUS_MIN_FACTOR, maxRadiusPx(h, w, vh));
+// rMaxCeil is the same value (maxRadiusPx(h,w,vh)) for every particle in a given
+// frame -- callers that loop over all particles should compute it ONCE and pass
+// it in, rather than paying 4 hypots per particle for an identical number.
+function particleRadiusPx(p, h, w, vh, rMaxCeil) {
+  const ceil = rMaxCeil !== undefined ? rMaxCeil : maxRadiusPx(h, w, vh);
+  return radiusFromSeed(p.radiusSeed, h.r * CYL_RADIUS_MIN_FACTOR, ceil);
 }
 function particleHOffPx(p, vh) {
   return p.hOffSeed * vh * CYL_HOFF_SCREEN_FACTOR;
+}
+// TORNADO profile: spin faster near the head (vortex core) than at the rim.
+// vortexFactor >= ~ (rRef/veryLargeR)^0.6 -> 0 as radius grows, and -> large
+// (but not unbounded, since rParticle is clamped at rRef by max()) near the axis.
+function vortexFactor(rParticle, rRef) {
+  return Math.pow(rRef / Math.max(rParticle, rRef), VORTEX_EXP);
+}
+// warp-stretch trail: length grows with speed, clamped to [minPx, maxPx]; a
+// near-stationary particle (speed ~0, no direction signal) falls back to a
+// fixed-but-per-particle direction (fallbackAngle) so it still gets a tiny dash
+// instead of a zero-length invisible stroke.
+function trailVector(vx, vy, kTrail, minPx, maxPx, fallbackAngle) {
+  const speed = Math.hypot(vx, vy);
+  const len = Math.min(maxPx, Math.max(minPx, speed * kTrail));
+  const dx = speed > 1e-4 ? vx / speed : Math.cos(fallbackAngle);
+  const dy = speed > 1e-4 ? vy / speed : Math.sin(fallbackAngle);
+  return { dx: dx * len, dy: dy * len };
 }
 // on release, recover an orbit theta from the particle's current screen x so
 // the spring pulls it smoothly from the cluster back to its cylinder slot.
@@ -255,12 +321,31 @@ function faceBoxToPixels(bb, vw, vh) {
    a fonte para encher o viewport. Mapear coordenadas da câmara para o ecrã
    exige a escala única do cover + os offsets do recorte — escalas X/Y
    independentes esticam o não-recortado e desalinham auréola e íman
-   (achado P1 do Codex no PR #24). Espelho (selfie) incluído aqui, num só sítio. */
+   (achado P1 do Codex no PR #24). Espelho (selfie) incluído aqui, num só sítio.
+   coverTransform() is the shared math; camToScreen() (per-point, hand/face
+   landmarks) and drawMaskThroughCover() (per-image, the segmentation mask)
+   both build on it so the mask lands EXACTLY where the mirrored video does --
+   same scale, same crop offsets, same mirror, one source of truth. */
+function coverTransform(fw, fh) {
+  const s = Math.max(W / fw, H / fh);
+  return { s, offX: (W - fw * s) / 2, offY: (H - fh * s) / 2 };
+}
 function camToScreen(nx, ny) {
   const vw = camBg.videoWidth || 1280, vh = camBg.videoHeight || 720; // fallback matches the 16:9 getUserMedia request
-  const s = Math.max(W / vw, H / vh);
-  const offX = (W - vw * s) / 2, offY = (H - vh * s) / 2;
+  const { s, offX, offY } = coverTransform(vw, vh);
   return { x: W - (offX + nx * vw * s), y: offY + ny * vh * s, s };
+}
+// draws `img` (the person mask, or a red-tinted copy of it) mirrored + scaled +
+// cropped through the exact same cover transform as camToScreen, so a
+// destination-out draw erases exactly the visible (mirrored) silhouette.
+function drawMaskThroughCover(ctx, img) {
+  const mw = img.width, mh = img.height;
+  const { s, offX, offY } = coverTransform(mw, mh);
+  ctx.save();
+  ctx.translate(W, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(img, 0, 0, mw, mh, offX, offY, mw * s, mh * s);
+  ctx.restore();
 }
 
 function processFace(res) {
@@ -282,6 +367,59 @@ function processFace(res) {
     head.cy += (cy - head.cy) * HEAD_EMA;
     head.r += (rPx - head.r) * HEAD_EMA;
   }
+}
+
+/* ================= person segmentation -> occlusion mask (shadow.html pattern) =================
+   selfie_multiclass_256x256: category 0 = background, anything else = person.
+   Trusted as-is (no live-test evidence here contradicted it, unlike shadow.html's
+   history) -- porting shadow's polarity self-check would double this section for
+   a case we have no evidence applies to this model/deployment. */
+let maskCanvas = null, mctx = null, maskReady = false;
+function paintPersonMask(result) {
+  const mask = result?.categoryMask;
+  if (!mask) return;
+  const data = mask.getAsUint8Array();
+  const w = mask.width, h = mask.height;
+  if (!maskCanvas || maskCanvas.width !== w || maskCanvas.height !== h) {
+    maskCanvas = document.createElement("canvas");
+    maskCanvas.width = w; maskCanvas.height = h;
+    mctx = maskCanvas.getContext("2d");
+  }
+  const id = mctx.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) {
+    const o = i * 4;
+    id.data[o] = 0; id.data[o + 1] = 0; id.data[o + 2] = 0; // colour is irrelevant for destination-out; only alpha matters
+    id.data[o + 3] = data[i] !== 0 ? 255 : 0;                // person = category != 0
+  }
+  mctx.putImageData(id, 0, 0);
+  maskReady = true;
+}
+function processSeg(res) {
+  // MPMask leak (shadow.html's own history): the returned result owns GPU/WASM
+  // buffers -- close() it EVERY time, success or failure, or it leaks a texture
+  // per call until the WebGL context dies.
+  try { paintPersonMask(res); }
+  finally { try { res?.close(); } catch {} }
+}
+// lazily builds a red-tinted copy of the current mask for the "o" debug key
+// (isolated tiny canvas -- never runs source-in directly on the stage, which
+// would erase every particle outside the mask's alpha instead of just tinting it)
+let maskTintCanvas = null, maskTintCtx = null;
+function tintedPersonMask() {
+  if (!maskCanvas) return null;
+  const w = maskCanvas.width, h = maskCanvas.height;
+  if (!maskTintCanvas || maskTintCanvas.width !== w || maskTintCanvas.height !== h) {
+    maskTintCanvas = document.createElement("canvas");
+    maskTintCanvas.width = w; maskTintCanvas.height = h;
+    maskTintCtx = maskTintCanvas.getContext("2d");
+  }
+  maskTintCtx.clearRect(0, 0, w, h);
+  maskTintCtx.drawImage(maskCanvas, 0, 0);
+  maskTintCtx.globalCompositeOperation = "source-in";
+  maskTintCtx.fillStyle = "#ff0000";
+  maskTintCtx.fillRect(0, 0, w, h);
+  maskTintCtx.globalCompositeOperation = "source-over";
+  return maskTintCanvas;
 }
 
 /* ================= hand tracking -> pinch points (exact pattern from draw.html) ================= */
@@ -326,6 +464,13 @@ function spawnParticle(p) {
   p.radiusSeed = Math.random();
   p.hOffSeed = Math.random() * 2 - 1;
   p.angularSpeed = ANGULAR_SPEED_MIN + Math.random() * (ANGULAR_SPEED_MAX - ANGULAR_SPEED_MIN); // all positive -> uniform direction
+  // DOUBLE PINCH BAND: personal, stable seeds assigned once at spawn -- bandT
+  // is this particle's fixed position along the A->B segment (0=handA, 1=handB,
+  // never reassigned), bandPerp is its fixed sideways offset direction/magnitude
+  // (band thickness). Stability is what makes the band read as a living ribbon
+  // instead of a shapeless cloud jittering between the two pinches every frame.
+  p.bandT = Math.random();
+  p.bandPerp = Math.random() * 2 - 1;
   p.releaseDurMs = 0; // 0 = never released yet, no cluster blend applied
   const a = cylinderAnchor(p.theta, particleRadiusPx(p, h, W, H), particleHOffPx(p, H), h);
   p.x = a.x; p.y = a.y; p.z = a.z;
@@ -350,10 +495,16 @@ function stepParticles(dt, now) {
   // from the cluster back toward its own cylinder slot; the differing
   // angularSpeeds spread the cluster back around the full ring over several
   // seconds ("lentamente deixam de estar todas juntas e voltamos ao cilindro").
+  // rMaxCeil depends only on (h, W, H) -- identical for every particle this
+  // frame, so compute the 4-corner ceiling ONCE instead of per particle
+  // (particleRadiusPx now runs for every particle every frame, pinched or not,
+  // to drive the tornado profile below -- see particleRadiusPx's own comment).
+  const rMaxCeil = maxRadiusPx(h, W, H);
+
   if (wasPinching && !anyPinch) {
     releaseAt = now;
     for (const p of particles) {
-      p.theta = reseedTheta(p.x, h, particleRadiusPx(p, h, W, H));
+      p.theta = reseedTheta(p.x, h, particleRadiusPx(p, h, W, H, rMaxCeil));
       // SLOW REGROUP: start each particle at a tight cluster radius/hOff and
       // let it decay back to its own full-screen slot over ~RELEASE_SPREAD_MS,
       // staggered +/-30% per particle so the swarm doesn't snap open in lockstep.
@@ -369,27 +520,50 @@ function stepParticles(dt, now) {
     ? AMBIENT_SPRING_K * (RELEASE_RAMP_START_MUL - (RELEASE_RAMP_START_MUL - 1) * (rampT / RELEASE_RAMP_MS))
     : AMBIENT_SPRING_K;
 
+  const rRef = h.r * VORTEX_R_REF_FACTOR;
+  const twoHands = pinchPoints.length >= 2;
+  const A = twoHands ? pinchPoints[0] : null, B = twoHands ? pinchPoints[1] : null;
+  // stable band axis (A->B) -- recomputed once per frame, shared by every
+  // particle's perpendicular offset, NOT per-particle (only bandT/bandPerp are).
+  let perpx = 0, perpy = 1;
+  if (twoHands) {
+    const bdx = B.x - A.x, bdy = B.y - A.y;
+    const blen = Math.hypot(bdx, bdy) || 1;
+    perpx = -bdy / blen; perpy = bdx / blen;
+  }
+
   for (const p of particles) {
-    p.theta += p.angularSpeed * dt; // orbit phase always advances
+    // TORNADO: spin faster the closer the particle's own cylinder radius is to
+    // the head (vortex core), slower at the rim -- reads as a vortex, not a drift.
+    const rParticle = particleRadiusPx(p, h, W, H, rMaxCeil);
+    p.theta += p.angularSpeed * vortexFactor(rParticle, rRef) * dt; // orbit phase always advances
     p.z = Math.sin(p.theta);        // depth cue, independent of screen position
 
     if (anyPinch) {
-      let best = pinchPoints[0], bestD2 = Infinity;
-      for (const pt of pinchPoints) {
-        const dx = pt.x - p.x, dy = pt.y - p.y, d2 = dx * dx + dy * dy;
-        if (d2 < bestD2) { bestD2 = d2; best = pt; }
+      let targetX, targetY;
+      if (twoHands) {
+        // DOUBLE PINCH = BAND: personal stable point on the A->B segment, offset
+        // sideways by a personal stable jitter -- the swarm stretches into a
+        // living band connecting the two pinches instead of two separate clumps.
+        targetX = lerp(A.x, B.x, p.bandT) + perpx * (p.bandPerp * BAND_PERP_FACTOR * h.r);
+        targetY = lerp(A.y, B.y, p.bandT) + perpy * (p.bandPerp * BAND_PERP_FACTOR * h.r);
+      } else {
+        // single pinch (or the other hand just released) -- the one remaining point
+        const only = pinchPoints[0];
+        targetX = only.x; targetY = only.y;
       }
-      const { fx, fy } = attractForce(p.x, p.y, best.x, best.y);
+      const { fx, fy } = spiralForce(p.x, p.y, targetX, targetY);
       p.vx += fx * dt; p.vy += fy * dt;
-      p.vx *= ATTRACT_DRAG; p.vy *= ATTRACT_DRAG;
+      p.vx *= SPIRAL_DRAG; p.vy *= SPIRAL_DRAG;
+      const capped = capSpeed(p.vx, p.vy, SPIRAL_SPEED_CAP);
+      p.vx = capped.vx; p.vy = capped.vy;
     } else {
       // releaseBlend: 1 right at release (tight cluster), decays to 0 over the
       // particle's own releaseDurMs (0 outside of a release => always full radius/hOff).
       const relElapsed = now - releaseAt;
       const releaseBlend = p.releaseDurMs ? Math.max(0, Math.min(1, 1 - relElapsed / p.releaseDurMs)) : 0;
       const t = 1 - releaseBlend; // 0 = tight cluster, 1 = own full-screen slot
-      const fullR = particleRadiusPx(p, h, W, H);
-      const r = lerp(h.r * CLUSTER_RADIUS_FACTOR, fullR, t);
+      const r = lerp(h.r * CLUSTER_RADIUS_FACTOR, rParticle, t);
       const hOffPx = lerp(0, particleHOffPx(p, H), t);
       const a = cylinderAnchor(p.theta, r, hOffPx, h);
       const { fx, fy } = springForce(p.x, p.y, a.x, a.y, springK);
@@ -402,8 +576,8 @@ function stepParticles(dt, now) {
   }
 }
 
-// debug: "o" key tints the occlusion ellipse red for DEBUG_MASK_MS so its
-// screen position can be checked against where hair/chin actually are.
+// debug: "o" key tints the person mask red for DEBUG_MASK_MS so its screen
+// position can be checked against where hair/chin/shoulders actually are.
 let debugMaskUntil = 0;
 window.addEventListener("keydown", e => {
   if (e.key !== "o" && e.key !== "O") return;
@@ -414,60 +588,42 @@ window.addEventListener("keydown", e => {
 
 function drawParticles(now) {
   sctx.clearRect(0, 0, W, H);
-  const h = currentHead();
-  const hasRealFace = head !== null; // fallback head (screen-center) has no face to hide behind -> skip the erase
   sctx.strokeStyle = "#fff";
   sctx.lineCap = "round";
 
-  // pass A: back half of the cylinder (z<0) -- drawn first so the head occlusion
+  // pass A: back half of the cylinder (z<0) -- drawn first so the person-mask
   // erase below covers them, and de-emphasized (thinner/dimmer) for a depth cue
   sctx.globalCompositeOperation = "lighter";
   for (const p of particles) {
     if (p.z >= 0) continue;
     sctx.globalAlpha = p.alpha * DEPTH_ALPHA_MUL;
     sctx.lineWidth = p.width * DEPTH_WIDTH_MUL;
+    const trail = trailVector(p.vx, p.vy, TRAIL_K, TRAIL_MIN_PX, TRAIL_MAX_PX, p.theta);
     sctx.beginPath();
-    sctx.moveTo(p.x - p.vx * STREAK_K, p.y - p.vy * STREAK_K);
+    sctx.moveTo(p.x - trail.dx, p.y - trail.dy);
     sctx.lineTo(p.x, p.y);
     sctx.stroke();
   }
 
-  if (hasRealFace) {
-    // HEAD OCCLUSION: erase the head region (skull+hair+chin) so the back-half
-    // particles just drawn read as passing BEHIND the head. Ellipse from the
-    // FaceDetector box -- ponytail: deliberately not a segmentation model, a
-    // soft-edge oval is the accepted tradeoff over a true per-pixel head cutout.
-    // Only runs while a real face is tracked -- on the fallback head this would
-    // erase mid-screen with nothing to justify it, which reads as a bug.
+  if (maskReady) {
+    // PIXEL-PERFECT OCCLUSION: erase wherever the segmentation mask says
+    // "person" (skull, hair, shoulders, whatever's actually in frame -- not an
+    // approximated oval) so the back-half particles just drawn read as passing
+    // BEHIND the visitor. Only runs once a mask has actually been painted.
     sctx.globalAlpha = 1;
     sctx.globalCompositeOperation = "destination-out";
-    sctx.save();
-    sctx.translate(h.cx, h.cy - h.r * OCCLUDE_CY_FACTOR);
-    sctx.scale(h.r * OCCLUDE_RX_FACTOR, h.r * OCCLUDE_RY_FACTOR);
-    const grad = sctx.createRadialGradient(0, 0, 0, 0, 0, 1);
-    grad.addColorStop(0, "rgba(0,0,0,1)");
-    grad.addColorStop(1 - OCCLUDE_SOFT_EDGE, "rgba(0,0,0,1)");
-    grad.addColorStop(1, "rgba(0,0,0,0)");
-    sctx.fillStyle = grad;
-    sctx.beginPath();
-    sctx.arc(0, 0, 1, 0, Math.PI * 2);
-    sctx.fill();
-    sctx.restore();
+    drawMaskThroughCover(sctx, maskCanvas);
+    sctx.globalCompositeOperation = "source-over";
 
-    // debug key "o": tint the same ellipse red at 20% alpha for 3s so the
-    // occlusion mask's position is actually visible on screen.
+    // debug key "o": tint the same mask red at 20% alpha for 3s so its screen
+    // position is actually visible on top of the particles.
     if (now < debugMaskUntil) {
-      sctx.globalCompositeOperation = "source-over";
-      sctx.globalAlpha = DEBUG_MASK_ALPHA;
-      sctx.save();
-      sctx.translate(h.cx, h.cy - h.r * OCCLUDE_CY_FACTOR);
-      sctx.scale(h.r * OCCLUDE_RX_FACTOR, h.r * OCCLUDE_RY_FACTOR);
-      sctx.fillStyle = "#ff0000";
-      sctx.beginPath();
-      sctx.arc(0, 0, 1, 0, Math.PI * 2);
-      sctx.fill();
-      sctx.restore();
-      sctx.globalAlpha = 1;
+      const tinted = tintedPersonMask();
+      if (tinted) {
+        sctx.globalAlpha = DEBUG_MASK_ALPHA;
+        drawMaskThroughCover(sctx, tinted);
+        sctx.globalAlpha = 1;
+      }
     }
   }
 
@@ -481,8 +637,9 @@ function drawParticles(now) {
     if (p.z < 0) continue;
     sctx.globalAlpha = p.alpha;
     sctx.lineWidth = p.width;
+    const trail = trailVector(p.vx, p.vy, TRAIL_K, TRAIL_MIN_PX, TRAIL_MAX_PX, p.theta);
     sctx.beginPath();
-    sctx.moveTo(p.x - p.vx * STREAK_K, p.y - p.vy * STREAK_K);
+    sctx.moveTo(p.x - trail.dx, p.y - trail.dy);
     sctx.lineTo(p.x, p.y);
     sctx.stroke();
   }
@@ -503,13 +660,14 @@ function perfGuard(rawDtMs, now) {
   }
 }
 
-/* ================= tracking tick (hands every frame, face every Nth) ================= */
-let handLandmarker = null, faceDetector = null, trackersReady = false;
+/* ================= tracking tick (hands every frame, face every 3rd, seg every 2nd) ================= */
+let handLandmarker = null, faceDetector = null, segmenter = null, trackersReady = false;
 let segFrameCount = 0;
 function processTracking(now) {
   segFrameCount++;
   processHands(handLandmarker.detectForVideo(camBg, now));
   if (segFrameCount % FACE_EVERY_N === 0) processFace(faceDetector.detectForVideo(camBg, now));
+  if (segFrameCount % SEG_EVERY_N === 0) processSeg(segmenter.segmentForVideo(camBg, now));
   dismissOverlay(); // first tracked frame: camera + models are both live
 }
 
@@ -551,7 +709,7 @@ function dismissOverlay() {
 }
 
 async function initModels() {
-  const { FilesetResolver, HandLandmarker, FaceDetector } =
+  const { FilesetResolver, HandLandmarker, FaceDetector, ImageSegmenter } =
     await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
   const fileset = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
@@ -569,11 +727,21 @@ async function initModels() {
     },
     runningMode: "VIDEO"
   });
+  // pixel-perfect occlusion -- exact model + options as shadow.html's proven pattern
+  segmenter = await ImageSegmenter.createFromOptions(fileset, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO",
+    outputCategoryMask: true,
+    outputConfidenceMasks: false
+  });
   trackersReady = true;
 }
 
 async function start() {
-  setLoadStatus("a carregar os modelos de mão e cara");
+  setLoadStatus("a carregar os modelos de mão, cara e segmentação");
   try {
     await initModels();
   } catch (e) {

@@ -82,28 +82,49 @@ npx serve -l 8777
 - `shadow.html` — 🌑 Sala de Sombras (beta): a sombra do corpo projetada
   numa sala 3D.
 - `draw.html` — ✍️ Pinch Draw: pintura de luz no ar com o gesto de pinch.
-- `enxame.html` — 🌬️ Enxame: milhares (9000, 2500 no mínimo) de partículas
+- `enxame.html` — 🌬️ Enxame: milhares (12000, 3000 no mínimo) de partículas
   brancas orbitam num **cilindro que enche o ecrã todo**, à volta do eixo
-  vertical da cabeça (MediaPipe `FaceDetector` localiza a cabeça). O raio de
-  cada partícula vai de `head.r×1.15` até à distância ao canto mais afastado
-  do ecrã (`×1.05`), com densidade **areal** (`r = sqrt(lerp(rMin², rMax²,
-  seed))`) para encher o ecrã de forma uniforme em vez de se amontoar junto à
-  cabeça; a altura (`hOff`) também é relativa ao ecrã (`±0.48×H`). Todas
-  giram no **mesmo sentido** (velocidade angular sempre positiva, banda
-  estreita 0.22–0.38 rad/s) — o lado de trás do cilindro (`sin(theta)<0`)
-  desloca-se sempre da **esquerda para a direita** atrás da cabeça. A
-  profundidade (`z = sin(theta)`) faz as partículas do lado de trás passarem
-  **atrás da cabeça** — uma elipse suave, recortada da caixa do
-  `FaceDetector` (só ativa quando há cara real detetada, nunca no fallback
-  de ecrã-centro), apaga-as onde se cruzam com a cara (não é um modelo de
-  segmentação; é o compromisso escolhido); a tecla **`o`** tinge essa elipse
-  de vermelho durante 3s para conferir o alinhamento. Aperta o polegar e o
-  indicador (`HandLandmarker`, em qualquer das mãos) para as atrair como um
-  íman rápido — elas seguem os dedos enquanto o pinch está fechado; ao
-  largar, cada partícula recupera o seu ângulo a partir da posição onde
-  ficou e volta primeiro como um **grupo compacto** (raio apertado, ~1.6×
-  a cabeça) que se vai **espalhando lentamente ao longo de ~9s** até
-  reocupar todo o cilindro — como giram todas no mesmo sentido, o grupo
-  viaja-se visivelmente junto antes de se dispersar.
+  vertical da cabeça (MediaPipe `FaceDetector` localiza a cabeça, a cada 3ª
+  frame). O raio de cada partícula vai de `head.r×1.15` até à distância ao
+  canto mais afastado do ecrã (`×1.05`), com densidade **areal** (`r =
+  sqrt(lerp(rMin², rMax², seed))`) para encher o ecrã de forma uniforme em
+  vez de se amontoar junto à cabeça; a altura (`hOff`) também é relativa ao
+  ecrã (`±0.48×H`). Todas giram no **mesmo sentido** (velocidade angular
+  sempre positiva, banda base 0.35–0.6 rad/s) — o lado de trás do cilindro
+  (`sin(theta)<0`) desloca-se sempre da **esquerda para a direita** atrás da
+  cabeça — mas com um perfil de **tornado**: a velocidade angular efetiva
+  sobe perto do eixo da cabeça e cai para a periferia
+  (`baseSpeed·(rRef/max(r,rRef))^0.6`, `rRef = head.r×2`), pelo que os anéis
+  interiores giram visivelmente mais depressa do que os exteriores, como um
+  vórtice, não uma deriva plana. A profundidade (`z = sin(theta)`) faz as
+  partículas do lado de trás passarem **atrás da cabeça/corpo** — agora com
+  **oclusão pixel-a-pixel**: MediaPipe `ImageSegmenter`
+  (`selfie_multiclass_256x256`, a cada 2ª frame trackeada) segmenta a pessoa
+  (categoria 0 = fundo, qualquer outra = pessoa), a máscara é pintada num
+  canvas offscreen à resolução nativa e apagada no palco através da MESMA
+  transformação "cover" (espelho + escala + recortes) usada para mãos/cara —
+  a máscara recorta exatamente a silhueta visível, já não uma elipse
+  aproximada; a tecla **`o`** tinge essa máscara de vermelho durante 3s para
+  conferir o alinhamento. O rasto de cada partícula agora estica-se
+  proporcionalmente à velocidade (`kTrail≈0.06s`, entre 4px e 70px) — parada
+  fica um pontinho, a espiralar para um pinch ou lançada na largada vira um
+  feixe de luz "quase warp". Aperta o polegar e o indicador
+  (`HandLandmarker`, em qualquer das mãos) para as atrair com **física real**
+  em vez de uma reta: gravidade + espiral (`F = G/(d+40)^1.5` radial mais uma
+  componente tangencial `swirlK×|F|`, sempre com a mesma quiralidade) faz as
+  partículas curvarem para dentro e **orbitar** o dedo em vez de colapsarem
+  num ponto (velocidade capada a ~1400px/s, atrito 0.985 que preserva o
+  momento angular do giro). Com as **duas mãos em pinch**, o enxame estica-se
+  numa **banda viva** entre os dois pinches: cada partícula tem uma posição
+  estável (`bandT∈[0,1]`, atribuída no spawn) ao longo do segmento entre as
+  mãos, com um pequeno deslocamento lateral estável (±`head.r×0.15`) que dá
+  espessura à banda; larga uma mão e volta ao comportamento de pinch único
+  em direção à que resta. Ao largar, cada partícula recupera o seu ângulo a
+  partir da posição onde ficou (já com a inércia tangencial da espiral, que
+  alimenta bem a rotação de regresso) e volta primeiro como um **grupo
+  compacto** (raio apertado, ~1.6× a cabeça) que se vai **espalhando
+  lentamente ao longo de ~9s** até reocupar todo o cilindro — como giram
+  todas no mesmo sentido, o grupo viaja-se visivelmente junto antes de se
+  dispersar.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).
