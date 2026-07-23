@@ -207,7 +207,11 @@ const PERF_COOLDOWN_MS = 2000;
 // right after release (transient burst cost, not sustained load) -- and the
 // ratchet isn't only downward: sustained cheap frames slowly restore particles.
 const PERF_FREEZE_AFTER_RELEASE_MS = 2000;
-const PERF_RECOVER_MS = 15;      // frameTimeEMA below this counts as "cheap"
+// 18ms e não 15: num ecrã de 60 Hz o rAF entrega ~16.7ms de intervalo bruto,
+// pelo que um limiar de 15 nunca seria atingido e a recuperação nunca
+// começava (achado P2 do Codex, PR #28). 18 fica acima do idle de 60 Hz e
+// bem abaixo do gatilho de step-down (24).
+const PERF_RECOVER_MS = 18;      // frameTimeEMA below this counts as "cheap"
 const PERF_RECOVER_HOLD_MS = 10000; // ...for this long straight before a recovery step
 const PERF_RECOVER_STEP = 1.15;  // +15% per recovery step, capped at ORIGINAL_PARTICLE_COUNT
 const FUGITIVE_DIST_FACTOR = 1.5; // px multiple of the screen diagonal, from screen center, before a silent re-snap
@@ -544,7 +548,13 @@ function stepParticles(dt, now) {
       // is pulled straight back into the tornado flow instead of "exploding"
       // outward from the release point ("quando solta voltam para o efeito
       // tornado, não precisa explodir o círculo").
-      const tHatX = -Math.sin(p.theta), tHatY = Math.cos(p.theta);
+      // a tangente REAL do anel inclui o CYL_WOBBLE no eixo y (a âncora é
+      // y = hOff + r·WOBBLE·sinθ ⇒ dy/dθ = r·WOBBLE·cosθ) — sem isto, perto
+      // de θ=0/π a projeção atirava ~8× velocidade vertical a mais e recriava
+      // a explosão (achado P2 do Codex, PR #28). Normalizada.
+      let tHatX = -Math.sin(p.theta), tHatY = CYL_WOBBLE * Math.cos(p.theta);
+      const tLen = Math.hypot(tHatX, tHatY) || 1;
+      tHatX /= tLen; tHatY /= tLen;
       const vTan = p.vx * tHatX + p.vy * tHatY;
       const ambientTanSpeed = p.angularSpeed * vortexFactor(rParticle, rRef) * rParticle;
       const clampedTan = Math.max(0, Math.min(vTan, ambientTanSpeed * TORNADO_REABSORB_MAX_MUL));
@@ -735,6 +745,10 @@ function perfGuard(rawDtMs, now) {
   // (EMA < PERF_RECOVER_MS) for PERF_RECOVER_HOLD_MS continuously, restore
   // particles in +15% steps back up toward ORIGINAL_PARTICLE_COUNT (the
   // pre-step-down target, captured once at startup).
+  // o freeze também trava a RECUPERAÇÃO (e reinicia o streak): uma sequência
+  // de frames baratos que amadureça durante um pinch não pode ADICIONAR carga
+  // a meio da interação (achado do CodeRabbit, PR #28).
+  if (frozen) { goodStreakStart = null; return; }
   if (frameTimeEMA < PERF_RECOVER_MS) {
     if (goodStreakStart === null) goodStreakStart = now;
     if (particles.length < ORIGINAL_PARTICLE_COUNT && now - goodStreakStart > PERF_RECOVER_HOLD_MS) {
