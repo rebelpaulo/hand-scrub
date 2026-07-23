@@ -132,6 +132,14 @@ const ANGULAR_SPEED_MIN = 0.35, ANGULAR_SPEED_MAX = 0.6; // rad/s, base band (ra
 // -- always positive, so the single-shared-direction invariant above is untouched.
 const VORTEX_R_REF_FACTOR = 2;
 const VORTEX_EXP = 0.6;
+// TORNADO REABSORPTION (post-release): right after a release, each particle's
+// velocity is projected onto the ring's own θ+ tangent (the same shared
+// direction as ANGULAR_SPEED above) and clamped to this multiple of the local
+// ambient tangential speed (angularSpeed_efetiva * raio) -- no radial leftover
+// survives, so the swarm is pulled straight back into the tornado flow instead
+// of "exploding" outward from the release point. See the release block in
+// stepParticles().
+const TORNADO_REABSORB_MAX_MUL = 1.5;
 
 // ambient spring (halo hugging its cylinder anchor)
 const AMBIENT_SPRING_K = 3.2;  // px/s^2 accel per px of offset from anchor
@@ -152,19 +160,21 @@ const DEBUG_MASK_MS = 3000, DEBUG_MASK_ALPHA = 0.2;        // "o" key: tint the 
 // particles curve in and settle into a tight orbit around the pinch instead of
 // collapsing onto a point. F = SPIRAL_G / (d + SPIRAL_D_OFFSET)^SPIRAL_POW along
 // r_hat (toward the target), PLUS a tangential term SPIRAL_SWIRL_K * |F| along
-// t_hat (r_hat rotated +90 deg, ALWAYS the same fixed rotation -- one shared
-// chirality for every particle every frame, same "single direction" convention
-// as the ambient ANGULAR_SPEED being all-positive above).
+// t_hat (r_hat rotated 90 deg BY swirlSign -- see the CHIRALITY comment on
+// spiralForce() below: which side of the screen the pinch is on decides the
+// rotation sign, so every particle attracted to a given pinch still shares ONE
+// chirality, just not the same one for a left-side vs right-side pinch).
 // SPIRAL_G tuned (see harness) so a particle starting at a "far corner" distance
 // of ~755px (half-diagonal of the 1280x800 baseline viewport -- corner-to-center,
 // the realistic worst case since a pinch sits somewhere on screen, not literally
 // in the opposite corner) settles inside a ~40px orbit shell around the pinch in
-// ~1s, under SPIRAL_DRAG and the SPIRAL_SPEED_CAP below.
-const SPIRAL_G = 6.0e7;
+// ~2s (SPIRAL_G at x0.4 of the original tuning -- slower, more-circular travel),
+// under SPIRAL_DRAG and the SPIRAL_SPEED_CAP below.
+const SPIRAL_G = 2.4e7;         // x0.4 of the original 6.0e7 -- ~2s corner-to-pinch travel, not ~1s
 const SPIRAL_D_OFFSET = 40;     // px, denominator offset -- avoids a singularity as d -> 0
 const SPIRAL_POW = 1.5;
-const SPIRAL_SWIRL_K = 0.5;     // tangential force = this fraction of the radial magnitude
-const SPIRAL_SPEED_CAP = 1400;  // px/s
+const SPIRAL_SWIRL_K = 0.75;    // was 0.5 -- more orbit, less fall-in around the pinch
+const SPIRAL_SPEED_CAP = 900;   // px/s, was 1400
 const SPIRAL_DRAG = 0.985;      // momentum-preserving -- the swirl keeps particles circulating, not stalling
 // DOUBLE PINCH = BAND: with both hands pinching, each particle's target becomes a
 // point on the segment between the two pinches (its own stable bandT, assigned at
@@ -193,6 +203,14 @@ const MAX_DT = 0.05;                   // s, clamp so a tab-suspend gap can't fl
 const PERF_FRAME_MS = 24;              // rAF EMA above this triggers a 25% particle-count step-down
 const PERF_STEP = 0.75;
 const PERF_COOLDOWN_MS = 2000;
+// perf guard: step-down is frozen during a live pinch and for a grace window
+// right after release (transient burst cost, not sustained load) -- and the
+// ratchet isn't only downward: sustained cheap frames slowly restore particles.
+const PERF_FREEZE_AFTER_RELEASE_MS = 2000;
+const PERF_RECOVER_MS = 15;      // frameTimeEMA below this counts as "cheap"
+const PERF_RECOVER_HOLD_MS = 10000; // ...for this long straight before a recovery step
+const PERF_RECOVER_STEP = 1.15;  // +15% per recovery step, capped at ORIGINAL_PARTICLE_COUNT
+const FUGITIVE_DIST_FACTOR = 1.5; // px multiple of the screen diagonal, from screen center, before a silent re-snap
 
 /* ================= pure physics helpers (also covered by the node harness) ================= */
 function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
@@ -203,16 +221,24 @@ function springForce(px, py, ax, ay, k = AMBIENT_SPRING_K) {
   return { fx: (ax - px) * k, fy: (ay - py) * k };
 }
 // SPIRAL MAGNET: gravity toward the target (r_hat, falloff 1/(d+offset)^pow)
-// PLUS a tangential swirl (t_hat = r_hat rotated +90 deg, ALWAYS the same
-// rotation -- one fixed chirality shared by every particle every frame) so
+// PLUS a tangential swirl (t_hat = r_hat rotated 90 deg BY swirlSign) so
 // particles curve in and orbit the target instead of collapsing onto it.
-function spiralForce(px, py, tx, ty) {
+// CHIRALITY BY PINCH SIDE: swirlSign picks which way t_hat rotates from r_hat.
+// swirlSign=+1 (unrotated: tx_=-ry, ty_=rx) -- verified by hand: at the TOP of
+// the orbit r_hat=(0,1) (particle above the target, pointing straight down at
+// it, screen y grows downward) so t_hat=(-1,0), a LEFTWARD tangential push ->
+// the particle sweeps right-to-left across the top of the orbit. That is the
+// RIGHT-side-pinch look the ticket asks for, so callers pass swirlSign=+1
+// when pinch.x > W/2.
+// swirlSign=-1 flips it (tx_=ry, ty_=-rx): at the top t_hat=(1,0), a
+// RIGHTWARD push -> left-to-right across the top -- the LEFT-side-pinch case.
+function spiralForce(px, py, tx, ty, swirlSign = 1) {
   const dx = tx - px, dy = ty - py;
   const d = Math.hypot(dx, dy);
   if (d < 1e-6) return { fx: 0, fy: 0 }; // already at the target -- no direction to push
   const mag = SPIRAL_G / Math.pow(d + SPIRAL_D_OFFSET, SPIRAL_POW);
   const rx = dx / d, ry = dy / d;      // r_hat: radial, toward the target
-  const tx_ = -ry, ty_ = rx;           // t_hat: r_hat rotated +90 deg (fixed chirality)
+  const tx_ = -ry * swirlSign, ty_ = rx * swirlSign; // t_hat: r_hat rotated 90 deg, sign-dependent
   return {
     fx: rx * mag + tx_ * (SPIRAL_SWIRL_K * mag),
     fy: ry * mag + ty_ * (SPIRAL_SWIRL_K * mag)
@@ -482,7 +508,10 @@ function spawnParticle(p) {
 function buildParticles(count) {
   particles = new Array(count).fill(null).map(() => spawnParticle({}));
 }
-buildParticles(computeParticleCount());
+// PERF RECOVERY target: the pre-step-down particle count perfGuard() ratchets
+// back up toward once frames have been cheap for a while (see perfGuard()).
+const ORIGINAL_PARTICLE_COUNT = computeParticleCount();
+buildParticles(ORIGINAL_PARTICLE_COUNT);
 
 let wasPinching = false;
 let releaseAt = -Infinity; // timestamp of the last pinch release, drives the spring-K ramp
@@ -500,11 +529,27 @@ function stepParticles(dt, now) {
   // (particleRadiusPx now runs for every particle every frame, pinched or not,
   // to drive the tornado profile below -- see particleRadiusPx's own comment).
   const rMaxCeil = maxRadiusPx(h, W, H);
+  const rRef = h.r * VORTEX_R_REF_FACTOR; // needed both by the tornado profile below and the release reabsorption right below
+  const screenDiag = Math.hypot(W, H);    // FUGITIVAS: re-snap threshold is 1.5x this, from screen center
 
   if (wasPinching && !anyPinch) {
     releaseAt = now;
     for (const p of particles) {
-      p.theta = reseedTheta(p.x, h, particleRadiusPx(p, h, W, H, rMaxCeil));
+      const rParticle = particleRadiusPx(p, h, W, H, rMaxCeil);
+      p.theta = reseedTheta(p.x, h, rParticle);
+      // TORNADO REABSORPTION: project the velocity onto the ring's own θ+
+      // tangent at the new theta and clamp to <=1.5x the local ambient
+      // tangential speed (angularSpeed_efetiva * raio, vortex-adjusted). No
+      // radial leftover survives the clamp (min 0), so on release the swarm
+      // is pulled straight back into the tornado flow instead of "exploding"
+      // outward from the release point ("quando solta voltam para o efeito
+      // tornado, não precisa explodir o círculo").
+      const tHatX = -Math.sin(p.theta), tHatY = Math.cos(p.theta);
+      const vTan = p.vx * tHatX + p.vy * tHatY;
+      const ambientTanSpeed = p.angularSpeed * vortexFactor(rParticle, rRef) * rParticle;
+      const clampedTan = Math.max(0, Math.min(vTan, ambientTanSpeed * TORNADO_REABSORB_MAX_MUL));
+      p.vx = tHatX * clampedTan;
+      p.vy = tHatY * clampedTan;
       // SLOW REGROUP: start each particle at a tight cluster radius/hOff and
       // let it decay back to its own full-screen slot over ~RELEASE_SPREAD_MS,
       // staggered +/-30% per particle so the swarm doesn't snap open in lockstep.
@@ -520,7 +565,6 @@ function stepParticles(dt, now) {
     ? AMBIENT_SPRING_K * (RELEASE_RAMP_START_MUL - (RELEASE_RAMP_START_MUL - 1) * (rampT / RELEASE_RAMP_MS))
     : AMBIENT_SPRING_K;
 
-  const rRef = h.r * VORTEX_R_REF_FACTOR;
   const twoHands = pinchPoints.length >= 2;
   const A = twoHands ? pinchPoints[0] : null, B = twoHands ? pinchPoints[1] : null;
   // stable band axis (A->B) -- recomputed once per frame, shared by every
@@ -531,6 +575,14 @@ function stepParticles(dt, now) {
     const blen = Math.hypot(bdx, bdy) || 1;
     perpx = -bdy / blen; perpy = bdx / blen;
   }
+  // CHIRALITY BY PINCH SIDE: which half of the screen the pinch (or the band
+  // midpoint, for double pinch) sits on picks the spiral's rotation sign --
+  // see the CHIRALITY comment on spiralForce() for the verified direction.
+  let swirlSign = 1;
+  if (anyPinch) {
+    const swirlRefX = twoHands ? (A.x + B.x) / 2 : pinchPoints[0].x;
+    swirlSign = swirlRefX > W / 2 ? 1 : -1;
+  }
 
   for (const p of particles) {
     // TORNADO: spin faster the closer the particle's own cylinder radius is to
@@ -538,6 +590,19 @@ function stepParticles(dt, now) {
     const rParticle = particleRadiusPx(p, h, W, H, rMaxCeil);
     p.theta += p.angularSpeed * vortexFactor(rParticle, rRef) * dt; // orbit phase always advances
     p.z = Math.sin(p.theta);        // depth cue, independent of screen position
+
+    // FUGITIVAS: a particle flung past 1.5x the screen diagonal from center
+    // never stays lost off-screen after a fling -- silently re-snap it to its
+    // own ambient cylinder anchor (position + tangential ambient velocity)
+    // before any force this frame gets a chance to push it further.
+    if (Math.hypot(p.x - W / 2, p.y - H / 2) > screenDiag * FUGITIVE_DIST_FACTOR) {
+      const anchor = cylinderAnchor(p.theta, rParticle, particleHOffPx(p, H), h);
+      p.x = anchor.x; p.y = anchor.y; p.z = anchor.z;
+      const tHatX = -Math.sin(p.theta), tHatY = Math.cos(p.theta);
+      const ambientTanSpeed = p.angularSpeed * vortexFactor(rParticle, rRef) * rParticle;
+      p.vx = tHatX * ambientTanSpeed;
+      p.vy = tHatY * ambientTanSpeed;
+    }
 
     if (anyPinch) {
       let targetX, targetY;
@@ -552,7 +617,7 @@ function stepParticles(dt, now) {
         const only = pinchPoints[0];
         targetX = only.x; targetY = only.y;
       }
-      const { fx, fy } = spiralForce(p.x, p.y, targetX, targetY);
+      const { fx, fy } = spiralForce(p.x, p.y, targetX, targetY, swirlSign);
       p.vx += fx * dt; p.vy += fy * dt;
       p.vx *= SPIRAL_DRAG; p.vy *= SPIRAL_DRAG;
       const capped = capSpeed(p.vx, p.vy, SPIRAL_SPEED_CAP);
@@ -647,16 +712,41 @@ function drawParticles(now) {
 }
 
 /* ================= perf guard: shrink the swarm if frames run slow ================= */
-let frameTimeEMA = 16, lastPerfStepAt = 0, perfSteps = 0;
+let frameTimeEMA = 16, lastPerfStepAt = 0, perfSteps = 0, goodStreakStart = null;
 function perfGuard(rawDtMs, now) {
   frameTimeEMA = frameTimeEMA * 0.9 + rawDtMs * 0.1;
-  if (frameTimeEMA > PERF_FRAME_MS && particles.length > PARTICLE_FLOOR && now - lastPerfStepAt > PERF_COOLDOWN_MS) {
+
+  // FREEZE: a live pinch or the ~2s right after a release is a transient cost
+  // spike (spiral force + release-reabsorption math), not sustained load --
+  // never step particles down while either is true.
+  const frozen = pinchPoints.length > 0 || (now - releaseAt < PERF_FREEZE_AFTER_RELEASE_MS);
+
+  if (!frozen && frameTimeEMA > PERF_FRAME_MS && particles.length > PARTICLE_FLOOR && now - lastPerfStepAt > PERF_COOLDOWN_MS) {
     const next = Math.max(PARTICLE_FLOOR, Math.round(particles.length * PERF_STEP));
     if (next < particles.length) {
       particles.length = next;
       lastPerfStepAt = now; perfSteps++;
+      goodStreakStart = null; // a fresh step-down cancels any in-progress recovery streak
       console.info(`enxame: perf step ${perfSteps} — frame EMA ${frameTimeEMA.toFixed(1)}ms, particles -> ${next}`);
     }
+  }
+
+  // RECOVERY: the ratchet isn't only downward. Once frames have been cheap
+  // (EMA < PERF_RECOVER_MS) for PERF_RECOVER_HOLD_MS continuously, restore
+  // particles in +15% steps back up toward ORIGINAL_PARTICLE_COUNT (the
+  // pre-step-down target, captured once at startup).
+  if (frameTimeEMA < PERF_RECOVER_MS) {
+    if (goodStreakStart === null) goodStreakStart = now;
+    if (particles.length < ORIGINAL_PARTICLE_COUNT && now - goodStreakStart > PERF_RECOVER_HOLD_MS) {
+      const next = Math.min(ORIGINAL_PARTICLE_COUNT, Math.round(particles.length * PERF_RECOVER_STEP));
+      if (next > particles.length) {
+        for (let i = particles.length; i < next; i++) particles.push(spawnParticle({}));
+        console.info(`enxame: perf recovery — frame EMA ${frameTimeEMA.toFixed(1)}ms, particles -> ${next}`);
+      }
+      goodStreakStart = now; // restart the hold window before the next +15% step
+    }
+  } else {
+    goodStreakStart = null;
   }
 }
 
