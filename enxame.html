@@ -621,8 +621,16 @@ function stepParticles(dt, now) {
   if (wasPinching && !anyPinch) {
     releaseAt = now;
     for (const p of particles) {
-      const rParticle = particleRadiusPx(p, h, W, H, rMaxCeil);
-      p.theta = reseedTheta(p.x, h, rParticle);
+      // UMA única derivação de θ para todo o caminho de largada: o thetaEst
+      // do adoptReleaseOverrides é calculado com o MESMO rGuess que deriva o
+      // rOverridePx — âncora ≡ posição atual. (Antes havia dois θ diferentes:
+      // um re-seed com o raio-seed aqui e um thetaEst descartado no helper —
+      // a âncora caía noutro sítio e a mola voltava a criar o snap; achado
+      // P2 do Codex, PR #30.)
+      const ov = adoptReleaseOverrides(p.x, p.y, h, H, rMinPx, rMaxCeil);
+      p.theta = ov.thetaEst;
+      p.hOverridePx = ov.hOverridePx;
+      p.rOverridePx = ov.rOverridePx;
       // TORNADO REABSORPTION: project the velocity onto the ring's own signed
       // tangent at the new theta and clamp to [0, 1.5x] the local ambient
       // tangential speed (angularSpeed_efetiva * raio, vortex-adjusted, in the
@@ -640,18 +648,13 @@ function stepParticles(dt, now) {
       const tLen = Math.hypot(tHatX, tHatY) || 1;
       tHatX /= tLen; tHatY /= tLen;
       const vTan = p.vx * tHatX + p.vy * tHatY;
-      const ambientTanSpeed = p.angularSpeed * vortexFactor(rParticle, rRef) * rParticle;
+      // velocidade ambiente local calculada no raio REAL da órbita adotada
+      // (rOverridePx), não no raio-seed — é onde a partícula está de facto.
+      const ambientTanSpeed = p.angularSpeed * vortexFactor(p.rOverridePx, rRef) * p.rOverridePx;
       const clampedTan = Math.max(0, Math.min(vTan, ambientTanSpeed * TORNADO_REABSORB_MAX_MUL));
       p.vx = tHatX * clampedTan;
       p.vy = tHatY * clampedTan;
-
-      // HONEST RELEASE ("só afetou as que tiveram tempo de lá chegar"): adopt
-      // the particle's CURRENT position as its orbit state instead of
-      // teleporting it into a cluster -- p.x/p.y are untouched here, so there
-      // is no jump at the release instant itself.
-      const ov = adoptReleaseOverrides(p.x, p.y, h, H, rMinPx, rMaxCeil);
-      p.hOverridePx = ov.hOverridePx;
-      p.rOverridePx = ov.rOverridePx;
+      // p.x/p.y intocados — zero salto no instante da largada.
     }
   }
   wasPinching = anyPinch;
