@@ -2064,7 +2064,8 @@ const dCanvas = $("drawCanvasT"), dctx = dCanvas.getContext("2d");
 const strokeEcho = document.createElement("canvas");
 const sectx = strokeEcho.getContext("2d");
 let echoUndo = [], echoRedo = []; // histórico LOCAL do eco (snapshots da camada de traços)
-const ECHO_HISTORY_MAX = 20;
+const ECHO_HISTORY_MAX = 10;   // tablet: memória limitada — poucos passos chegam (o display é a verdade)
+const ECHO_SNAP_MAX = 900;     // maior lado do snapshot em px — leve (num DPR2 1080p full-res eram ~32MiB/passo)
 let drawScreenOpen = false;
 const STAMP_EMOJIS_TABLET = ["⭐", "❤️", "🌸", "✨", "🦋", "😀"]; // mesmo conjunto do display
 
@@ -2116,16 +2117,21 @@ function compositeEcho() {
   dctx.restore();
 }
 function snapshotEcho() {
+  // snapshot em resolução REDUZIDA (limita a memória do histórico no tablet) —
+  // o eco é uma pré-visualização aproximada, o render fiel é no display
+  const sw = strokeEcho.width, sh = strokeEcho.height;
+  const scale = Math.min(1, ECHO_SNAP_MAX / Math.max(sw, sh, 1));
   const c = document.createElement("canvas");
-  c.width = strokeEcho.width; c.height = strokeEcho.height;
-  c.getContext("2d").drawImage(strokeEcho, 0, 0);
+  c.width = Math.max(1, Math.round(sw * scale));
+  c.height = Math.max(1, Math.round(sh * scale));
+  c.getContext("2d").drawImage(strokeEcho, 0, 0, c.width, c.height);
   return c;
 }
 function restoreEcho(c) {
   sectx.save();
   sectx.setTransform(1, 0, 0, 1, 0, 0);
   sectx.clearRect(0, 0, strokeEcho.width, strokeEcho.height);
-  sectx.drawImage(c, 0, 0);
+  sectx.drawImage(c, 0, 0, strokeEcho.width, strokeEcho.height); // reamplia às dims reais
   sectx.restore();
   compositeEcho();
 }
@@ -2160,12 +2166,17 @@ $("drawModeBtn").onclick = () => {
   if (!refImgLoadedOnce) { refImgLoadedOnce = true; refImgCloudLoad(); } // mesma imagem de referência do admin
 };
 $("drawCloseBtn").onclick = () => { drawScreenOpen = false; drawScreen.hidden = true; };
+// undo/redo em LOCKSTEP com o display: só mexe no display quando também há um
+// passo local a desfazer (senão, após um resize que limpa o histórico local, o
+// display mudava sem o tablet — review PR #43)
 $("drawUndoBtn").onclick = () => {
-  if (echoUndo.length) { echoRedo.push(snapshotEcho()); restoreEcho(echoUndo.pop()); } // eco local
-  $("undoBtn").click(); // e sincroniza o display (kind 'undo')
+  if (!echoUndo.length) return;
+  echoRedo.push(snapshotEcho()); restoreEcho(echoUndo.pop());
+  $("undoBtn").click(); // sincroniza o display (kind 'undo')
 };
 $("drawRedoBtn").onclick = () => {
-  if (echoRedo.length) { echoUndo.push(snapshotEcho()); restoreEcho(echoRedo.pop()); }
+  if (!echoRedo.length) return;
+  echoUndo.push(snapshotEcho()); restoreEcho(echoRedo.pop());
   $("redoBtn").click();
 };
 $("drawPhotoBtn").onclick = () => photoBtn.click();
@@ -2245,7 +2256,7 @@ dCanvas.addEventListener("pointerdown", e => {
   const { nx, ny, px, py } = drawCanvasPt(e);
   const sid = Math.random().toString(36).slice(2, 10);
   const brush = { tool: state.tool, color: state.color, size: state.size, mirror: state.mirror };
-  if (!tabletStrokesLocal.size) pushEchoHistory(); // 1º dedo do gesto: 1 passo de undo (multi-toque = 1 passo)
+  pushEchoHistory(); // 1 passo de undo POR traço (cada dedo) — alinha com o display, que assa/empilha por tstroke
   tabletStrokesLocal.set(e.pointerId, { sid, brush, lastPt: { x: px, y: py }, hue: Math.random() * 360, distSinceStamp: 0, emoji: null, pending: [], timer: null });
   send({ kind: "tstroke", sid, phase: "start", pts: [[r4(nx), r4(ny)]], brush }); // brush SEMPRE no 'start' — o display congela-o por traço
 });
