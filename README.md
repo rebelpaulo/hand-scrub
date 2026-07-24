@@ -140,12 +140,18 @@ npx serve -l 8777
   larga o pinch — e o pinch tiver durado pelo menos 200ms —, o enxame é
   atirado nessa direção — cada partícula ganha velocidade da mão mais um
   espalhamento em cone que abre mais quanto mais rápido o gesto, voa livre
-  por ~0,7s e só depois aterra e derrete de volta no tornado a partir de onde
-  ficou; uma largada lenta, ou um pinch demasiado curto, continuam a
-  comportar-se como antes (sem arremesso). Rastrear a velocidade na palma em
-  vez do ponto de pinch evita um "arremesso fantasma" quando só se abrem os
-  dedos com a mão parada; um pequeno atraso (120ms) a ativar o pinch e a
-  exigência dos 200ms filtram falsos pinches causados por ruído da câmara
-  durante um movimento rápido da mão.
+  por ~0,7s (com um arrasto ligeiramente mais forte, para a desaceleração já
+  se sentir durante o próprio voo) e só depois aterra: já não trava de
+  repente — **desacelera e funde-se no tornado num movimento contínuo**,
+  a velocidade da aterragem relaxa ao longo de ~0,9s para o fluxo ambiente do
+  anel em vez de ser cortada num único frame, com a mola a entrar em rampa no
+  mesmo intervalo. A largada lenta — ou um pinch demasiado curto — segue
+  exatamente o mesmo caminho fluido (a espiral do pinch também pode levar uma
+  partícula a alta velocidade antes de largar, independentemente da rapidez
+  da mão nesse instante). Rastrear a velocidade na palma em vez do ponto de
+  pinch evita um "arremesso fantasma" quando só se abrem os dedos com a mão
+  parada; um pequeno atraso (120ms) a ativar o pinch e a exigência dos 200ms
+  filtram falsos pinches causados por ruído da câmara durante um movimento
+  rápido da mão.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).

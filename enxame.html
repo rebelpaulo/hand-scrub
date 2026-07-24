@@ -140,14 +140,18 @@ const ANGULAR_SPEED_MIN = 0.35, ANGULAR_SPEED_MAX = 0.6; // rad/s, base band (ra
 // -- always positive, so the single-shared-direction invariant above is untouched.
 const VORTEX_R_REF_FACTOR = 2;
 const VORTEX_EXP = 0.6;
-// TORNADO REABSORPTION (post-release): right after a release, each particle's
-// velocity is projected onto the ring's own θ+ tangent (the same shared
-// direction as ANGULAR_SPEED above) and clamped to this multiple of the local
-// ambient tangential speed (angularSpeed_efetiva * raio) -- no radial leftover
-// survives, so the swarm is pulled straight back into the tornado flow instead
-// of "exploding" outward from the release point. See the release block in
-// stepParticles().
-const TORNADO_REABSORB_MAX_MUL = 1.5;
+// TORNADO REABSORPTION (post-release): the orbit (theta/overrides) is adopted
+// immediately, but the particle's velocity is NOT touched in that same frame
+// -- a single-frame overwrite reads as a hard brake ("desacelera de repente"),
+// the exact complaint that shipped v10. Instead the particle's OWN velocity is
+// carried forward and relaxed CONTINUOUSLY toward the ring's ambient tangential
+// flow over VBLEND_MS (see the vBlend branch in stepParticles() and
+// adoptAndReabsorb()) -- momentum visibly bends into the tornado instead of
+// snapping to it. VBLEND_MS is jittered +-VBLEND_JITTER_FRAC per particle so a
+// whole batch of landings doesn't finish fusing in the same frame.
+const VBLEND_MS = 900;
+const VBLEND_JITTER_FRAC = 0.2;
+const VBLEND_TAU = 0.35; // s, exponential time-constant of the velocity relax
 
 // ambient spring (halo hugging its cylinder anchor)
 const AMBIENT_SPRING_K = 3.2;  // px/s^2 accel per px of offset from anchor
@@ -227,7 +231,7 @@ const THROW_CONE_RAD = 35 * Math.PI / 180; // cone de espalhamento em torno da d
 const THROW_JITTER_PX_S = 40;   // px/s, jitter isotrópico pequeno somado ao cone
 const BALLISTIC_MS = 700;       // duração base do voo balístico
 const BALLISTIC_JITTER_FRAC = 0.3; // +-30% aleatório por partícula
-const BALLISTIC_DRAG = 0.99;    // arrasto leve durante o voo balístico (por frame)
+const BALLISTIC_DRAG = 0.987;   // arrasto leve durante o voo balístico (por frame) -- ligeiramente mais forte que 0.99 para que a desaceleração já se sinta DURANTE o voo, não só na aterragem
 
 // render / perf (kept from v1)
 // WARP STRETCH: trail length is now PROPORTIONAL TO SPEED (not a fixed streak) --
@@ -443,27 +447,47 @@ function throwVelocityDelta(vHandX, vHandY, gain, spreadK, coneRad, jitterPxS, r
 function ballisticDurationMs(baseMs, jitterFrac, rand) {
   return baseMs * (1 + (rand * 2 - 1) * jitterFrac);
 }
+// real signed ring tangent at theta, normalized -- the anchor is
+// y = hOff + r*WOBBLE*sin(theta), so dy/dtheta = r*WOBBLE*cos(theta); without
+// that WOBBLE term the tangent near theta=0/pi carries ~8x too much vertical
+// component (achado P2 do Codex, PR #28). sign is the global tornadoSign.
+// Shared by adoptAndReabsorb's vBlend target, the fugitive re-snap, and (below)
+// the ambient vBlend target computed every frame in stepParticles().
+function ringTangentUnit(theta, sign) {
+  let tx = -Math.sin(theta) * sign, ty = CYL_WOBBLE * Math.cos(theta) * sign;
+  const tLen = Math.hypot(tx, ty) || 1;
+  return { tx: tx / tLen, ty: ty / tLen };
+}
+// CONTINUOUS VELOCITY RELAX (replaces the old single-frame tangent clamp):
+// exponential step toward a target velocity, dt/tau fraction of the remaining
+// gap per frame, capped so a single (low-fps) frame can never overshoot past
+// the target. Used to fuse a throw-landing / release velocity into the
+// ambient ring flow smoothly instead of snapping to it in one frame.
+function blendVelocity(vx, vy, targetVx, targetVy, dt, tau) {
+  const k = Math.min(1, dt / tau);
+  return { vx: vx + (targetVx - vx) * k, vy: vy + (targetVy - vy) * k };
+}
 // HONEST RELEASE / THROW LANDING (helper comum -- extraído do bloco de largada
-// original, PR #30, para ser reutilizável): adota a posição/velocidade ATUAL
-// da partícula como novo ponto de órbita -- o mesmo caminho de θ único
-// (adoptReleaseOverrides -> thetaEst -> tangent-clamp da velocidade CORRENTE
-// nesse θ) usado por: (a) largada lenta, para TODAS as partículas, de
+// original, PR #30, para ser reutilizável): adota a posição ATUAL da
+// partícula como novo ponto de órbita (θ único: adoptReleaseOverrides ->
+// thetaEst) usado por: (a) largada lenta, para TODAS as partículas, de
 // imediato; (b) expiração do voo balístico, POR PARTÍCULA, sempre que o
 // temporizador dessa partícula acaba -- ela aterra onde o arremesso a levou e
 // derrete de volta no tornado a partir daí.
-function adoptAndReabsorb(p, h, vh, rMinPx, rMaxCeil, rRef, sign) {
+// v10: já NÃO mexe em p.vx/p.vy aqui -- um clamp instantâneo da tangente era
+// um travão de um frame só ("PARA DE REPENTE", o relato do utilizador).
+// Em vez disso arma um vBlend (vBlendUntil/vBlendTau) que o ramo ambiente de
+// stepParticles() usa para relaxar a velocidade CONTINUAMENTE para o fluxo
+// ambiente do anel ao longo de VBLEND_MS -- ver o ramo `blending` abaixo.
+function adoptAndReabsorb(p, h, vh, rMinPx, rMaxCeil, rRef, sign, now, rand) {
   const ov = adoptReleaseOverrides(p.x, p.y, h, vh, rMinPx, rMaxCeil);
   p.theta = ov.thetaEst;
   p.hOverridePx = ov.hOverridePx;
   p.rOverridePx = ov.rOverridePx;
-  let tHatX = -Math.sin(p.theta) * sign, tHatY = CYL_WOBBLE * Math.cos(p.theta) * sign;
-  const tLen = Math.hypot(tHatX, tHatY) || 1;
-  tHatX /= tLen; tHatY /= tLen;
-  const vTan = p.vx * tHatX + p.vy * tHatY;
-  const ambientTanSpeed = p.angularSpeed * vortexFactor(p.rOverridePx, rRef) * p.rOverridePx;
-  const clampedTan = Math.max(0, Math.min(vTan, ambientTanSpeed * TORNADO_REABSORB_MAX_MUL));
-  p.vx = tHatX * clampedTan;
-  p.vy = tHatY * clampedTan;
+  p.vBlendStart = now;
+  p.vBlendDurMs = VBLEND_MS * (1 + (rand * 2 - 1) * VBLEND_JITTER_FRAC);
+  p.vBlendUntil = now + p.vBlendDurMs;
+  p.vBlendTau = VBLEND_TAU;
 }
 
 /* ================= canvas sizing (DPR-aware, capped) ================= */
@@ -783,20 +807,13 @@ function stepParticles(dt, now) {
         // (Antes havia dois θ diferentes: um re-seed com o raio-seed aqui e
         // um thetaEst descartado no helper — a âncora caía noutro sítio e a
         // mola voltava a criar o snap; achado P2 do Codex, PR #30.)
-        // TORNADO REABSORPTION: project the velocity onto the ring's own
-        // signed tangent at the new theta and clamp to [0, 1.5x] the local
-        // ambient tangential speed (angularSpeed_efetiva * raio,
-        // vortex-adjusted, in the tornadoSign direction). No radial leftover,
-        // and nothing against the current spin direction, survives the
-        // clamp, so on release the swarm is pulled straight back into the
-        // tornado flow instead of "exploding" outward from the release point
-        // ("quando solta voltam para o efeito tornado, não precisa explodir
-        // o círculo"). A tangente REAL do anel inclui o CYL_WOBBLE no eixo y
-        // (a âncora é y = hOff + r·WOBBLE·sinθ ⇒ dy/dθ = r·WOBBLE·cosθ) —
-        // sem isto, perto de θ=0/π a projeção atirava ~8× velocidade
-        // vertical a mais e recriava a explosão (achado P2 do Codex, PR #28).
-        // p.x/p.y intocados — zero salto no instante da largada.
-        adoptAndReabsorb(p, h, H, rMinPx, rMaxCeil, rRef, tornadoSign);
+        // v10: a largada lenta também passa pelo vBlend (ver adoptAndReabsorb)
+        // -- durante um pinch a espiral pode levar a partícula até
+        // SPIRAL_SPEED_CAP (900px/s) independentemente de quão devagar a MÃO
+        // larga; reabsorver isso num único frame trava tão bruscamente como o
+        // arremesso, mesmo sem ter havido arremesso nenhum. p.x/p.y intocados
+        // — zero salto no instante da largada.
+        adoptAndReabsorb(p, h, H, rMinPx, rMaxCeil, rRef, tornadoSign, now, Math.random());
       }
     }
   }
@@ -881,9 +898,11 @@ function stepParticles(dt, now) {
     } else {
       if (p.ballisticUntil !== undefined) {
         // ATERRAGEM: o voo balístico desta partícula acabou -- adota a
-        // posição/velocidade ATUAL (onde o arremesso a levou) e derrete de
-        // volta no tornado a partir daí (mesmo caminho de largada honesta).
-        adoptAndReabsorb(p, h, H, rMinPx, rMaxCeil, rRef, tornadoSign);
+        // posição ATUAL (onde o arremesso a levou) e arma o vBlend que funde
+        // a velocidade CONTINUAMENTE no fluxo do tornado a partir daí (ver
+        // adoptAndReabsorb e o ramo `blending` abaixo -- sem travão de frame
+        // único).
+        adoptAndReabsorb(p, h, H, rMinPx, rMaxCeil, rRef, tornadoSign, now, Math.random());
         delete p.ballisticUntil;
       }
       // HONEST RELEASE, no teleport: while an override is present, relax it
@@ -901,10 +920,30 @@ function stepParticles(dt, now) {
       const r = p.rOverridePx !== undefined ? p.rOverridePx : homeR;
       const hOffPx = p.hOverridePx !== undefined ? p.hOverridePx : homeH;
       const a = cylinderAnchor(p.theta, r, hOffPx, h);
-      const { fx, fy } = springForce(p.x, p.y, a.x, a.y, springK);
-      p.vx += (fx + (Math.random() - 0.5) * AMBIENT_JITTER) * dt;
-      p.vy += (fy + (Math.random() - 0.5) * AMBIENT_JITTER) * dt;
-      p.vx *= AMBIENT_DRAG; p.vy *= AMBIENT_DRAG;
+
+      const blending = p.vBlendUntil !== undefined && now < p.vBlendUntil;
+      if (blending) {
+        // v10 CONTINUOUS LANDING: momentum from the throw/pinch visibly bends
+        // into the ring instead of an instant tangent-clamp brake. Spring
+        // gain ramps in with lambda (0 at adoption -> 1 at VBLEND_MS) so the
+        // spring doesn't yank the particle onto its anchor before the
+        // velocity has had time to catch up; AMBIENT_DRAG is skipped here --
+        // the exponential relax below already carries the deceleration.
+        const lambda = Math.min(1, (now - p.vBlendStart) / p.vBlendDurMs);
+        const { fx, fy } = springForce(p.x, p.y, a.x, a.y, springK * lambda);
+        p.vx += (fx + (Math.random() - 0.5) * AMBIENT_JITTER) * dt;
+        p.vy += (fy + (Math.random() - 0.5) * AMBIENT_JITTER) * dt;
+        const { tx, ty } = ringTangentUnit(p.theta, tornadoSign);
+        const ambientTanSpeed = p.angularSpeed * vortexFactor(r, rRef) * r;
+        const blended = blendVelocity(p.vx, p.vy, tx * ambientTanSpeed, ty * ambientTanSpeed, dt, p.vBlendTau);
+        p.vx = blended.vx; p.vy = blended.vy;
+        if (now >= p.vBlendUntil) { delete p.vBlendStart; delete p.vBlendDurMs; delete p.vBlendUntil; delete p.vBlendTau; }
+      } else {
+        const { fx, fy } = springForce(p.x, p.y, a.x, a.y, springK);
+        p.vx += (fx + (Math.random() - 0.5) * AMBIENT_JITTER) * dt;
+        p.vy += (fy + (Math.random() - 0.5) * AMBIENT_JITTER) * dt;
+        p.vx *= AMBIENT_DRAG; p.vy *= AMBIENT_DRAG;
+      }
     }
 
     p.x += p.vx * dt; p.y += p.vy * dt;
