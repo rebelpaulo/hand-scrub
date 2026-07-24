@@ -104,6 +104,16 @@
   #clearBtn { background: linear-gradient(160deg, #2a0f14, #1a1e2ac0); border-color: #ff4d5555; }
   #clearBtn .ic { font-size: 34px; }
   #clearBtn.confirm { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
+  #clearDrawBtn, #clearAllBtn { font-size: 14px; font-weight: 800; }
+  #clearDrawBtn .ic, #clearAllBtn .ic { font-size: 30px; }
+  #clearDrawBtn { background: linear-gradient(160deg, #0f1f2a, #1a1e2ac0); border-color: #00c8ff55; }
+  #clearAllBtn { background: #3a0f14; border-color: #ff4d55; box-shadow: 0 0 22px -2px #ff4d55; }
+  #actions button[hidden] { display: none; }
+
+  /* ---------- desfazer/refazer ---------- */
+  #historyActions { display: flex; gap: 10px; }
+  #historyActions button { flex: 1; min-height: 90px; font-size: 14px; font-weight: 800; }
+  #historyActions button .ic { font-size: 30px; }
 
   /* ---------- pré-visualização ---------- */
   #previewWrap { display: flex; align-items: center; gap: 10px; }
@@ -151,7 +161,15 @@
   #zoneAddBtn, #zoneCircleBtn { border-color: #00ffcc55; }
   #zoneDelBtn, #zonePointDelBtn { border-color: #ff4d5555; }
   #zoneCurveBtn.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
+  #zoneTypeBtn.mode-include { border-color: #00dc7855; }
+  #zoneTypeBtn.mode-occlude { border-color: #ff4d5555; }
   #zoneDoneBtn { border-color: #00ffcc; background: #0f2b26; flex-basis: 100%; }
+
+  /* ---------- seletor: áreas de desenho (verde) vs zonas de oclusão (vermelho) ---------- */
+  #zoneModeSelect { display: flex; gap: 8px; }
+  #zoneModeSelect button { flex: 1; min-height: 54px; font-size: 13px; font-weight: 800; }
+  #zoneModeSelect button[data-mode="include"].on { border-color: #00dc78; background: #0a2b1c; box-shadow: 0 0 0 3px #00dc7833; }
+  #zoneModeSelect button[data-mode="occlude"].on { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
 </style>
 </head>
 <body>
@@ -176,21 +194,33 @@
   <div id="actions">
     <button id="photoBtn"><span class="ic">📸</span><span>Foto</span></button>
     <button id="clearBtn"><span class="ic">🗑</span><span>Limpar</span></button>
+    <button id="clearDrawBtn" hidden><span class="ic">🖌</span><span>Limpar desenho</span></button>
+    <button id="clearAllBtn" hidden><span class="ic">🗑</span><span>Limpar tudo</span></button>
+  </div>
+  <div id="historyActions">
+    <button id="undoBtn"><span class="ic">↩️</span><span>Desfazer</span></button>
+    <button id="redoBtn"><span class="ic">↪️</span><span>Refazer</span></button>
   </div>
 
   <footer>Magic Draw · painel touch</footer>
   <button id="adminGearBtn" aria-label="Modo admin: zonas de oclusão (mantém premido 3s)">⚙️</button>
 
-  <!-- ================= overlay admin: zonas de oclusão (janelas/portas) ================= -->
+  <!-- ================= overlay admin: zonas (áreas de desenho + oclusão) ================= -->
   <div id="adminOverlay" hidden>
     <div class="admin-panel">
-      <h2 class="section">🪟 Zonas de oclusão</h2>
+      <h2 class="section">🪟 Zonas</h2>
+      <div id="zoneModeSelect">
+        <button id="zoneModeIncludeBtn" data-mode="include">🟢 Áreas de desenho</button>
+        <button id="zoneModeOccludeBtn" data-mode="occlude">🔴 Zonas de oclusão</button>
+      </div>
+      <p class="hint">verde = onde se pode pintar (contorno da casa) · vermelho = tapado (janelas, portas)</p>
       <canvas id="adminCanvas"></canvas>
-      <p class="hint">Arrasta um vértice para moldar · toca num "+" da aresta para inserir ponto · toca dentro para selecionar</p>
+      <p class="hint">Arrasta um vértice para moldar · toca num "+" da aresta para inserir ponto · toca dentro para selecionar/mover</p>
       <div id="adminActions">
         <button id="zoneAddBtn">➕<br>Criar zona</button>
         <button id="zoneCircleBtn">⭕<br>Criar círculo</button>
         <button id="zoneCurveBtn" disabled>◠<br>Curvas</button>
+        <button id="zoneTypeBtn" disabled>🔁<br>Tipo</button>
         <button id="zonePointDelBtn" disabled>−<br>Ponto</button>
         <button id="zoneDelBtn" disabled>🗑<br>Apagar</button>
         <button id="zoneDoneBtn">✔<br>Concluir</button>
@@ -243,12 +273,20 @@ let sbChannel = null;
 
 // dedup no recetor: última seq vista por src
 const lastSeq = new Map();
+// FIX C (emenda): só sabemos se há foto congelada olhando ao próprio tráfego do
+// canal (nenhum novo campo no protocolo) — true em qualquer 'photo', false em
+// qualquer 'clear' scope 'all' (ou sem scope). Cobre outros src; os envios
+// PRÓPRIOS de 'photo'/'clear all' atualizam hasPhoto diretamente (onMsg ignora-os).
+let hasPhoto = false;
 function onMsg(msg) {
   if (!msg || msg.v !== 1 || msg.src === CLIENT_ID) return;
   const prev = lastSeq.get(msg.src) ?? -1;
   if (msg.seq <= prev) return;
   lastSeq.set(msg.src, msg.seq);
-  if (msg.kind === "hello") sendState(); // display pediu o estado atual
+  if (msg.kind === "hello") { sendState(); sendZones(false); } // display recarregado a meio: reenvia estado + zonas, sem entrar em edição
+  if (msg.kind === "state") lastSeenRev = Math.max(lastSeenRev, msg.rev || 0); // outro controlo: só acerta o relógio lógico, NUNCA adota a UI daqui
+  if (msg.kind === "photo") hasPhoto = true;
+  if (msg.kind === "clear" && (!msg.scope || msg.scope === "all")) hasPhoto = false;
 }
 
 function send(payload) {
@@ -261,10 +299,24 @@ function send(payload) {
 const state = { tool: "neon", color: "#00ffcc", size: 14, mirror: 0 };
 let lastNonRainbowTool = "neon";
 
-function sendState() { send({ kind: "state", state: { ...state } }); }
+/* rev monotónico: 2º painel de controlo aberto não pode esmagar a última
+   escolha humana com o keepalive antigo — o display só aceita um 'state'
+   se rev >= currentStateRev. lastSeenRev acompanha o relógio lógico visto
+   nas mensagens de OUTROS controlos (sem nunca adotar o estado deles). */
+let stateRev = 0;
+let lastSeenRev = 0;
 
-/* keepalive a cada 3s */
+function sendState() { send({ kind: "state", rev: stateRev, state: { ...state } }); }
+function bumpRevAndSend() {
+  stateRev = Math.max(Date.now(), lastSeenRev + 1, stateRev + 1); // ação humana: sempre avança
+  sendState();
+}
+
+/* keepalive a cada 3s: reenvia o MESMO stateRev — nunca carimba de novo */
 setInterval(sendState, 3000);
+
+// exposto só para inspeção/depuração (não faz parte do protocolo de sync)
+window.__mdDebug = { get rev() { return stateRev; }, get lastSeenRev() { return lastSeenRev; } };
 
 /* ================= pincéis ================= */
 const BRUSHES = [
@@ -285,7 +337,7 @@ for (const b of BRUSHES) {
   btn.onclick = () => {
     state.tool = b.tool;
     if (b.tool !== "rainbow") lastNonRainbowTool = b.tool;
-    renderBrushes(); renderColors(); renderPreview(); sendState();
+    renderBrushes(); renderColors(); renderPreview(); bumpRevAndSend();
   };
   brushesEl.appendChild(btn);
 }
@@ -308,7 +360,7 @@ for (const c of COLORS) {
   btn.onclick = () => {
     state.color = c;
     state.tool = state.tool === "rainbow" ? lastNonRainbowTool : state.tool; // escolher cor sólida sai do modo arco-íris
-    renderBrushes(); renderColors(); renderPreview(); sendState();
+    renderBrushes(); renderColors(); renderPreview(); bumpRevAndSend();
   };
   colorsEl.appendChild(btn);
 }
@@ -317,7 +369,7 @@ rainbowBtn.className = "swatch rainbow";
 rainbowBtn.dataset.rainbow = "1";
 rainbowBtn.onclick = () => {
   state.tool = "rainbow"; // mantém o último 'color' escolhido
-  renderBrushes(); renderColors(); renderPreview(); sendState();
+  renderBrushes(); renderColors(); renderPreview(); bumpRevAndSend();
 };
 colorsEl.appendChild(rainbowBtn);
 function renderColors() {
@@ -336,7 +388,7 @@ for (const s of SIZES) {
   btn.dataset.size = s;
   const px = Math.round(14 + s * 0.9); // bola desenhada à escala, limitada ao botão
   btn.innerHTML = `<span class="dot" style="width:${px}px;height:${px}px"></span><span class="lbl">${s}px</span>`;
-  btn.onclick = () => { state.size = s; renderSizes(); renderPreview(); sendState(); };
+  btn.onclick = () => { state.size = s; renderSizes(); renderPreview(); bumpRevAndSend(); };
   sizesEl.appendChild(btn);
 }
 function renderSizes() {
@@ -355,7 +407,7 @@ for (const mv of MIRRORS) {
   const btn = document.createElement("button");
   btn.dataset.mirror = mv.m;
   btn.innerHTML = `<span class="ic">${mv.ic}</span><span>${mv.label}</span>`;
-  btn.onclick = () => { state.mirror = mv.m; renderMirrors(); sendState(); };
+  btn.onclick = () => { state.mirror = mv.m; renderMirrors(); bumpRevAndSend(); };
   mirrorsEl.appendChild(btn);
 }
 function renderMirrors() {
@@ -481,6 +533,7 @@ photoBtn.onclick = () => {
   if (photoBusy) return;
   photoBusy = true;
   photoBtn.classList.add("busy");
+  hasPhoto = true; // FIX C (emenda): envio próprio, onMsg não o vê (filtra o próprio src)
   send({ kind: "photo" });
   const label = photoBtn.querySelector("span:last-child");
   const original = label.textContent;
@@ -499,28 +552,47 @@ photoBtn.onclick = () => {
   }, 700);
 };
 
-/* ================= limpar: confirmação anti-toque-acidental ================= */
-const clearBtn = $("clearBtn");
-let clearArmed = false, clearTimer = null;
+/* ================= limpar: com foto congelada expande "desenho"/"tudo";
+   sem foto mantém o comportamento antigo (toque → "Confirmar?" → toque = limpa tudo) ================= */
+const clearBtn = $("clearBtn"), clearDrawBtn = $("clearDrawBtn"), clearAllBtn = $("clearAllBtn");
 const clearLabel = clearBtn.querySelector("span:last-child");
 const clearOriginal = clearLabel.textContent;
+let clearArmed = false, clearTimer = null;
 clearBtn.onclick = () => {
-  if (!clearArmed) {
-    clearArmed = true;
-    clearBtn.classList.add("confirm");
-    clearLabel.textContent = "Confirmar?";
-    clearTimer = setTimeout(resetClear, 3000);
+  if (clearArmed) {
+    if (!hasPhoto) { // modo sem foto: o 2º toque já é a confirmação
+      clearTimeout(clearTimer);
+      resetClear();
+      send({ kind: "clear", scope: "all" });
+    }
     return;
   }
-  clearTimeout(clearTimer);
-  resetClear();
-  send({ kind: "clear" });
+  clearArmed = true;
+  clearTimer = setTimeout(resetClear, 3000);
+  if (hasPhoto) {
+    clearBtn.hidden = true;
+    clearDrawBtn.hidden = false;
+    clearAllBtn.hidden = false;
+  } else {
+    clearBtn.classList.add("confirm");
+    clearLabel.textContent = "Confirmar?";
+  }
 };
 function resetClear() {
   clearArmed = false;
+  clearTimeout(clearTimer);
+  clearBtn.hidden = false;
   clearBtn.classList.remove("confirm");
   clearLabel.textContent = clearOriginal;
+  clearDrawBtn.hidden = true;
+  clearAllBtn.hidden = true;
 }
+clearDrawBtn.onclick = () => { resetClear(); send({ kind: "clear", scope: "draw" }); };
+clearAllBtn.onclick = () => { resetClear(); hasPhoto = false; send({ kind: "clear", scope: "all" }); };
+
+/* ================= desfazer/refazer do desenho (FIX E, aditivo ao protocolo, sem payload) ================= */
+$("undoBtn").onclick = () => send({ kind: "undo" });
+$("redoBtn").onclick = () => send({ kind: "redo" });
 
 /* ==================================================================
    Zonas de oclusão (janelas/portas do edifício) — modo admin
@@ -535,11 +607,13 @@ let selectedZoneId = null;
 let selectedVertexIdx = null; // vértice tocado (só poly) — para "− Ponto"
 let adminOpen = false;
 
-// zonas antigas (antes do type/smooth existirem) contam como poly reto
+// zonas antigas (antes do type/smooth/mode existirem) contam como poly reto,
+// mode 'occlude' (retro-compat: era o único comportamento antes do FIX G2)
 function normalizeZone(z) {
   if (!z) return z;
-  if (z.type === "ellipse") return z;
-  return { id: z.id, type: "poly", pts: z.pts, smooth: !!z.smooth };
+  const mode = z.mode === "include" ? "include" : "occlude";
+  if (z.type === "ellipse") return { ...z, mode };
+  return { id: z.id, type: "poly", pts: z.pts, smooth: !!z.smooth, mode };
 }
 
 /* ---- traçado do contorno: TEM de ser igual ao de magicdraw-display.html
@@ -597,15 +671,19 @@ const clamp01 = v => Math.min(1, Math.max(0, v));
 /* ---- persistência cloud (Supabase · hand_config, id "magicdraw-zones") ---- */
 const ZONES_ID = "magicdraw-zones";
 let zonesCloudSaveT = 0;
+// true assim que o utilizador mexe nas zonas nesta sessão — o fetch de arranque
+// pode resolver DEPOIS disso (rede lenta) e não pode esmagar o que já foi criado
+let zonesTouchedLocally = false;
 async function zonesCloudLoad() {
   try {
     const r = await fetch(`${SB_URL}/rest/v1/hand_config?id=eq.${ZONES_ID}&select=data`, { headers: SB_HDRS });
     if (!r.ok) return;
     const cfg = (await r.json())[0]?.data;
-    if (cfg?.zones) zones = cfg.zones.map(normalizeZone);
+    if (cfg?.zones && !zonesTouchedLocally) zones = cfg.zones.map(normalizeZone);
   } catch { /* offline: começa sem zonas guardadas, a próxima gravação recupera */ }
 }
 function zonesCloudSave() {
+  zonesTouchedLocally = true;
   clearTimeout(zonesCloudSaveT);
   zonesCloudSaveT = setTimeout(async () => {
     try {
@@ -624,8 +702,8 @@ function sendZones(editing) {
   send({
     kind: "zones",
     zones: zones.map(z => z.type === "ellipse"
-      ? { id: z.id, type: "ellipse", cx: r4(z.cx), cy: r4(z.cy), rx: r4(z.rx), ry: r4(z.ry), rot: r4(z.rot || 0) }
-      : { id: z.id, type: "poly", pts: z.pts.map(([x, y]) => [r4(x), r4(y)]), smooth: !!z.smooth }),
+      ? { id: z.id, type: "ellipse", cx: r4(z.cx), cy: r4(z.cy), rx: r4(z.rx), ry: r4(z.ry), rot: r4(z.rot || 0), mode: z.mode || "occlude" }
+      : { id: z.id, type: "poly", pts: z.pts.map(([x, y]) => [r4(x), r4(y)]), smooth: !!z.smooth, mode: z.mode || "occlude" }),
     editing,
   });
 }
@@ -655,23 +733,29 @@ function renderAdminCanvas() {
   actx.fillStyle = "#000"; actx.fillRect(0, 0, w, h);
   for (const z of zones) {
     const selected = z.id === selectedZoneId;
+    // FIX G2: verde = área de desenho (include), vermelho = oclusão (occlude, omissão)
+    const isInclude = (z.mode || "occlude") === "include";
+    const rgb = isInclude ? "0,220,120" : "255,30,80";
+    const solid = isInclude ? "#00dc78" : "#ff2d55";
+    const dim = isInclude ? "#00dc7899" : "#ff2d5599";
     traceZonePath(actx, z, w, h);
-    actx.fillStyle = selected ? "rgba(255,45,85,0.55)" : "rgba(255,30,80,0.35)";
+    actx.fillStyle = selected ? `rgba(${rgb},0.55)` : `rgba(${rgb},0.35)`;
     actx.fill();
-    actx.strokeStyle = selected ? "#ff2d55" : "#ff2d5599";
+    actx.strokeStyle = selected ? solid : dim;
     actx.lineWidth = selected ? 3 : 2;
     actx.stroke();
+    // FIX G1: raio VISUAL reduzido (~60%) — o raio de HIT (VERTEX_HIT_R) fica igual, generoso ao toque
     for (const hpt of zoneHandlesPx(z, w, h)) {
       const isSelVertex = selected && hpt.kind === "vertex" && hpt.idx === selectedVertexIdx;
       actx.beginPath();
-      actx.arc(hpt.x, hpt.y, isSelVertex ? 13 : 10, 0, Math.PI * 2);
-      actx.fillStyle = isSelVertex ? "#fff" : "#ff2d55"; actx.fill();
-      actx.strokeStyle = isSelVertex ? "#ff2d55" : "#fff"; actx.lineWidth = 1.5; actx.stroke();
+      actx.arc(hpt.x, hpt.y, isSelVertex ? 8 : 6, 0, Math.PI * 2);
+      actx.fillStyle = isSelVertex ? "#fff" : solid; actx.fill();
+      actx.strokeStyle = isSelVertex ? solid : "#fff"; actx.lineWidth = 1.5; actx.stroke();
     }
     // pegas "+" de inserção de vértice — só na zona selecionada, tipo poly
     if (selected && z.type === "poly") {
       for (const mp of zoneMidpointsPx(z, w, h)) {
-        actx.beginPath(); actx.arc(mp.x, mp.y, 9, 0, Math.PI * 2);
+        actx.beginPath(); actx.arc(mp.x, mp.y, 5, 0, Math.PI * 2);
         actx.fillStyle = "#00ffcc55"; actx.fill();
         actx.strokeStyle = "#00ffcc"; actx.lineWidth = 1.5; actx.stroke();
         actx.fillStyle = "#00ffcc"; actx.font = "bold 13px sans-serif";
@@ -686,6 +770,11 @@ window.addEventListener("resize", () => { if (adminOpen) sizeAdminCanvas(); });
 function updateZoneButtons() {
   const z = zones.find(zz => zz.id === selectedZoneId);
   $("zoneDelBtn").disabled = !z;
+  const typeBtn = $("zoneTypeBtn");
+  typeBtn.disabled = !z;
+  const isInclude = !!z && (z.mode || "occlude") === "include";
+  typeBtn.classList.toggle("mode-include", isInclude);
+  typeBtn.classList.toggle("mode-occlude", !!z && !isInclude);
   $("zoneCurveBtn").disabled = !z || z.type !== "poly";
   $("zoneCurveBtn").classList.toggle("on", !!(z && z.type === "poly" && z.smooth));
   $("zonePointDelBtn").disabled = !(z && z.type === "poly" && selectedVertexIdx != null && z.pts.length > 3);
@@ -714,9 +803,24 @@ function getCanvasPt(e) {
   return { x, y, w: rect.width, h: rect.height, nx: x / rect.width, ny: y / rect.height };
 }
 
+// FIX F: delta de translação clampado ao [0,1] SEM deformar a forma — clampa
+// o delta (não cada ponto individualmente) por eixo, a partir dos pontos de
+// arranque; se um eixo bate no limite, esse eixo trava e o outro continua livre.
+function clampTranslateDelta(startPts, dx, dy) {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [x, y] of startPts) {
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  }
+  return [
+    Math.min(Math.max(dx, -minX), 1 - maxX),
+    Math.min(Math.max(dy, -minY), 1 - maxY),
+  ];
+}
+
 /* ---- interação touch: arrastar pega, inserir vértice numa aresta, ou selecionar zona ---- */
 const VERTEX_HIT_R = 30; // px CSS, generoso para dedos
-let dragging = null; // { zoneId, kind: 'vertex'|'center'|'rx'|'ry', idx? }
+let dragging = null; // { zoneId, kind: 'vertex'|'center'|'rx'|'ry'|'body', idx? }
 adminCanvas.addEventListener("pointerdown", e => {
   adminCanvas.setPointerCapture(e.pointerId);
   const { x, y, w, h, nx, ny } = getCanvasPt(e);
@@ -751,10 +855,16 @@ adminCanvas.addEventListener("pointerdown", e => {
     }
   }
 
-  // 3) corpo da zona: seleciona (sem vértice)
+  // 3) corpo da zona: seleciona E inicia arrasto de translação (move a zona TODA) — FIX F
   const hitZone = zones.find(z => z.type === "ellipse" ? pointInEllipsePx(x, y, z, w, h) : pointInPoly(nx, ny, z.pts));
   selectedZoneId = hitZone ? hitZone.id : null;
   selectedVertexIdx = null;
+  if (hitZone) {
+    dragging = {
+      zoneId: hitZone.id, kind: "body", startNX: nx, startNY: ny,
+      startPts: hitZone.type === "ellipse" ? [[hitZone.cx, hitZone.cy]] : hitZone.pts.map(p => [p[0], p[1]]),
+    };
+  }
   renderAdminCanvas(); updateZoneButtons();
 });
 adminCanvas.addEventListener("pointermove", e => {
@@ -777,6 +887,15 @@ adminCanvas.addEventListener("pointermove", e => {
     const rot = z.rot || 0;
     const proj = dx * -Math.sin(rot) + dy * Math.cos(rot);
     z.ry = Math.max(0.01, Math.abs(proj) / h);
+  } else if (dragging.kind === "body") {
+    // FIX F: arrastar o corpo move a zona TODA (todos os pts, ou cx/cy da elipse) pelo mesmo delta
+    const [dx, dy] = clampTranslateDelta(dragging.startPts, nx - dragging.startNX, ny - dragging.startNY);
+    if (z.type === "ellipse") {
+      z.cx = dragging.startPts[0][0] + dx;
+      z.cy = dragging.startPts[0][1] + dy;
+    } else {
+      z.pts = dragging.startPts.map(([px, py]) => [px + dx, py + dy]);
+    }
   }
   renderAdminCanvas();
   sendZonesThrottled();
@@ -791,19 +910,45 @@ function endDrag() {
 adminCanvas.addEventListener("pointerup", endDrag);
 adminCanvas.addEventListener("pointercancel", endDrag);
 
-/* ---- botões: criar poly / criar círculo / curvas / apagar ponto / apagar zona / concluir ---- */
+/* ---- seletor de modo (FIX G2): determina o mode das PRÓXIMAS zonas criadas.
+   Por omissão ao abrir o admin: 🟢 Áreas de desenho (ver openAdmin). ---- */
+let newZoneMode = "include";
+const zoneModeIncludeBtn = $("zoneModeIncludeBtn"), zoneModeOccludeBtn = $("zoneModeOccludeBtn");
+function renderZoneModeSelect() {
+  zoneModeIncludeBtn.classList.toggle("on", newZoneMode === "include");
+  zoneModeOccludeBtn.classList.toggle("on", newZoneMode === "occlude");
+}
+zoneModeIncludeBtn.onclick = () => { newZoneMode = "include"; renderZoneModeSelect(); };
+zoneModeOccludeBtn.onclick = () => { newZoneMode = "occlude"; renderZoneModeSelect(); };
+
+/* ---- botões: criar poly / criar círculo / curvas / alternar tipo / apagar ponto / apagar zona / concluir ---- */
+// FIX F: spawn desempilhado — cada zona nova nasce ~0.06 mais deslocada do
+// centro (cascata diagonal), a ciclar a cada 6, para não nascerem empilhadas.
+let zoneSpawnStep = 0;
+function nextSpawnOffset() {
+  const off = (zoneSpawnStep++ % 6) * 0.06;
+  return [off, off];
+}
 $("zoneAddBtn").onclick = () => {
   const id = "z" + Math.random().toString(36).slice(2, 8);
-  // quadrilátero centrado, ~25% do ecrã de lado
-  zones.push({ id, type: "poly", pts: [[0.375, 0.375], [0.625, 0.375], [0.625, 0.625], [0.375, 0.625]], smooth: false });
+  const [ox, oy] = nextSpawnOffset();
+  // quadrilátero, ~25% do ecrã de lado, centrado no ecrã + deslocamento de cascata
+  zones.push({
+    id, type: "poly",
+    pts: [[0.375, 0.375], [0.625, 0.375], [0.625, 0.625], [0.375, 0.625]]
+      .map(([x, y]) => [clamp01(x + ox), clamp01(y + oy)]),
+    smooth: false,
+    mode: newZoneMode,
+  });
   selectedZoneId = id; selectedVertexIdx = null;
   renderAdminCanvas(); updateZoneButtons();
   sendZones(true); zonesCloudSave();
 };
 $("zoneCircleBtn").onclick = () => {
   const id = "z" + Math.random().toString(36).slice(2, 8);
-  // elipse centrada, raio ~12.5% do ecrã (diâmetro ~25%, mesma escala da zona quadrada)
-  zones.push({ id, type: "ellipse", cx: 0.5, cy: 0.5, rx: 0.125, ry: 0.125, rot: 0 });
+  const [ox, oy] = nextSpawnOffset();
+  // elipse, raio ~12.5% do ecrã (diâmetro ~25%, mesma escala da zona quadrada) + cascata
+  zones.push({ id, type: "ellipse", cx: clamp01(0.5 + ox), cy: clamp01(0.5 + oy), rx: 0.125, ry: 0.125, rot: 0, mode: newZoneMode });
   selectedZoneId = id; selectedVertexIdx = null;
   renderAdminCanvas(); updateZoneButtons();
   sendZones(true); zonesCloudSave();
@@ -812,6 +957,15 @@ $("zoneCurveBtn").onclick = () => {
   const z = zones.find(zz => zz.id === selectedZoneId);
   if (!z || z.type !== "poly") return;
   z.smooth = !z.smooth;
+  renderAdminCanvas(); updateZoneButtons();
+  sendZones(true); zonesCloudSave();
+};
+// discreto: alterna o mode (include/occlude) da zona JÁ selecionada, qualquer que
+// tenha sido o seletor no momento em que foi criada
+$("zoneTypeBtn").onclick = () => {
+  const z = zones.find(zz => zz.id === selectedZoneId);
+  if (!z) return;
+  z.mode = (z.mode || "occlude") === "include" ? "occlude" : "include";
   renderAdminCanvas(); updateZoneButtons();
   sendZones(true); zonesCloudSave();
 };
@@ -835,6 +989,7 @@ $("zoneDoneBtn").onclick = () => closeAdmin();
 function openAdmin() {
   adminOpen = true;
   selectedZoneId = null; selectedVertexIdx = null;
+  newZoneMode = "include"; renderZoneModeSelect(); // FIX G2: o fluxo começa pelas áreas de desenho
   adminOverlay.hidden = false;
   requestAnimationFrame(sizeAdminCanvas); // overlay precisa de estar visível para medir o canvas
   updateZoneButtons();
