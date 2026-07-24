@@ -200,7 +200,7 @@ function applyKeystone() {
 }
 async function keystoneCloudLoad() {
   try {
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.mapping-keystone&select=data`, {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.${encodeURIComponent(KEYSTONE_ID)}&select=data`, {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
     });
     if (!r.ok) return;
@@ -212,7 +212,7 @@ function keystoneCloudSave(corners) {
   fetch(`${SUPABASE_URL}/rest/v1/hand_config`, {
     method: "POST",
     headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" },
-    body: JSON.stringify([{ id: "mapping-keystone", data: { corners }, updated_at: new Date().toISOString() }]),
+    body: JSON.stringify([{ id: KEYSTONE_ID, data: { corners }, updated_at: new Date().toISOString() }]),
   }).catch(() => { /* offline: fica só aplicado localmente */ });
 }
 
@@ -220,6 +220,9 @@ function keystoneCloudSave(corners) {
 const SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
 const ROOM = (new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "") || "default";
+// rows por instalação (room 'default' mantém as rows históricas) — ver review PR #35
+const KEYSTONE_ID = ROOM === "default" ? "mapping-keystone" : "mapping-keystone:" + ROOM;
+const ZONES_ROW_ID = ROOM === "default" ? "magicdraw-zones" : "magicdraw-zones:" + ROOM;
 const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let seq = 0;
 
@@ -349,7 +352,7 @@ window.addEventListener("message", e => {
 /* ================= carregamento inicial (zonas + keystone, hand_config) ================= */
 async function loadZonesFromCloud() {
   try {
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.magicdraw-zones&select=data`, {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.${encodeURIComponent(ZONES_ROW_ID)}&select=data`, {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
     });
     if (!r.ok) return;
