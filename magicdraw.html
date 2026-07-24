@@ -853,7 +853,10 @@ function setRefImg(dataUrl, save) {
   refImg = null;
   if (dataUrl) {
     const im = new Image();
-    im.onload = () => { refImg = im; renderAdminCanvas(); };
+    // o load é assíncrono: redesenha os DOIS canvases que usam a imagem — o
+    // do admin e o do modo Desenhar (podia estar aberto antes do cloud-load
+    // chegar e ficava preto até um resize; review PR #40)
+    im.onload = () => { refImg = im; renderAdminCanvas(); renderDrawBase(); };
     im.src = dataUrl;
   }
   renderAdminCanvas();
