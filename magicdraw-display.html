@@ -165,12 +165,15 @@ resize();
 /* ================= protocolo de sync (BroadcastChannel + Supabase Realtime) ================= */
 const SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
+/* ?room=X emparelha esta projeção com o tablet que abrir o mesmo room —
+   sem isto, todas as instalações partilhariam um único stream de comandos. */
+const ROOM = (new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "") || "default";
 const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let seq = 0;
 
-const bc = new BroadcastChannel("magicdraw");
+const bc = new BroadcastChannel("magicdraw:" + ROOM);
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const sbChannel = sb.channel("magicdraw");
+const sbChannel = sb.channel("magicdraw:" + ROOM);
 let sbReady = false;
 
 function send(kind, extra = {}) {
@@ -425,6 +428,7 @@ function processHands(res, now) {
     const was = st.pinching;
     if (st.pinching) {
       st.pinching = ratio < PINCH_EXIT; // sai sem debounce
+      if (!st.pinching) st.belowSince = undefined; // largou: o próximo pinch volta a dever o debounce
     } else if (ratio < PINCH_ENTER) {
       if (st.belowSince === undefined) st.belowSince = now;
       st.pinching = (now - st.belowSince) >= PINCH_DEBOUNCE_MS;

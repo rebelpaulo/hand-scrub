@@ -147,10 +147,14 @@
 const $ = id => document.getElementById(id);
 
 /* ================= protocolo de sync ================= */
+/* ?room=X emparelha este tablet com a projeção que abriu o mesmo room —
+   sem isto, todas as instalações (e qualquer visitante da página pública)
+   partilhariam um único stream de comandos. */
+const ROOM = (new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "") || "default";
 const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let seq = 0;
 
-const bc = new BroadcastChannel("magicdraw");
+const bc = new BroadcastChannel("magicdraw:" + ROOM);
 bc.onmessage = e => onMsg(e.data);
 
 const SB_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
@@ -162,7 +166,7 @@ let sbChannel = null;
   try {
     const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
     const sb = createClient(SB_URL, SB_KEY);
-    sbChannel = sb.channel("magicdraw");
+    sbChannel = sb.channel("magicdraw:" + ROOM);
     sbChannel
       .on("broadcast", { event: "msg" }, ({ payload }) => onMsg(payload))
       .subscribe(status => {

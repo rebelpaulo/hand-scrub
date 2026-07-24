@@ -173,6 +173,8 @@ npx serve -l 8777
     `BroadcastChannel` (mesma máquina, <5ms) + **Supabase Realtime
     Broadcast** (entre dispositivos), com dedup por `src`/`seq` — o controlo
     emite sempre o estado COMPLETO (nunca deltas) em cada mudança e a cada
-    3s como keepalive.
+    3s como keepalive. Acrescenta `?room=<nome>` ao URL das DUAS páginas
+    para emparelhar um tablet com a sua projeção (sem isto ambas usam o
+    room `default` — instalações separadas devem usar rooms separados).
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).
