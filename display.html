@@ -388,12 +388,16 @@ fsHotspot.style.cssText = "position:fixed;right:0;bottom:0;width:72px;height:72p
 fsHotspot.setAttribute("aria-hidden", "true");
 document.body.appendChild(fsHotspot);
 let fsClicks = 0, fsClickTimer = 0;
-fsHotspot.addEventListener("pointerdown", () => {
+// 'click' (não pointerdown): em touch a ativação de utilizador que o
+// fullscreen exige só é concedida no fim do toque — com pointerdown o
+// requestFullscreen era rejeitado em tablet.
+fsHotspot.addEventListener("click", () => {
   clearTimeout(fsClickTimer);
   fsClicks++;
   if (fsClicks >= 5) {
     fsClicks = 0;
-    document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    const p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    p?.catch?.(() => { /* recusado (política do browser): fica como está */ });
     return;
   }
   fsClickTimer = setTimeout(() => { fsClicks = 0; }, 1200);
