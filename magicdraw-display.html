@@ -322,6 +322,9 @@ function applyWarpConfig(n, points, testPattern) {
   warpTestOn = !!testPattern;
   warpIsIdentityCache = warp.isIdentity();
   setWarpActiveVisual(warpTestOn || !warpIsIdentityCache);
+  // um warp carregado da cloud pode ativar ANTES do 1º rAF (prompt de câmara
+  // pendente): compõe já um frame para não ficar tudo preto até o loop andar (T31)
+  if (warpActive) composeAndWarp();
 }
 
 // alterna a visibilidade das camadas SÓ quando o estado ativo/inativo muda — evita

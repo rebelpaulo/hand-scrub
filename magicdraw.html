@@ -170,7 +170,8 @@
   /* ---------- overlay admin: warp (grelha de projeção N×N) — 2º ecrã do admin ---------- */
   #warpOverlay { position: fixed; inset: 0; z-index: 200; background: #05060ae6; display: flex; align-items: center; justify-content: center; padding: 14px; backdrop-filter: blur(6px); }
   #warpOverlay[hidden] { display: none; }
-  #warpCanvas { width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 12px; touch-action: none; display: block; }
+  /* sem border-radius: o recorte tornava o pixel do canto exato não-clicável (T31) */
+  #warpCanvas { width: 100%; aspect-ratio: 16 / 9; background: #000; touch-action: none; display: block; }
   #warpNSelect { display: flex; gap: 8px; }
   #warpNSelect button { flex: 1; min-height: 54px; font-size: 14px; font-weight: 800; }
   #warpNSelect button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
