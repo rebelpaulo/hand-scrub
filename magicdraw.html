@@ -1158,7 +1158,7 @@ function setRefImg(dataUrl, save) {
     // o load é assíncrono: redesenha os DOIS canvases que usam a imagem — o
     // do admin e o do modo Desenhar (podia estar aberto antes do cloud-load
     // chegar e ficava preto até um resize; review PR #40)
-    im.onload = () => { refImg = im; renderAdminCanvas(); renderDrawBase(); };
+    im.onload = () => { refImg = im; renderAdminCanvas(); compositeEcho(); }; // compositeEcho preserva os traços do eco ao chegar a imagem
     im.src = dataUrl;
   }
   renderAdminCanvas();
@@ -2058,6 +2058,14 @@ $("buildingsBackBtn").onclick = () => { buildingsOverlay.hidden = true; adminOve
    ================================================================== */
 const drawScreen = $("drawScreen");
 const dCanvas = $("drawCanvasT"), dctx = dCanvas.getContext("2d");
+// os traços do eco vivem numa camada PRÓPRIA (offscreen), separada da imagem
+// de referência: a borracha (destination-out) só apaga traços, a imagem de
+// fundo fica intacta — antes furava tudo até ao preto.
+const strokeEcho = document.createElement("canvas");
+const sectx = strokeEcho.getContext("2d");
+let echoUndo = [], echoRedo = []; // histórico LOCAL do eco (snapshots da camada de traços)
+const ECHO_HISTORY_MAX = 10;   // tablet: memória limitada — poucos passos chegam (o display é a verdade)
+const ECHO_SNAP_MAX = 900;     // maior lado do snapshot em px — leve (num DPR2 1080p full-res eram ~32MiB/passo)
 let drawScreenOpen = false;
 const STAMP_EMOJIS_TABLET = ["⭐", "❤️", "🌸", "✨", "🦋", "😀"]; // mesmo conjunto do display
 
@@ -2100,6 +2108,38 @@ function renderDrawBase() {
   dctx.fillStyle = "#000"; dctx.fillRect(0, 0, w, h);
   if (refImg) { dctx.globalAlpha = 0.5; dctx.drawImage(refImg, 0, 0, w, h); dctx.globalAlpha = 1; }
 }
+// compõe o visível = base (preto + imagem) + camada de traços por cima
+function compositeEcho() {
+  renderDrawBase();
+  dctx.save();
+  dctx.setTransform(1, 0, 0, 1, 0, 0); // blit 1:1 em píxeis de dispositivo (strokeEcho tem as mesmas dims)
+  dctx.drawImage(strokeEcho, 0, 0);
+  dctx.restore();
+}
+function snapshotEcho() {
+  // snapshot em resolução REDUZIDA (limita a memória do histórico no tablet) —
+  // o eco é uma pré-visualização aproximada, o render fiel é no display
+  const sw = strokeEcho.width, sh = strokeEcho.height;
+  const scale = Math.min(1, ECHO_SNAP_MAX / Math.max(sw, sh, 1));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(sw * scale));
+  c.height = Math.max(1, Math.round(sh * scale));
+  c.getContext("2d").drawImage(strokeEcho, 0, 0, c.width, c.height);
+  return c;
+}
+function restoreEcho(c) {
+  sectx.save();
+  sectx.setTransform(1, 0, 0, 1, 0, 0);
+  sectx.clearRect(0, 0, strokeEcho.width, strokeEcho.height);
+  sectx.drawImage(c, 0, 0, strokeEcho.width, strokeEcho.height); // reamplia às dims reais
+  sectx.restore();
+  compositeEcho();
+}
+function pushEchoHistory() { // chamado ANTES de cada operação (traço/limpar): 1 passo desfazível
+  echoUndo.push(snapshotEcho());
+  if (echoUndo.length > ECHO_HISTORY_MAX) echoUndo.shift();
+  echoRedo = [];
+}
 function sizeDrawCanvas() {
   // maior retângulo 16:9 que cabe no espaço disponível (a moldura de
   // ferramentas à volta já reserva o resto) — mesmo padrão DPR-aware do #adminCanvas
@@ -2110,7 +2150,12 @@ function sizeDrawCanvas() {
   dCanvas.style.width = cw + "px"; dCanvas.style.height = ch + "px";
   dCanvas.width = cw * dpr; dCanvas.height = ch * dpr;
   dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  renderDrawBase();
+  // a camada de traços acompanha as dims e a transformação (desenha em px CSS);
+  // um resize limpa os traços e o histórico (mesmo ceiling do display)
+  strokeEcho.width = cw * dpr; strokeEcho.height = ch * dpr;
+  sectx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  echoUndo = []; echoRedo = [];
+  compositeEcho();
 }
 window.addEventListener("resize", () => { if (drawScreenOpen) sizeDrawCanvas(); });
 
@@ -2121,29 +2166,47 @@ $("drawModeBtn").onclick = () => {
   if (!refImgLoadedOnce) { refImgLoadedOnce = true; refImgCloudLoad(); } // mesma imagem de referência do admin
 };
 $("drawCloseBtn").onclick = () => { drawScreenOpen = false; drawScreen.hidden = true; };
-$("drawUndoBtn").onclick = () => $("undoBtn").click();
-$("drawRedoBtn").onclick = () => $("redoBtn").click();
+// undo/redo em LOCKSTEP com o display: só mexe no display quando também há um
+// passo local a desfazer (senão, após um resize que limpa o histórico local, o
+// display mudava sem o tablet — review PR #43)
+$("drawUndoBtn").onclick = () => {
+  if (!echoUndo.length) return;
+  echoRedo.push(snapshotEcho()); restoreEcho(echoUndo.pop());
+  $("undoBtn").click(); // sincroniza o display (kind 'undo')
+};
+$("drawRedoBtn").onclick = () => {
+  if (!echoRedo.length) return;
+  echoUndo.push(snapshotEcho()); restoreEcho(echoRedo.pop());
+  $("redoBtn").click();
+};
 $("drawPhotoBtn").onclick = () => photoBtn.click();
-$("drawClearBtn").onclick = () => { send({ kind: "clear", scope: "draw" }); renderDrawBase(); };
+$("drawClearBtn").onclick = () => {
+  pushEchoHistory(); // o limpar do eco também é desfazível
+  sectx.save(); sectx.setTransform(1, 0, 0, 1, 0, 0); sectx.clearRect(0, 0, strokeEcho.width, strokeEcho.height); sectx.restore();
+  compositeEcho();
+  send({ kind: "clear", scope: "draw" });
+};
 
 /* ---- eco local simplificado: mesma família de 8 pincéis, um segmento de
    cada vez (sem o path contínuo/mandala do display — aproximado de propósito) ---- */
 function echoSegment(s, A, B) {
   const { tool, color, size } = s.brush;
-  dctx.lineCap = "round"; dctx.lineJoin = "round"; dctx.shadowBlur = 0; dctx.globalAlpha = 1;
-  dctx.globalCompositeOperation = "source-over";
+  sectx.lineCap = "round"; sectx.lineJoin = "round"; sectx.shadowBlur = 0; sectx.globalAlpha = 1;
+  sectx.globalCompositeOperation = "source-over";
   if (tool === "eraser") {
-    dctx.globalCompositeOperation = "destination-out";
-    dctx.lineWidth = size * 2;
-    dctx.beginPath(); dctx.moveTo(A.x, A.y); dctx.lineTo(B.x, B.y); dctx.stroke();
-    dctx.globalCompositeOperation = "source-over";
+    // destination-out na CAMADA DE TRAÇOS apenas — apaga o desenho e revela a
+    // imagem de fundo por baixo, sem furar até ao preto
+    sectx.globalCompositeOperation = "destination-out";
+    sectx.lineWidth = size * 2;
+    sectx.beginPath(); sectx.moveTo(A.x, A.y); sectx.lineTo(B.x, B.y); sectx.stroke();
+    sectx.globalCompositeOperation = "source-over";
     return;
   }
   if (tool === "spray") {
-    dctx.fillStyle = color;
+    sectx.fillStyle = color;
     for (let i = 0; i < 6; i++) {
       const a = Math.random() * Math.PI * 2, r = Math.random() * size * 0.7;
-      dctx.beginPath(); dctx.arc(B.x + Math.cos(a) * r, B.y + Math.sin(a) * r, 1.2, 0, Math.PI * 2); dctx.fill();
+      sectx.beginPath(); sectx.arc(B.x + Math.cos(a) * r, B.y + Math.sin(a) * r, 1.2, 0, Math.PI * 2); sectx.fill();
     }
     return;
   }
@@ -2152,30 +2215,30 @@ function echoSegment(s, A, B) {
     if (s.distSinceStamp < size * 1.8) return;
     s.distSinceStamp = 0;
     if (!s.emoji || Math.random() < 0.5) s.emoji = STAMP_EMOJIS_TABLET[Math.random() * STAMP_EMOJIS_TABLET.length | 0];
-    dctx.font = `${Math.round(size * 2)}px serif`; dctx.textAlign = "center"; dctx.textBaseline = "middle";
-    dctx.fillText(s.emoji, B.x, B.y);
+    sectx.font = `${Math.round(size * 2)}px serif`; sectx.textAlign = "center"; sectx.textBaseline = "middle";
+    sectx.fillText(s.emoji, B.x, B.y);
     return;
   }
-  dctx.beginPath(); dctx.moveTo(A.x, A.y); dctx.lineTo(B.x, B.y);
+  sectx.beginPath(); sectx.moveTo(A.x, A.y); sectx.lineTo(B.x, B.y);
   if (tool === "rainbow") {
     s.hue = (s.hue + Math.hypot(B.x - A.x, B.y - A.y) * 0.4) % 360;
-    dctx.strokeStyle = `hsl(${s.hue.toFixed(1)},100%,60%)`; dctx.lineWidth = size;
-    dctx.shadowColor = "#fff"; dctx.shadowBlur = 6;
+    sectx.strokeStyle = `hsl(${s.hue.toFixed(1)},100%,60%)`; sectx.lineWidth = size;
+    sectx.shadowColor = "#fff"; sectx.shadowBlur = 6;
   } else if (tool === "neon") {
-    dctx.strokeStyle = color; dctx.lineWidth = Math.max(2, size * 0.6);
-    dctx.shadowColor = color; dctx.shadowBlur = size; dctx.globalAlpha = 0.95;
+    sectx.strokeStyle = color; sectx.lineWidth = Math.max(2, size * 0.6);
+    sectx.shadowColor = color; sectx.shadowBlur = size; sectx.globalAlpha = 0.95;
   } else if (tool === "glitter") {
-    dctx.strokeStyle = color; dctx.lineWidth = Math.max(2, size * 0.35);
-    dctx.shadowColor = "#fff"; dctx.shadowBlur = 8;
+    sectx.strokeStyle = color; sectx.lineWidth = Math.max(2, size * 0.35);
+    sectx.shadowColor = "#fff"; sectx.shadowBlur = 8;
   } else if (tool === "marker") {
-    dctx.strokeStyle = color; dctx.lineWidth = size; dctx.globalAlpha = 0.5;
+    sectx.strokeStyle = color; sectx.lineWidth = size; sectx.globalAlpha = 0.5;
   } else if (tool === "crayon") {
-    dctx.strokeStyle = color; dctx.lineWidth = Math.max(2, size * 0.7); dctx.globalAlpha = 0.85;
+    sectx.strokeStyle = color; sectx.lineWidth = Math.max(2, size * 0.7); sectx.globalAlpha = 0.85;
   } else {
-    dctx.strokeStyle = color; dctx.lineWidth = size;
+    sectx.strokeStyle = color; sectx.lineWidth = size;
   }
-  dctx.stroke();
-  dctx.shadowBlur = 0; dctx.globalAlpha = 1;
+  sectx.stroke();
+  sectx.shadowBlur = 0; sectx.globalAlpha = 1;
 }
 
 /* ---- toque/pointer: cada pointerId é um traço independente (multi-toque) —
@@ -2193,6 +2256,7 @@ dCanvas.addEventListener("pointerdown", e => {
   const { nx, ny, px, py } = drawCanvasPt(e);
   const sid = Math.random().toString(36).slice(2, 10);
   const brush = { tool: state.tool, color: state.color, size: state.size, mirror: state.mirror };
+  pushEchoHistory(); // 1 passo de undo POR traço (cada dedo) — alinha com o display, que assa/empilha por tstroke
   tabletStrokesLocal.set(e.pointerId, { sid, brush, lastPt: { x: px, y: py }, hue: Math.random() * 360, distSinceStamp: 0, emoji: null, pending: [], timer: null });
   send({ kind: "tstroke", sid, phase: "start", pts: [[r4(nx), r4(ny)]], brush }); // brush SEMPRE no 'start' — o display congela-o por traço
 });
@@ -2201,6 +2265,7 @@ dCanvas.addEventListener("pointermove", e => {
   if (!s) return;
   const { nx, ny, px, py } = drawCanvasPt(e);
   echoSegment(s, s.lastPt, { x: px, y: py });
+  compositeEcho(); // mostra base (imagem) + camada de traços
   s.lastPt = { x: px, y: py };
   s.pending.push([r4(nx), r4(ny)]);
   if (!s.timer) {
