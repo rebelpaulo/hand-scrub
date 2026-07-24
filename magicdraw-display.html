@@ -119,8 +119,6 @@
   </div>
 
 <script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
-
 const $ = id => document.getElementById(id);
 const photoCanvas = $("photoCanvas"), pctx = photoCanvas.getContext("2d");
 const drawCanvas = $("drawCanvas"), dctx = drawCanvas.getContext("2d");
@@ -172,8 +170,7 @@ const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let seq = 0;
 
 const bc = new BroadcastChannel("magicdraw:" + ROOM);
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const sbChannel = sb.channel("magicdraw:" + ROOM);
+let sbChannel = null; // null se o CDN falhar — o BroadcastChannel local continua a funcionar
 let sbReady = false;
 
 function send(kind, extra = {}) {
@@ -195,9 +192,18 @@ function onMsg(payload) {
   handleMsg(payload);
 }
 bc.onmessage = e => onMsg(e.data);
-sbChannel.on("broadcast", { event: "msg" }, ({ payload }) => onMsg(payload)).subscribe(status => {
-  if (status === "SUBSCRIBED") { sbReady = true; send("hello"); }
-});
+// import dinâmico guardado (como magicdraw.html): uma falha do CDN não pode
+// matar a projeção — câmara, tracking e BroadcastChannel arrancam na mesma.
+(async () => {
+  try {
+    const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    sbChannel = sb.channel("magicdraw:" + ROOM);
+    sbChannel.on("broadcast", { event: "msg" }, ({ payload }) => onMsg(payload)).subscribe(status => {
+      if (status === "SUBSCRIBED") { sbReady = true; send("hello"); }
+    });
+  } catch (e) { /* offline/CDN em baixo: fica só o canal local */ }
+})();
 send("hello"); // já dispara via BroadcastChannel de imediato; o supabase repete quando subscrito
 
 let gotFirstState = false;
