@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Magic Draw — painel de controlo</title>
+<style>
+  :root {
+    --bg: #07080d;
+    --panel: #12141dcc;
+    --line: #2a3245;
+    --text: #eef2f8;
+    --muted: #98a2b6;
+    --neon: #00ffcc;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; background: var(--bg); overflow-x: hidden;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    color: var(--text);
+    display: flex; flex-direction: column; gap: 14px;
+    padding: 14px; padding-top: 56px;
+    min-height: 100vh;
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    background:
+      radial-gradient(900px 500px at 15% -10%, rgba(0,255,204,.10), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, rgba(255,77,210,.10), transparent 60%),
+      var(--bg);
+  }
+
+  a#back {
+    position: fixed; top: 14px; left: 14px; z-index: 95; text-decoration: none;
+    color: var(--text); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 10px 16px; font-size: 14px; font-weight: 700;
+    backdrop-filter: blur(10px);
+  }
+  #status {
+    position: fixed; top: 14px; right: 14px; z-index: 95;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 99px;
+    padding: 8px 14px; font-size: 13px; font-weight: 600; backdrop-filter: blur(10px);
+    white-space: nowrap;
+  }
+
+  h2.section {
+    margin: 4px 2px 0; font-size: 13px; font-weight: 800; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--muted);
+  }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+    padding: 12px; backdrop-filter: blur(10px);
+  }
+
+  /* ---------- botão base: toque grande, feedback tátil ---------- */
+  button {
+    font-family: inherit; color: var(--text); background: #1a1e2ac0;
+    border: 2px solid var(--line); border-radius: 16px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease;
+  }
+  button:active { transform: scale(.92); }
+
+  /* ---------- pinceis: grelha responsiva, alvo >=90px ---------- */
+  #brushes { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+  #brushes button { min-height: 96px; font-size: 12px; font-weight: 700; padding: 8px 4px; }
+  #brushes button .ic { font-size: 32px; line-height: 1; }
+  #brushes button.on {
+    border-color: var(--neon); background: #0f2b26;
+    box-shadow: 0 0 0 3px #00ffcc33, 0 0 22px -2px var(--neon);
+  }
+
+  /* ---------- cores: swatches redondos, caixa de lápis ---------- */
+  #colors { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .swatch {
+    width: 54px; height: 54px; min-width: 54px; border-radius: 50%;
+    border: 3px solid #0000; box-shadow: inset 0 0 0 1px #ffffff22;
+    padding: 0;
+  }
+  .swatch.on { border-color: #fff; box-shadow: 0 0 0 3px #ffffff55, 0 0 18px -2px currentColor; transform: scale(1.08); }
+  .swatch.rainbow { background: conic-gradient(red, orange, yellow, lime, cyan, blue, magenta, red); }
+
+  /* ---------- tamanhos: bolas crescentes ---------- */
+  #sizes { display: flex; gap: 10px; justify-content: center; }
+  #sizes button { flex: 1; min-height: 90px; }
+  #sizes button .dot { border-radius: 50%; background: var(--neon); }
+  #sizes button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
+  #sizes button .lbl { font-size: 11px; color: var(--muted); font-weight: 700; }
+
+  /* ---------- simetria: segmentado ---------- */
+  #mirrors { display: flex; gap: 10px; }
+  #mirrors button { flex: 1; min-height: 90px; font-size: 15px; font-weight: 800; }
+  #mirrors button .ic { font-size: 26px; }
+  #mirrors button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
+
+  /* ---------- ações: foto / limpar ---------- */
+  #actions { display: flex; gap: 10px; }
+  #actions button { flex: 1; min-height: 100px; font-size: 16px; font-weight: 800; }
+  #photoBtn { background: linear-gradient(160deg, #2a1f00, #1a1e2ac0); border-color: #ffd23f55; }
+  #photoBtn .ic { font-size: 34px; }
+  #photoBtn.busy { border-color: #ffd23f; box-shadow: 0 0 22px -2px #ffd23f; }
+  #clearBtn { background: linear-gradient(160deg, #2a0f14, #1a1e2ac0); border-color: #ff4d5555; }
+  #clearBtn .ic { font-size: 34px; }
+  #clearBtn.confirm { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
+
+  /* ---------- pré-visualização ---------- */
+  #previewWrap { display: flex; align-items: center; gap: 10px; }
+  canvas#preview { width: 100%; height: 90px; border-radius: 12px; background: #000; display: block; }
+
+  footer { text-align: center; color: var(--muted); font-size: 11px; padding: 4px 0 2px; }
+</style>
+</head>
+<body>
+  <a id="back" href="index.html">← voltar</a>
+  <div id="status">🟡 só local</div>
+
+  <h2 class="section">✏️ Pincéis</h2>
+  <div class="card"><div id="brushes"></div></div>
+
+  <h2 class="section">🎨 Cores</h2>
+  <div class="card"><div id="colors"></div></div>
+
+  <h2 class="section">⚪ Tamanho</h2>
+  <div class="card"><div id="sizes"></div></div>
+
+  <h2 class="section">❄️ Simetria</h2>
+  <div class="card"><div id="mirrors"></div></div>
+
+  <h2 class="section">👁️ Pré-visualização</h2>
+  <div class="card" id="previewWrap"><canvas id="preview"></canvas></div>
+
+  <div id="actions">
+    <button id="photoBtn"><span class="ic">📸</span><span>Foto</span></button>
+    <button id="clearBtn"><span class="ic">🗑</span><span>Limpar</span></button>
+  </div>
+
+  <footer>Magic Draw · painel touch</footer>
+
+<script type="module">
+/* ==================================================================
+   Magic Draw — painel de controlo (touch-only, sem câmara)
+   Emite o estado em tempo real para magicdraw-display.html via dois
+   canais: BroadcastChannel local + Supabase Realtime Broadcast.
+   ================================================================== */
+const $ = id => document.getElementById(id);
+
+/* ================= protocolo de sync ================= */
+const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
+let seq = 0;
+
+const bc = new BroadcastChannel("magicdraw");
+bc.onmessage = e => onMsg(e.data);
+
+const SB_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
+const statusEl = $("status");
+let sbChannel = null;
+
+(async () => {
+  try {
+    const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
+    const sb = createClient(SB_URL, SB_KEY);
+    sbChannel = sb.channel("magicdraw");
+    sbChannel
+      .on("broadcast", { event: "msg" }, ({ payload }) => onMsg(payload))
+      .subscribe(status => {
+        if (status === "SUBSCRIBED") { statusEl.textContent = "🟢 ligado"; }
+        else if (status === "CLOSED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          statusEl.textContent = "🟡 só local";
+        }
+      });
+  } catch {
+    statusEl.textContent = "🟡 só local"; // sem rede: BroadcastChannel local continua a funcionar
+  }
+})();
+
+// dedup no recetor: última seq vista por src
+const lastSeq = new Map();
+function onMsg(msg) {
+  if (!msg || msg.src === CLIENT_ID) return;
+  const prev = lastSeq.get(msg.src) ?? -1;
+  if (msg.seq <= prev) return;
+  lastSeq.set(msg.src, msg.seq);
+  if (msg.kind === "hello") sendState(); // display pediu o estado atual
+}
+
+function send(payload) {
+  const msg = { v: 1, src: CLIENT_ID, seq: seq++, ...payload };
+  bc.postMessage(msg);
+  sbChannel?.send({ type: "broadcast", event: "msg", payload: msg });
+}
+
+/* ================= estado ================= */
+const state = { tool: "neon", color: "#00ffcc", size: 14, mirror: 0 };
+let lastNonRainbowTool = "neon";
+
+function sendState() { send({ kind: "state", state: { ...state } }); }
+
+/* keepalive a cada 3s */
+setInterval(sendState, 3000);
+
+/* ================= pincéis ================= */
+const BRUSHES = [
+  { tool: "neon",    ic: "✨", label: "Néon" },
+  { tool: "rainbow", ic: "🌈", label: "Arco-íris" },
+  { tool: "glitter", ic: "⭐", label: "Brilhos" },
+  { tool: "stamp",   ic: "🦋", label: "Carimbos" },
+  { tool: "spray",   ic: "🎨", label: "Spray" },
+  { tool: "marker",  ic: "🖊️", label: "Marcador" },
+  { tool: "crayon",  ic: "🖍️", label: "Lápis de cera" },
+  { tool: "eraser",  ic: "🧽", label: "Borracha" },
+];
+const brushesEl = $("brushes");
+for (const b of BRUSHES) {
+  const btn = document.createElement("button");
+  btn.dataset.tool = b.tool;
+  btn.innerHTML = `<span class="ic">${b.ic}</span><span>${b.label}</span>`;
+  btn.onclick = () => {
+    state.tool = b.tool;
+    if (b.tool !== "rainbow") lastNonRainbowTool = b.tool;
+    renderBrushes(); renderColors(); renderPreview(); sendState();
+  };
+  brushesEl.appendChild(btn);
+}
+function renderBrushes() {
+  for (const btn of brushesEl.children) btn.classList.toggle("on", btn.dataset.tool === state.tool);
+}
+
+/* ================= cores ================= */
+const COLORS = [
+  "#ffffff", "#ff3b3b", "#ff9500", "#ffee00", "#c6ff00", "#39ff14", "#00ffb3",
+  "#00e5ff", "#2979ff", "#0040ff", "#8a2be2", "#b026ff", "#ff2d95", "#ff00c8",
+];
+const colorsEl = $("colors");
+for (const c of COLORS) {
+  const btn = document.createElement("button");
+  btn.className = "swatch";
+  btn.style.background = c;
+  btn.style.color = c;
+  btn.dataset.color = c;
+  btn.onclick = () => {
+    state.color = c;
+    state.tool = state.tool === "rainbow" ? lastNonRainbowTool : state.tool; // escolher cor sólida sai do modo arco-íris
+    renderBrushes(); renderColors(); renderPreview(); sendState();
+  };
+  colorsEl.appendChild(btn);
+}
+const rainbowBtn = document.createElement("button");
+rainbowBtn.className = "swatch rainbow";
+rainbowBtn.dataset.rainbow = "1";
+rainbowBtn.onclick = () => {
+  state.tool = "rainbow"; // mantém o último 'color' escolhido
+  renderBrushes(); renderColors(); renderPreview(); sendState();
+};
+colorsEl.appendChild(rainbowBtn);
+function renderColors() {
+  for (const btn of colorsEl.children) {
+    const isRainbowSwatch = btn.dataset.rainbow === "1";
+    if (isRainbowSwatch) { btn.classList.toggle("on", state.tool === "rainbow"); continue; }
+    btn.classList.toggle("on", state.tool !== "rainbow" && btn.dataset.color === state.color);
+  }
+}
+
+/* ================= tamanhos: bolas crescentes ================= */
+const SIZES = [6, 14, 26, 44];
+const sizesEl = $("sizes");
+for (const s of SIZES) {
+  const btn = document.createElement("button");
+  btn.dataset.size = s;
+  const px = Math.round(14 + s * 0.9); // bola desenhada à escala, limitada ao botão
+  btn.innerHTML = `<span class="dot" style="width:${px}px;height:${px}px"></span><span class="lbl">${s}px</span>`;
+  btn.onclick = () => { state.size = s; renderSizes(); renderPreview(); sendState(); };
+  sizesEl.appendChild(btn);
+}
+function renderSizes() {
+  for (const btn of sizesEl.children) btn.classList.toggle("on", +btn.dataset.size === state.size);
+}
+
+/* ================= simetria ================= */
+const MIRRORS = [
+  { m: 0, ic: "✖️", label: "Off" },
+  { m: 2, ic: "❄️", label: "2×" },
+  { m: 4, ic: "❄️", label: "4×" },
+  { m: 8, ic: "❄️", label: "8×" },
+];
+const mirrorsEl = $("mirrors");
+for (const mv of MIRRORS) {
+  const btn = document.createElement("button");
+  btn.dataset.mirror = mv.m;
+  btn.innerHTML = `<span class="ic">${mv.ic}</span><span>${mv.label}</span>`;
+  btn.onclick = () => { state.mirror = mv.m; renderMirrors(); sendState(); };
+  mirrorsEl.appendChild(btn);
+}
+function renderMirrors() {
+  for (const btn of mirrorsEl.children) btn.classList.toggle("on", +btn.dataset.mirror === state.mirror);
+}
+
+/* ================= pré-visualização (rabisco em S) ================= */
+const preview = $("preview"), pctx = preview.getContext("2d");
+function sizePreview() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = preview.clientWidth, h = preview.clientHeight;
+  preview.width = w * dpr; preview.height = h * dpr;
+  pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+// pontos de uma curva em S, usados como base para todos os pincéis
+function sPath(w, h) {
+  const pts = [];
+  const n = 60;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const x = 16 + t * (w - 32);
+    const y = h / 2 + Math.sin(t * Math.PI * 2) * (h * 0.28);
+    pts.push({ x, y });
+  }
+  return pts;
+}
+function renderPreview() {
+  const w = preview.clientWidth, h = preview.clientHeight;
+  sizePreview();
+  pctx.clearRect(0, 0, w, h);
+  pctx.fillStyle = "#000"; pctx.fillRect(0, 0, w, h);
+  const pts = sPath(w, h);
+  const size = state.size;
+
+  if (state.tool === "eraser") {
+    // contorno tracejado: mostra "por onde passaria" sem desenhar tinta
+    pctx.strokeStyle = "#ffffff88"; pctx.lineWidth = Math.max(2, size * 0.6);
+    pctx.setLineDash([6, 8]); pctx.lineCap = "round"; pctx.lineJoin = "round";
+    pctx.beginPath();
+    pts.forEach((p, i) => i ? pctx.lineTo(p.x, p.y) : pctx.moveTo(p.x, p.y));
+    pctx.stroke();
+    pctx.setLineDash([]);
+    return;
+  }
+
+  if (state.tool === "stamp") {
+    // carimbos: emojis espaçados ao longo da curva
+    const emojis = ["🦋", "⭐", "🌸", "💫"];
+    pctx.font = `${Math.max(14, size)}px sans-serif`;
+    pctx.textAlign = "center"; pctx.textBaseline = "middle";
+    for (let i = 0; i < pts.length; i += 10) {
+      pctx.fillText(emojis[(i / 10) | 0 % emojis.length], pts[i].x, pts[i].y);
+    }
+    return;
+  }
+
+  if (state.tool === "spray") {
+    // spray: nuvem de pontinhos à volta da curva
+    pctx.fillStyle = state.color;
+    for (const p of pts) {
+      for (let k = 0; k < 4; k++) {
+        const a = Math.random() * Math.PI * 2, r = Math.random() * (size * 0.7);
+        pctx.beginPath();
+        pctx.arc(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r, 1.2, 0, Math.PI * 2);
+        pctx.fill();
+      }
+    }
+    return;
+  }
+
+  pctx.lineCap = "round"; pctx.lineJoin = "round";
+  pctx.beginPath();
+  pts.forEach((p, i) => i ? pctx.lineTo(p.x, p.y) : pctx.moveTo(p.x, p.y));
+
+  if (state.tool === "rainbow") {
+    const grad = pctx.createLinearGradient(0, 0, w, 0);
+    ["red", "orange", "yellow", "lime", "cyan", "blue", "magenta"].forEach((c, i, arr) => grad.addColorStop(i / (arr.length - 1), c));
+    pctx.strokeStyle = grad; pctx.lineWidth = size; pctx.globalAlpha = 1;
+    pctx.shadowColor = "#fff"; pctx.shadowBlur = 6;
+    pctx.stroke();
+  } else if (state.tool === "neon") {
+    pctx.strokeStyle = state.color; pctx.lineWidth = Math.max(2, size * 0.5);
+    pctx.shadowColor = state.color; pctx.shadowBlur = 18;
+    pctx.stroke();
+    pctx.shadowBlur = 0;
+  } else if (state.tool === "glitter") {
+    pctx.strokeStyle = state.color; pctx.lineWidth = Math.max(2, size * 0.35);
+    pctx.shadowColor = "#fff"; pctx.shadowBlur = 10;
+    pctx.stroke();
+    pctx.shadowBlur = 0;
+    pctx.fillStyle = "#fff";
+    for (let i = 0; i < pts.length; i += 4) {
+      pctx.beginPath();
+      pctx.arc(pts[i].x + (Math.random() - 0.5) * size, pts[i].y + (Math.random() - 0.5) * size, 1.4, 0, Math.PI * 2);
+      pctx.fill();
+    }
+  } else if (state.tool === "marker") {
+    pctx.strokeStyle = state.color; pctx.lineWidth = size; pctx.globalAlpha = 0.55;
+    pctx.stroke();
+    pctx.globalAlpha = 1;
+  } else if (state.tool === "crayon") {
+    // lápis de cera: linha com jitter (textura granulada)
+    pctx.strokeStyle = state.color; pctx.lineWidth = Math.max(2, size * 0.7); pctx.globalAlpha = 0.85;
+    pctx.stroke();
+    pctx.globalAlpha = 1;
+    pctx.fillStyle = state.color;
+    for (const p of pts) {
+      pctx.beginPath();
+      pctx.arc(p.x + (Math.random() - 0.5) * 3, p.y + (Math.random() - 0.5) * 3, 0.8, 0, Math.PI * 2);
+      pctx.fill();
+    }
+  } else {
+    pctx.strokeStyle = state.color; pctx.lineWidth = size;
+    pctx.stroke();
+  }
+}
+window.addEventListener("resize", renderPreview);
+
+/* ================= foto: contagem visual 3-2-1 ================= */
+const photoBtn = $("photoBtn");
+let photoBusy = false;
+photoBtn.onclick = () => {
+  if (photoBusy) return;
+  photoBusy = true;
+  photoBtn.classList.add("busy");
+  send({ kind: "photo" });
+  const label = photoBtn.querySelector("span:last-child");
+  const original = label.textContent;
+  let n = 3;
+  label.textContent = `${n}…`;
+  const t = setInterval(() => {
+    n--;
+    if (n > 0) { label.textContent = `${n}…`; return; }
+    label.textContent = "📸";
+    clearInterval(t);
+    setTimeout(() => {
+      photoBusy = false;
+      photoBtn.classList.remove("busy");
+      label.textContent = original;
+    }, 600);
+  }, 700);
+};
+
+/* ================= limpar: confirmação anti-toque-acidental ================= */
+const clearBtn = $("clearBtn");
+let clearArmed = false, clearTimer = null;
+const clearLabel = clearBtn.querySelector("span:last-child");
+const clearOriginal = clearLabel.textContent;
+clearBtn.onclick = () => {
+  if (!clearArmed) {
+    clearArmed = true;
+    clearBtn.classList.add("confirm");
+    clearLabel.textContent = "Confirmar?";
+    clearTimer = setTimeout(resetClear, 3000);
+    return;
+  }
+  clearTimeout(clearTimer);
+  resetClear();
+  send({ kind: "clear" });
+};
+function resetClear() {
+  clearArmed = false;
+  clearBtn.classList.remove("confirm");
+  clearLabel.textContent = clearOriginal;
+}
+
+/* ================= arranque ================= */
+renderBrushes(); renderColors(); renderSizes(); renderMirrors(); renderPreview();
+sendState(); // estado inicial emitido no arranque
+
+/* ================= teclado ================= */
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") location.href = "index.html";
+});
+</script>
+</body>
+</html>

@@ -18,6 +18,7 @@
     --amber: #f59e0b;    /* Sala de Sombras */
     --magenta: #ff4dd2;  /* Pinch Draw */
     --ice: #cbd5e1;      /* Enxame */
+    --violet: #a78bfa;   /* Magic Draw */
     --bg-0: #000;
     --bg-1: #05070a;
   }
@@ -166,11 +167,13 @@
   .card[data-accent="amber"]:hover, .card[data-accent="amber"]:focus-visible, .card[data-accent="amber"].hover { border-color: var(--amber); }
   .card[data-accent="magenta"]:hover, .card[data-accent="magenta"]:focus-visible, .card[data-accent="magenta"].hover { border-color: var(--magenta); }
   .card[data-accent="ice"]:hover, .card[data-accent="ice"]:focus-visible, .card[data-accent="ice"].hover { border-color: var(--ice); }
+  .card[data-accent="violet"]:hover, .card[data-accent="violet"]:focus-visible, .card[data-accent="violet"].hover { border-color: var(--violet); }
   .card.selected { transform: translateY(-6px) scale(1.02); }
   .card[data-accent="teal"].selected    { border-color: var(--accent);  box-shadow: 0 0 0 2px #5eead455, 0 30px 70px -20px #5eead433; }
   .card[data-accent="amber"].selected   { border-color: var(--amber);   box-shadow: 0 0 0 2px #f59e0b55, 0 30px 70px -20px #f59e0b33; }
   .card[data-accent="magenta"].selected { border-color: var(--magenta); box-shadow: 0 0 0 2px #ff4dd255, 0 30px 70px -20px #ff4dd233; }
   .card[data-accent="ice"].selected     { border-color: var(--ice);     box-shadow: 0 0 0 2px #cbd5e155, 0 30px 70px -20px #cbd5e133; }
+  .card[data-accent="violet"].selected  { border-color: var(--violet);  box-shadow: 0 0 0 2px #a78bfa55, 0 30px 70px -20px #a78bfa33; }
 
   .card .preview { position: relative; aspect-ratio: 16/10; overflow: hidden; }
   .card[data-accent="teal"] .preview {
@@ -189,10 +192,15 @@
     background: radial-gradient(120% 120% at 50% 20%, #1c2836, #070a0e 70%);
     animation: previewShiftIce 9s ease-in-out infinite alternate;
   }
+  .card[data-accent="violet"] .preview {
+    background: radial-gradient(120% 120% at 70% 80%, #241a3f, #0a0614 70%);
+    animation: previewShiftViolet 9s ease-in-out infinite alternate;
+  }
   @keyframes previewShiftTeal    { from { background-position: 0% 0%; } to { background-position: 40% 60%; } }
   @keyframes previewShiftAmber   { from { background-position: 100% 0%; } to { background-position: 60% 50%; } }
   @keyframes previewShiftMagenta { from { background-position: 0% 100%; } to { background-position: 55% 30%; } }
   @keyframes previewShiftIce     { from { background-position: 20% 0%; } to { background-position: 65% 45%; } }
+  @keyframes previewShiftViolet  { from { background-position: 100% 100%; } to { background-position: 45% 35%; } }
   .card .preview .icon {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     filter: drop-shadow(0 10px 30px #0008);
@@ -203,6 +211,7 @@
   .card[data-accent="amber"] .preview .icon svg   { color: var(--amber); }
   .card[data-accent="magenta"] .preview .icon svg { color: var(--magenta); }
   .card[data-accent="ice"] .preview .icon svg     { color: var(--ice); }
+  .card[data-accent="violet"] .preview .icon svg  { color: var(--violet); }
   @keyframes iconFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 
   /* dwell ring — filled by real mouse :hover (CSS) or by gesture dwell (JS) */
@@ -220,6 +229,7 @@
   .card[data-accent="amber"] .dwell circle.fill   { stroke: var(--amber); }
   .card[data-accent="magenta"] .dwell circle.fill { stroke: var(--magenta); }
   .card[data-accent="ice"] .dwell circle.fill     { stroke: var(--ice); }
+  .card[data-accent="violet"] .dwell circle.fill  { stroke: var(--violet); }
   .card:hover .dwell circle.fill { stroke-dashoffset: 0; }
   /* gesture-driven dwell writes stroke-dashoffset inline (JS) — no CSS transition then */
   .card.gesture-dwelling .dwell circle.fill { transition: none; }
@@ -374,6 +384,19 @@
           </div>
         </button>
 
+        <button class="card" type="button" data-accent="violet" data-href="magicdraw-display.html">
+          <div class="preview"><span class="icon">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8 19 13"/><path d="M15 9h.01"/><path d="M17.8 6.2 19 5"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/></svg>
+          </span></div>
+          <div class="dwell">
+            <svg aria-hidden="true" viewBox="0 0 46 46"><circle class="track" cx="23" cy="23" r="20"/><circle class="fill" cx="23" cy="23" r="20"/></svg>
+          </div>
+          <div class="body">
+            <h3 class="title">🪄 Magic Draw</h3>
+            <p class="desc">desenha no ar sobre o edifício — controla no tablet</p>
+          </div>
+        </button>
+
       </div>
     </section>
   </div>
@@ -444,6 +467,7 @@ const EXPERIENCES = [
   { name: "🌑 SALA DE SOMBRAS",  accent: "#f59e0b" },
   { name: "✍️ PINCH DRAW",       accent: "#ff4dd2" },
   { name: "🌬️ ENXAME",          accent: "#cbd5e1" },
+  { name: "🪄 MAGIC DRAW",       accent: "#a78bfa" },
 ];
 let expIdx = 0;
 function paintExperience(i) {
