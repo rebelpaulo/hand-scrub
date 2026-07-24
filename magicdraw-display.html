@@ -151,6 +151,9 @@ let currentState = { ...DEFAULT_STATE };
 // para um 2º painel de controlo aberto não conseguir esmagar a última escolha
 // humana com o keepalive de 3s de um estado mais antigo. Retro-compat: rev em falta = 0.
 let currentStateRev = 0;
+let lastStateSrc = null;   // desempate: em rev igual só o mesmo painel re-aplica (keepalive idempotente)
+let photoOnDisplay = false; // há foto congelada? — respondido ao 'hello' de um painel recarregado
+let zonesLive = false;      // já chegaram zonas ao vivo? o cloudLoad atrasado não as pode esmagar
 // pilhas de undo/redo do drawCanvas (FIX E) — declaradas cedo porque resize()
 // (chamado já no arranque) as limpa: snapshots presos ao tamanho antigo do
 // canvas deixam de bater certo depois de um resize.
@@ -294,6 +297,10 @@ const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let seq = 0;
 
 const bc = new BroadcastChannel("magicdraw:" + ROOM);
+// canal GLOBAL de zonas do edifício (partilhado com o mapping mode): edições
+// feitas na landing/shell chegam aqui ao vivo — herança nos dois sentidos.
+const bcZones = new BroadcastChannel("mapping-zones:" + ROOM);
+bcZones.onmessage = e => onMsg(e.data);
 let sbChannel = null; // null se o CDN falhar — o BroadcastChannel local continua a funcionar
 let sbReady = false;
 
@@ -326,6 +333,9 @@ bc.onmessage = e => onMsg(e.data);
     sbChannel.on("broadcast", { event: "msg" }, ({ payload }) => onMsg(payload)).subscribe(status => {
       if (status === "SUBSCRIBED") { sbReady = true; send("hello"); }
     });
+    // canal global de zonas (mapping mode) — mesma dedup (src,seq) absorve duplicados
+    sb.channel("mapping-zones:" + ROOM)
+      .on("broadcast", { event: "msg" }, ({ payload }) => onMsg(payload)).subscribe();
   } catch (e) { /* offline/CDN em baixo: fica só o canal local */ }
 })();
 send("hello"); // já dispara via BroadcastChannel de imediato; o supabase repete quando subscrito
@@ -340,7 +350,7 @@ window.__mdDebug = {
   get hasRedo() { return redoStack.length; },
   simulateStroke(hand, pts) {
     const st = handState[hand];
-    st.stroke = { pts: [], buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null, preSnap: snapshotDrawCanvas() };
+    st.stroke = { pts: [], buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null, preSnap: snapshotDrawCanvas(), brush: { ...currentState } };
     st.pinching = true; st.sx = undefined;
     for (const p of pts) onPinchPoint(hand, p);
     renderActiveStrokes();
@@ -359,7 +369,9 @@ function handleMsg(payload) {
     case "state": {
       const rev = payload.rev || 0;
       if (rev < currentStateRev) break; // mensagem mais velha (2º painel/keepalive atrasado): ignora
-      currentStateRev = rev;
+      // empate de rev de OUTRO painel (2 ações no mesmo ms): fica quem chegou primeiro, sem flip-flop
+      if (rev === currentStateRev && currentStateRev > 0 && payload.src !== lastStateSrc) break;
+      currentStateRev = rev; lastStateSrc = payload.src;
       currentState = { ...DEFAULT_STATE, ...payload.state };
       if (!gotFirstState) { gotFirstState = true; hint.hidden = true; }
       break;
@@ -369,14 +381,20 @@ function handleMsg(payload) {
       pushUndo(snapshotDrawCanvas()); // FIX E: o clear passa a ser desfazível (só o drawCanvas participa)
       dctx.clearRect(0, 0, W, H);
       sctx.clearRect(0, 0, W, H); // traço em curso (FIX B) também some
-      if (scope === "all") pctx.clearRect(0, 0, W, H);
+      if (scope === "all") { pctx.clearRect(0, 0, W, H); photoOnDisplay = false; }
       break;
     }
     case "photo":
+      photoOnDisplay = true; // otimista: a sequência congela ~4s depois
       startPhotoSequence();
+      break;
+    case "hello":
+      // um painel (re)carregado pergunta pelo mundo: diz-lhe se há foto congelada
+      send("dstate", { hasPhoto: photoOnDisplay });
       break;
     case "zones":
       // substitui o estado por completo (nunca deltas, mesmo padrão do 'state')
+      zonesLive = true;
       zones = (Array.isArray(payload.zones) ? payload.zones : []).map(normalizeZone);
       zoneEditing = !!payload.editing;
       renderZones();
@@ -396,7 +414,7 @@ async function loadZonesFromCloud() {
     });
     if (!r.ok) return;
     const cfg = (await r.json())[0]?.data;
-    if (cfg?.zones) { zones = cfg.zones.map(normalizeZone); zoneEditing = false; renderZones(); }
+    if (cfg?.zones && !zonesLive) { zones = cfg.zones.map(normalizeZone); zoneEditing = false; renderZones(); }
   } catch { /* offline: fica sem zonas até chegar uma mensagem 'zones' ao vivo */ }
 }
 loadZonesFromCloud();
@@ -591,7 +609,7 @@ function drawEraser(A, C, B, size) {
 // de PATH puros (neon/rainbow/marker/crayon) não passam por aqui — são
 // redesenhados por frame a partir do array completo de pontos (ver render loop).
 function incrementalSegment(strokeObj, A, C, B) {
-  const state = currentState;
+  const state = strokeObj.brush || currentState; // pincel do arranque do traço
   const segLen = dist(A, B);
   const n = (state.mirror && state.mirror > 0) ? state.mirror : 1;
   const cx = W / 2, cy = H / 2;
@@ -713,12 +731,14 @@ function onPinchPoint(hand, rawPt) {
 // curso) como path contínuo — FIX B. Chamado a cada rAF (loop()).
 function renderActiveStrokes() {
   sctx.clearRect(0, 0, W, H);
-  const state = currentState;
-  if (!PATH_TOOLS.has(state.tool)) return; // pincéis incrementais já vão direto ao drawCanvas
   for (const hand of ["Left", "Right"]) {
     const st = handState[hand];
     if (!st.pinching || !st.stroke || st.stroke.pts.length < 2) continue;
-    renderStrokePath(sctx, state.tool, st.stroke.pts, state.color, state.size, state.mirror);
+    // pincel CONGELADO no arranque do traço — trocar de ferramenta a meio de
+    // um pinch já não perde o troço desenhado nem muda o traço a meio
+    const b = st.stroke.brush || currentState;
+    if (!PATH_TOOLS.has(b.tool)) continue; // pincéis incrementais já vão direto ao drawCanvas
+    renderStrokePath(sctx, b.tool, st.stroke.pts, b.color, b.size, b.mirror);
   }
 }
 
@@ -728,9 +748,9 @@ function bakeStroke(st) {
   const strokeObj = st.stroke;
   if (!strokeObj) return;
   pushUndo(strokeObj.preSnap);
-  const state = currentState;
-  if (PATH_TOOLS.has(state.tool) && strokeObj.pts.length >= 2) {
-    renderStrokePath(dctx, state.tool, strokeObj.pts, state.color, state.size, state.mirror);
+  const b = strokeObj.brush || currentState; // pincel do arranque do traço
+  if (PATH_TOOLS.has(b.tool) && strokeObj.pts.length >= 2) {
+    renderStrokePath(dctx, b.tool, strokeObj.pts, b.color, b.size, b.mirror);
     resetCtx();
   }
 }
@@ -766,7 +786,7 @@ function processHands(res, now) {
     if (st.pinching && !was) {
       st.sx = undefined; // sem lag-in: primeiro ponto do traço é o ponto cru
       // preSnap: estado do drawCanvas ANTES deste traço — FIX E, o "antes" do undo
-      st.stroke = { pts: [], buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null, preSnap: snapshotDrawCanvas() };
+      st.stroke = { pts: [], buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null, preSnap: snapshotDrawCanvas(), brush: { ...currentState } };
     }
     if (st.pinching) {
       onPinchPoint(userHand, p);

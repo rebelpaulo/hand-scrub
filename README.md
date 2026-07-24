@@ -181,7 +181,7 @@ npx serve -l 8777
     nada) — abre um editor 16:9 onde se criam quadriláteros/polígonos
     (**➕ Criar zona**, N pontos ≥3: toca num "+" no meio de uma aresta para
     inserir um vértice, **− Ponto** remove o selecionado) ou **⭕ círculos**
-    (elipse com pegas de centro, raio-X e raio-Y, esta última também roda a
+    (elipse com pegas de centro, raio-X e raio-Y — a do raio-X também roda a
     forma). **◠ Curvas** converte o contorno reto num spline Catmull-Rom
     fechado. No display estas zonas ficam **acima de tudo** (foto, desenho,
     cursores, flash): a vermelho translúcido com pegas enquanto o admin edita

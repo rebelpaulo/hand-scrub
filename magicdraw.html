@@ -246,6 +246,11 @@ let seq = 0;
 
 const bc = new BroadcastChannel("magicdraw:" + ROOM);
 bc.onmessage = e => onMsg(e.data);
+// canal GLOBAL de zonas do edifício: o shell display.html (mapping mode) escuta
+// aqui — as zonas editadas neste admin chegam-lhe ao vivo, e vice-versa.
+const bcZones = new BroadcastChannel("mapping-zones:" + ROOM);
+bcZones.onmessage = e => onMsg(e.data);
+let sbZonesChannel = null;
 
 const SB_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
@@ -257,6 +262,8 @@ let sbChannel = null;
   try {
     const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
     const sb = createClient(SB_URL, SB_KEY);
+    sbZonesChannel = sb.channel("mapping-zones:" + ROOM);
+    sbZonesChannel.on("broadcast", { event: "msg" }, ({ payload }) => onMsg(payload)).subscribe();
     sbChannel = sb.channel("magicdraw:" + ROOM);
     sbChannel
       .on("broadcast", { event: "msg" }, ({ payload }) => onMsg(payload))
@@ -287,12 +294,14 @@ function onMsg(msg) {
   if (msg.kind === "state") lastSeenRev = Math.max(lastSeenRev, msg.rev || 0); // outro controlo: só acerta o relógio lógico, NUNCA adota a UI daqui
   if (msg.kind === "photo") hasPhoto = true;
   if (msg.kind === "clear" && (!msg.scope || msg.scope === "all")) hasPhoto = false;
+  if (msg.kind === "dstate") hasPhoto = !!msg.hasPhoto; // resposta do display ao nosso 'hello' — painel recarregado recupera o estado da foto
 }
 
 function send(payload) {
   const msg = { v: 1, src: CLIENT_ID, seq: seq++, ...payload };
   bc.postMessage(msg);
   sbChannel?.send({ type: "broadcast", event: "msg", payload: msg });
+  return msg; // para replicar a MESMA mensagem (mesma seq) noutro canal
 }
 
 /* ================= estado ================= */
@@ -699,13 +708,20 @@ function zonesCloudSave() {
 /* ---- emissão em tempo real (protocolo kind:'zones', mesmos dois canais) ---- */
 const r4 = n => +n.toFixed(4);
 function sendZones(editing) {
-  send({
+  const payload = {
     kind: "zones",
     zones: zones.map(z => z.type === "ellipse"
       ? { id: z.id, type: "ellipse", cx: r4(z.cx), cy: r4(z.cy), rx: r4(z.rx), ry: r4(z.ry), rot: r4(z.rot || 0), mode: z.mode || "occlude" }
       : { id: z.id, type: "poly", pts: z.pts.map(([x, y]) => [r4(x), r4(y)]), smooth: !!z.smooth, mode: z.mode || "occlude" }),
     editing,
-  });
+  };
+  const msg = send(payload); // canal do magic draw (ganha v/src/seq)
+  // replica a MESMA mensagem (mesma seq) no canal global de zonas — o dedup
+  // (src,seq) anula a duplicação em quem escuta os dois canais.
+  try { bcZones.postMessage(msg); } catch { /* indisponível — segue local */ }
+  if (sbZonesChannel) {
+    try { sbZonesChannel.send({ type: "broadcast", event: "msg", payload: msg }); } catch { /* ignora */ }
+  }
 }
 // throttle ~80ms durante drags (leading + trailing, para não perder o último ponto)
 let zonesThrottleTimer = null, zonesThrottlePending = false;
@@ -1030,6 +1046,7 @@ zonesCloudLoad(); // hidrata zonas guardadas antes de o admin abrir pela 1ª vez
 /* ================= arranque ================= */
 renderBrushes(); renderColors(); renderSizes(); renderMirrors(); renderPreview();
 sendState(); // estado inicial emitido no arranque
+send({ kind: "hello" }); // pergunta ao display se há foto congelada (responde 'dstate')
 
 /* ================= teclado ================= */
 document.addEventListener("keydown", e => {
