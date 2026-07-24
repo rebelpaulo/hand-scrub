@@ -137,27 +137,41 @@
   }
 
   /* ============================================================ SELECTOR */
+  /* o body é overflow:hidden — o que não couber na altura CORTA. Por isso o
+     grid dos cartões usa altura fluida (flex:1 + grid-auto-rows:1fr): a
+     área dos cartões ocupa exatamente o espaço livre debaixo do cabeçalho,
+     e cada linha (1 ou 2, conforme as colunas) divide esse espaço — nunca
+     transborda, independentemente do viewport. */
   .view-selector {
     background: radial-gradient(1400px 900px at 50% 0%, #0b0f18, #020304 70%);
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: clamp(20px, 4vh, 48px); padding: 4vw;
+    display: flex; flex-direction: column; align-items: center;
+    gap: clamp(10px, 2vh, 28px); padding: clamp(12px, 2.6vh, 4vw) 4vw;
+    height: 100%;
   }
-  .selector-head { text-align: center; }
+  .selector-head { text-align: center; flex: 0 0 auto; }
   .selector-head .eyebrow {
     font-size: clamp(11px, 1vw, 14px); font-weight: 700; letter-spacing: .28em;
     color: var(--muted); text-transform: uppercase; margin: 0 0 8px;
   }
   .selector-head h2 {
-    margin: 0; font-size: clamp(28px, 4vw, 54px); font-weight: 900;
+    margin: 0; font-size: clamp(22px, 4vw, 54px); font-weight: 900;
     letter-spacing: -0.01em; color: var(--text);
   }
   .cards {
-    display: flex; gap: clamp(16px, 2vw, 32px); width: 100%; max-width: 920px;
-    justify-content: center; flex-wrap: wrap;
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-auto-rows: minmax(0, 1fr);
+    gap: clamp(8px, 1.4vh, 24px); width: 100%; max-width: 1440px;
+    flex: 1 1 auto; min-height: 0;
+  }
+  /* 5 colunas em ecrãs largos; 3+2 em médios (tablets); coluna única só em
+     portrait estreito (telemóvel) — ver degrade mais abaixo. */
+  @media (max-width: 1200px) {
+    .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   }
   .card {
-    position: relative; flex: 1 1 320px; max-width: 420px; min-width: 260px;
-    border-radius: 20px; overflow: hidden; cursor: pointer;
+    position: relative; display: flex; flex-direction: column;
+    height: 100%; min-height: 0; overflow: hidden;
+    border-radius: 20px; cursor: pointer;
     border: 1px solid var(--line); background: #0a0d13; text-align: left;
     padding: 0; appearance: none; color: inherit; font-family: inherit;
     transition: transform .3s ease-out, border-color .3s ease-out, box-shadow .3s ease-out;
@@ -175,7 +189,10 @@
   .card[data-accent="ice"].selected     { border-color: var(--ice);     box-shadow: 0 0 0 2px #cbd5e155, 0 30px 70px -20px #cbd5e133; }
   .card[data-accent="violet"].selected  { border-color: var(--violet);  box-shadow: 0 0 0 2px #a78bfa55, 0 30px 70px -20px #a78bfa33; }
 
-  .card .preview { position: relative; aspect-ratio: 16/10; overflow: hidden; }
+  /* sem aspect-ratio fixo: o preview cresce/encolhe (flex) para caber na
+     linha do grid, seja 1 ou 2 linhas — garante que os 5 cartões cabem
+     sempre no ecrã sem cortar. */
+  .card .preview { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
   .card[data-accent="teal"] .preview {
     background: radial-gradient(120% 120% at 20% 20%, #123b34, #05100e 70%);
     animation: previewShiftTeal 9s ease-in-out infinite alternate;
@@ -234,13 +251,16 @@
   /* gesture-driven dwell writes stroke-dashoffset inline (JS) — no CSS transition then */
   .card.gesture-dwelling .dwell circle.fill { transition: none; }
 
-  .card .body { padding: 18px 20px 22px; }
+  .card .body {
+    flex: 0 0 auto; overflow: hidden;
+    padding: clamp(8px, 1.6vh, 18px) clamp(12px, 1.4vw, 20px) clamp(10px, 1.8vh, 22px);
+  }
   .card .body .title {
-    margin: 0 0 6px; font-size: clamp(20px, 1.8vw, 28px); font-weight: 800;
+    margin: 0 0 4px; font-size: clamp(15px, 1.8vw, 28px); font-weight: 800;
     color: var(--text); letter-spacing: -0.01em;
   }
   .card .body .desc {
-    margin: 0; font-size: clamp(13px, 1vw, 15px); color: var(--muted); line-height: 1.5;
+    margin: 0; font-size: clamp(11.5px, 1vw, 15px); color: var(--muted); line-height: 1.4;
   }
 
   /* ============================================================ hand cursor */
@@ -291,10 +311,118 @@
   @media (max-width: 720px) {
     .ghost-hand-wrap { width: 46vw; right: 6vw; top: 40%; }
     .scene-tag h1 { font-size: clamp(34px, 12vw, 60px); }
-    .cards { flex-direction: column; align-items: stretch; }
-    .card { max-width: 100%; }
+    /* portrait estreito (telemóvel): coluna única — cada linha continua a
+       dividir a altura livre (grid-auto-rows:1fr), por isso cabe sem cortar */
+    .cards { grid-template-columns: 1fr; }
     #camPip { width: 110px; }
   }
+
+  /* ============================================================ MAPPING MODE — hotspot secreto */
+  /* hotspot invisível no canto inferior direito — sem qualquer traço visual,
+     só existe para ser mantido premido 10s (ver script). */
+  #mapHotspot {
+    position: fixed; right: 0; bottom: 0; width: 72px; height: 72px;
+    z-index: 500; background: transparent; touch-action: none;
+  }
+  /* hotspot invisível no canto SUPERIOR direito — máquina do projetor: 3s
+     mandam direto para display.html. Canto diferente do #mapHotspot (10s,
+     inferior) para nunca se sobreporem/conflituarem. */
+  #displayHotspot {
+    position: fixed; right: 0; top: 0; width: 72px; height: 72px;
+    z-index: 500; background: transparent; touch-action: none;
+  }
+
+  /* ============================================================ MAPPING MODE — diálogos/overlays */
+  .map-overlay {
+    position: fixed; inset: 0; z-index: 600; display: flex;
+    align-items: center; justify-content: center; padding: 4vw;
+    background: #000000cc; backdrop-filter: blur(6px);
+  }
+  .map-overlay[hidden] { display: none; }
+  .map-modal {
+    width: min(440px, 100%); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 18px; padding: 26px 28px; box-shadow: 0 30px 80px -20px #000c;
+    color: var(--text); max-height: 86vh; overflow-y: auto;
+  }
+  .map-modal h3 { margin: 0 0 14px; font-size: 18px; }
+  .map-modal p { margin: 0 0 18px; font-size: 15px; line-height: 1.5; }
+  .map-modal ol { margin: 0 0 18px; padding-left: 20px; font-size: 14px; line-height: 1.6; color: var(--muted); }
+  .map-modal ol code { color: var(--accent); }
+  .map-modal-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+
+  .map-btn {
+    appearance: none; cursor: pointer; font-family: inherit; font-weight: 700;
+    font-size: 13.5px; color: var(--text); background: #161b26; border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 16px; transition: border-color .2s, background .2s;
+  }
+  .map-btn:hover { border-color: var(--accent-2); }
+  .map-btn.primary { background: var(--accent); color: #04211c; border-color: var(--accent); }
+  .map-btn.primary:hover { filter: brightness(1.08); }
+  .map-btn.on { background: var(--hot); color: #2a0410; border-color: var(--hot); }
+
+  /* ============================================================ MAPPING MODE — painel de controlo */
+  .view-mapping {
+    background: radial-gradient(1400px 900px at 50% 0%, #0b0f18, #020304 70%);
+    display: flex; flex-direction: column; gap: 18px; padding: clamp(16px, 2.4vw, 32px);
+    overflow-y: auto; overflow-x: hidden;
+  }
+  .map-top {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; padding-bottom: 14px; border-bottom: 1px solid var(--line);
+  }
+  .map-title { margin: 0 0 4px; font-size: 14px; font-weight: 800; letter-spacing: .04em; }
+  .map-indicator { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .map-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  .map-body { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; flex: 1; min-height: 0; }
+  @media (orientation: portrait) { .map-body { grid-template-columns: 1fr; } }
+
+  .map-apps { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .map-card {
+    display: flex; align-items: center; gap: 14px; text-align: left; width: 100%;
+    padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line);
+    background: #0a0d13; cursor: pointer; appearance: none; color: inherit; font-family: inherit;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .map-card .icon { width: 34px; height: 34px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+  .map-card .icon svg { width: 22px; height: 22px; }
+  .map-card .txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .map-card .txt .t { font-weight: 800; font-size: 15.5px; }
+  .map-card .txt .d { font-size: 12px; color: var(--muted); }
+  .map-card[data-accent="teal"] .icon svg    { color: var(--accent); }
+  .map-card[data-accent="amber"] .icon svg   { color: var(--amber); }
+  .map-card[data-accent="magenta"] .icon svg { color: var(--magenta); }
+  .map-card[data-accent="ice"] .icon svg     { color: var(--ice); }
+  .map-card[data-accent="violet"] .icon svg  { color: var(--violet); }
+  .map-card[data-accent="teal"]:hover,    .map-card[data-accent="teal"].active    { border-color: var(--accent); }
+  .map-card[data-accent="amber"]:hover,   .map-card[data-accent="amber"].active   { border-color: var(--amber); }
+  .map-card[data-accent="magenta"]:hover, .map-card[data-accent="magenta"].active { border-color: var(--magenta); }
+  .map-card[data-accent="ice"]:hover,     .map-card[data-accent="ice"].active     { border-color: var(--ice); }
+  .map-card[data-accent="violet"]:hover,  .map-card[data-accent="violet"].active  { border-color: var(--violet); }
+  .map-card[data-accent="teal"].active    { box-shadow: 0 0 0 2px #5eead455; }
+  .map-card[data-accent="amber"].active   { box-shadow: 0 0 0 2px #f59e0b55; }
+  .map-card[data-accent="magenta"].active { box-shadow: 0 0 0 2px #ff4dd255; }
+  .map-card[data-accent="ice"].active     { box-shadow: 0 0 0 2px #cbd5e155; }
+  .map-card[data-accent="violet"].active  { box-shadow: 0 0 0 2px #a78bfa55; }
+
+  .map-detail {
+    border: 1px solid var(--line); border-radius: 18px; background: var(--panel);
+    padding: clamp(20px, 2.6vw, 32px); overflow-y: auto; min-width: 0;
+  }
+  .map-detail .placeholder { color: var(--muted); font-size: 15px; }
+  .map-detail h2 { margin: 0 0 12px; font-size: clamp(24px, 2.6vw, 36px); }
+  .map-detail .expl { margin: 0 0 22px; font-size: 16px; line-height: 1.6; }
+  .map-scenes { display: flex; flex-wrap: wrap; gap: 10px; }
+  .map-scenes[hidden] { display: none; }
+  .map-chip {
+    appearance: none; cursor: pointer; font-family: inherit; font-weight: 700; font-size: 14px;
+    color: var(--text); background: #161b26; border: 1px solid var(--line); border-radius: 99px;
+    padding: 10px 18px; transition: border-color .2s, box-shadow .2s;
+  }
+  .map-chip:hover { border-color: var(--accent); }
+  .map-chip.active { border-color: var(--accent); box-shadow: 0 0 0 2px #5eead455; }
+  .map-open-magicdraw { display: inline-block; text-decoration: none; margin-top: 6px; }
+  .map-open-magicdraw[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -384,7 +512,7 @@
           </div>
         </button>
 
-        <button class="card" type="button" data-accent="violet" data-href="magicdraw-display.html">
+        <button class="card" type="button" data-accent="violet" data-href="magicdraw.html">
           <div class="preview"><span class="icon">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8 19 13"/><path d="M15 9h.01"/><path d="M17.8 6.2 19 5"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/></svg>
           </span></div>
@@ -393,10 +521,60 @@
           </div>
           <div class="body">
             <h3 class="title">🪄 Magic Draw</h3>
-            <p class="desc">desenha no ar sobre o edifício — controla no tablet</p>
+            <p class="desc">desenha no ar sobre o edifício — abre o painel e controla</p>
           </div>
         </button>
 
+      </div>
+    </section>
+
+    <!-- ================= MAPPING MODE — painel de controlo da projeção ================= -->
+    <section class="view view-mapping" id="viewMapping" hidden>
+      <div class="map-top">
+        <div>
+          <p class="map-title">🗺️ MAPPING MODE · room <span id="mapRoomLabel"></span></p>
+          <p class="map-indicator" id="mapIndicator">🟡 só local</p>
+        </div>
+        <div class="map-actions">
+          <button type="button" class="map-btn" id="mapSetupBtn">⚙️ Setup</button>
+          <button type="button" class="map-btn" id="mapCamBtn">👁 Preview câmara</button>
+          <button type="button" class="map-btn" id="mapHomeBtn">⬛ Ecrã preto</button>
+        </div>
+      </div>
+
+      <div class="map-body">
+        <div class="map-apps" id="mapApps">
+          <button type="button" class="map-card" data-accent="teal" data-app="scrub">
+            <span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5c-1-3-4-3-5-1-1 2 0 4 2 5 1.5.8 2.5 2 3 4"/><path d="M12 5c1-3 4-3 5-1 1 2 0 4-2 5-1.5.8-2.5 2-3 4"/><path d="M12 9c-2 1-4 3-4 6 0 2 1 4 4 4"/><path d="M12 9c2 1 4 3 4 6 0 2-1 4-4 4"/><line x1="12" y1="4" x2="12" y2="21"/></svg></span>
+            <span class="txt"><span class="t">🦋 Butterfly Effect</span><span class="d">toca para abrir no ecrã</span></span>
+          </button>
+          <button type="button" class="map-card" data-accent="amber" data-app="shadow">
+            <span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></span>
+            <span class="txt"><span class="t">🌑 Sala de Sombras</span><span class="d">toca para abrir no ecrã</span></span>
+          </button>
+          <button type="button" class="map-card" data-accent="magenta" data-app="draw">
+            <span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19 7-7 3 3-7 7-3-3z"/><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="m2 2 7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg></span>
+            <span class="txt"><span class="t">✍️ Pinch Draw</span><span class="d">toca para abrir no ecrã</span></span>
+          </button>
+          <button type="button" class="map-card" data-accent="ice" data-app="enxame">
+            <span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.59 4.59A2 2 0 1 1 11 8H2"/><path d="M12.59 11.59A2 2 0 1 1 14 15H2"/><path d="M17.6 6.6A1 1 0 1 1 19 8H2"/></svg></span>
+            <span class="txt"><span class="t">🌬️ Enxame</span><span class="d">toca para abrir no ecrã</span></span>
+          </button>
+          <button type="button" class="map-card" data-accent="violet" data-app="magicdraw">
+            <span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8 19 13"/><path d="M15 9h.01"/><path d="M17.8 6.2 19 5"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/></svg></span>
+            <span class="txt"><span class="t">🪄 Magic Draw</span><span class="d">toca para abrir no ecrã</span></span>
+          </button>
+        </div>
+
+        <div class="map-detail" id="mapDetail">
+          <p class="placeholder" id="mapDetailPlaceholder">Escolhe uma experiência à esquerda para a abrir no ecrã de projeção.</p>
+          <div id="mapDetailContent" hidden>
+            <h2 class="display" id="mapDetailTitle"></h2>
+            <p class="expl" id="mapDetailDesc"></p>
+            <div class="map-scenes" id="mapScenes" hidden></div>
+            <a class="map-btn primary map-open-magicdraw" id="mapOpenMagicdraw" href="magicdraw.html" hidden>abrir painel de desenho →</a>
+          </div>
+        </div>
       </div>
     </section>
   </div>
@@ -412,6 +590,38 @@
 
   <div id="notice"></div>
 
+  <!-- hotspot invisível (canto superior direito): 3s manda para display.html —
+       é para a máquina do projetor, corner diferente do mapping mode abaixo -->
+  <div id="displayHotspot" aria-hidden="true"></div>
+
+  <!-- ================= MAPPING MODE — hotspot secreto + diálogos ================= -->
+  <div id="mapHotspot" aria-hidden="true"></div>
+
+  <div class="map-overlay" id="mapConfirm" hidden>
+    <div class="map-modal">
+      <p id="mapConfirmText"></p>
+      <div class="map-modal-actions">
+        <button type="button" class="map-btn" id="mapConfirmCancel"></button>
+        <button type="button" class="map-btn primary" id="mapConfirmOk"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="map-overlay" id="mapSetup" hidden>
+    <div class="map-modal">
+      <h3>⚙️ Setup do mapping mode</h3>
+      <ol>
+        <li>Abre <code>display.html</code> no computador do projetor (mesmo <code>?room=</code>).</li>
+        <li>Define as zonas do edifício no admin do Magic Draw (⚙️ 3s no painel de desenho).</li>
+        <li>Volta aqui e escolhe a experiência.</li>
+      </ol>
+      <div class="map-modal-actions">
+        <button type="button" class="map-btn" id="mapCopyUrlBtn">📋 copiar URL do display</button>
+        <button type="button" class="map-btn primary" id="mapSetupClose">Fechar</button>
+      </div>
+    </div>
+  </div>
+
 <script type="module">
 // Links legados partilhados apontam para a raiz como /#cfg=... — antes desta
 // home, a raiz ERA a app do Butterfly Effect. Encaminha-os direto lá.
@@ -421,7 +631,7 @@ if (/^#cfg=/.test(location.hash)) {
 
 const $ = id => document.getElementById(id);
 const stage = $("stage");
-const viewAttract = $("viewAttract"), viewSelector = $("viewSelector");
+const viewAttract = $("viewAttract"), viewSelector = $("viewSelector"), viewMapping = $("viewMapping");
 const attractName = $("attractName"), sceneTag = document.querySelector(".scene-tag");
 const cards = [...document.querySelectorAll(".card")];
 const cam = $("cam"), overlay = $("overlay"), octx = overlay.getContext("2d");
@@ -440,6 +650,7 @@ function setView(name) {
   view = name;
   viewAttract.hidden = name !== "attract";
   viewSelector.hidden = name !== "selector";
+  viewMapping.hidden = name !== "mapping";
 }
 function goSelector() { setView("selector"); }
 
@@ -605,6 +816,7 @@ function loop() {
 }
 
 function processHands(res, now) {
+  if (view === "mapping") return; // painel de controlo não usa o cursor gestual
   // a gap between processed frames (tab suspend, MediaPipe hiccup) must not
   // let a stale hold insta-activate on the returning frame — reset the dwell.
   const stalled = lastFrameAt && (now - lastFrameAt > FRAME_STALL_MS);
@@ -704,6 +916,258 @@ function resetHover() {
   hoverCard = null;
   holdStart = 0;
 }
+
+/* ============================================================ MAPPING MODE
+   painel de controlo remoto: escolher um cartão deixa de navegar e passa a
+   mandar a experiência abrir no display.html remoto (BroadcastChannel +
+   Supabase Realtime). Tudo o que precisa de DOM/rede fica atrás do flag —
+   o modo normal da landing (attract/seletor) não muda em nada. */
+let mappingMode = localStorage.getItem("mappingMode") === "1";
+const mapHotspot = $("mapHotspot");
+const mapConfirm = $("mapConfirm"), mapConfirmText = $("mapConfirmText");
+const mapConfirmOk = $("mapConfirmOk"), mapConfirmCancel = $("mapConfirmCancel");
+const mapSetup = $("mapSetup"), mapSetupClose = $("mapSetupClose"), mapCopyUrlBtn = $("mapCopyUrlBtn");
+const mapSetupBtn = $("mapSetupBtn"), mapCamBtn = $("mapCamBtn"), mapHomeBtn = $("mapHomeBtn");
+const mapRoomLabel = $("mapRoomLabel"), mapIndicator = $("mapIndicator");
+const mapAppsEl = $("mapApps"), mapDetailPlaceholder = $("mapDetailPlaceholder"), mapDetailContent = $("mapDetailContent");
+const mapDetailTitle = $("mapDetailTitle"), mapDetailDesc = $("mapDetailDesc");
+const mapScenesEl = $("mapScenes"), mapOpenMagicdraw = $("mapOpenMagicdraw");
+
+/* ---------- contrato de sync (pinado — display.html implementa isto à letra) ---------- */
+const ROOM = (new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "") || "default";
+const MAP_SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
+const MAP_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
+const MAP_CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
+let mapSeq = 0, mapBc = null, mapSbChannel = null, mapSbReady = false, mapSyncStarted = false;
+// campreview começa ON: é o default das experiências ao abrir — assim o botão
+// reflete a realidade e o 1º toque esconde de facto (T28b finding 3)
+let mapWired = false, mapActiveApp = null, mapCamPreviewOn = true, mapActiveScene = null;
+
+function mapSend(kind, extra = {}) {
+  const payload = { v: 1, src: MAP_CLIENT_ID, seq: ++mapSeq, kind, ...extra };
+  try { mapBc && mapBc.postMessage(payload); } catch (e) { /* canal indisponível — ignora */ }
+  if (mapSbReady) {
+    try { mapSbChannel.send({ type: "broadcast", event: "msg", payload }); } catch (e) { /* ignora */ }
+  }
+}
+
+// dedup: as mensagens chegam pelos DOIS canais — ignora repetições e as próprias.
+const mapLastSeqBySrc = new Map();
+function mapOnMsg(payload) {
+  if (!payload || payload.v !== 1 || payload.src === MAP_CLIENT_ID) return;
+  const last = mapLastSeqBySrc.get(payload.src) ?? -1;
+  if (payload.seq <= last) return;
+  mapLastSeqBySrc.set(payload.src, payload.seq);
+  mapHandleMsg(payload);
+}
+
+function mapHandleMsg(payload) {
+  switch (payload.kind) {
+    case "hello":
+      // o display pediu o estado atual — reenvia o que está selecionado agora
+      if (mapActiveApp) mapSend("open", { app: mapActiveApp });
+      mapSend("campreview", { on: mapCamPreviewOn });
+      break;
+    case "status":
+      setMapActiveApp(payload.app || null);
+      break;
+  }
+}
+
+function updateMapIndicator() {
+  mapIndicator.textContent = mapSbReady ? "🟢 ligado" : "🟡 só local";
+}
+
+function initMappingSync() {
+  if (mapSyncStarted) return;
+  mapSyncStarted = true;
+  mapBc = new BroadcastChannel("mapping:" + ROOM);
+  mapBc.onmessage = e => mapOnMsg(e.data);
+  // import dinâmico guardado (mesmo padrão de magicdraw-display.html): uma
+  // falha do CDN não pode impedir o painel de funcionar — o BroadcastChannel
+  // local continua a mandar 'open'/'home'/'campreview'/'scene'.
+  (async () => {
+    try {
+      const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
+      const sb = createClient(MAP_SUPABASE_URL, MAP_SUPABASE_ANON_KEY);
+      mapSbChannel = sb.channel("mapping:" + ROOM);
+      mapSbChannel.on("broadcast", { event: "msg" }, ({ payload }) => mapOnMsg(payload)).subscribe(status => {
+        if (status === "SUBSCRIBED") { mapSbReady = true; updateMapIndicator(); mapSend("hello"); }
+      });
+    } catch (e) { /* offline/CDN em baixo: fica só o canal local */ }
+  })();
+  updateMapIndicator();
+}
+
+/* ---------- explicações das experiências (PT-PT, tom festival) ---------- */
+const MAP_APPS = {
+  scrub: {
+    title: "🦋 Butterfly Effect",
+    desc: "A tua mão controla o tempo. Abre os dedos e o vídeo avança; fecha-os e ele recua — como se tivesses o tempo na palma da mão. Escolhe uma cena no menu ao lado e deixa o público redescobrir o momento exato da transformação.",
+  },
+  shadow: {
+    title: "🌑 Sala de Sombras",
+    desc: "A tua sombra ganha vida dentro de uma sala em 3D projetada na parede. Move as mãos e o corpo e vê a sombra reagir ao espaço, ganhar volume e brincar com a luz — teatro de sombras que sai do plano.",
+  },
+  draw: {
+    title: "✍️ Pinch Draw",
+    desc: "Aperta o polegar contra o indicador e desenha traços de luz no ar. Larga o gesto para levantar o lápis — cada visitante assina o edifício com o próprio corpo, sem tocar em nada.",
+  },
+  enxame: {
+    title: "🌬️ Enxame",
+    desc: "Milhares de partículas de luz seguem as tuas mãos como um enxame vivo. Empurra o ar, faz redemoinhos, abre caminho — a nuvem responde em tempo real a cada gesto de quem está à frente.",
+  },
+  magicdraw: {
+    title: "🪄 Magic Draw",
+    desc: "Desenha diretamente sobre a fachada do edifício, mapeada zona a zona. O controlo do desenho fica no tablet — abre o painel para escolher cores, apagar traços e gerir as zonas da projeção.",
+  },
+};
+// ordem confirmada em scrub.html (const SCENES) — os índices têm de bater certo
+const MAP_SCENES = ["🚀 Foguetão", "☢️ Bomba atómica", "🌹 Rosa", "🌼 Peónia", "📄 Origami", "🌊 Moisés"];
+
+/* ---------- estado + ações do painel ---------- */
+function setMapActiveApp(appId) {
+  mapActiveApp = appId;
+  mapAppsEl.querySelectorAll(".map-card").forEach(c => c.classList.toggle("active", c.dataset.app === appId));
+  renderMapDetail(appId);
+}
+function openMapApp(appId) {
+  setMapActiveApp(appId);
+  mapSend("open", { app: appId });
+}
+function mapGoHome() {
+  mapSend("home");
+  setMapActiveApp(null);
+}
+function toggleMapCamPreview() {
+  mapCamPreviewOn = !mapCamPreviewOn;
+  mapSend("campreview", { on: mapCamPreviewOn });
+  mapCamBtn.classList.toggle("on", mapCamPreviewOn);
+}
+function sendMapScene(i) {
+  mapActiveScene = i;
+  mapSend("scene", { i });
+  mapScenesEl.querySelectorAll(".map-chip").forEach(ch => ch.classList.toggle("active", Number(ch.dataset.i) === i));
+}
+
+function renderMapDetail(appId) {
+  const info = appId && MAP_APPS[appId];
+  mapDetailPlaceholder.hidden = !!info;
+  mapDetailContent.hidden = !info;
+  if (!info) return;
+  mapDetailTitle.textContent = info.title;
+  mapDetailDesc.textContent = info.desc;
+  mapScenesEl.hidden = appId !== "scrub";
+  mapOpenMagicdraw.hidden = appId !== "magicdraw";
+}
+
+function buildMapScenes() {
+  mapScenesEl.innerHTML = "";
+  MAP_SCENES.forEach((name, i) => {
+    const chip = document.createElement("button");
+    chip.type = "button"; chip.className = "map-chip"; chip.dataset.i = i;
+    chip.textContent = name;
+    chip.addEventListener("click", () => sendMapScene(i));
+    mapScenesEl.appendChild(chip);
+  });
+}
+
+function displayUrl() {
+  return location.origin + "/display.html" + (ROOM !== "default" ? "?room=" + ROOM : "");
+}
+async function copyDisplayUrl() {
+  const url = displayUrl();
+  const original = mapCopyUrlBtn.textContent;
+  try {
+    await navigator.clipboard.writeText(url);
+    mapCopyUrlBtn.textContent = "✅ copiado!";
+  } catch (e) {
+    mapCopyUrlBtn.textContent = "⚠️ copia manual: " + url;
+  }
+  setTimeout(() => { mapCopyUrlBtn.textContent = original; }, 2000);
+}
+function openMapSetup() { mapSetup.hidden = false; }
+
+// wiring do painel só acontece na 1ª ativação do mapping mode — em modo
+// normal nada disto corre.
+function wireMapUI() {
+  if (mapWired) return;
+  mapWired = true;
+  buildMapScenes();
+  mapAppsEl.querySelectorAll(".map-card").forEach(card => {
+    card.addEventListener("click", () => openMapApp(card.dataset.app));
+  });
+  mapCamBtn.addEventListener("click", toggleMapCamPreview);
+  mapCamBtn.classList.toggle("on", mapCamPreviewOn); // estado visual inicial coerente
+  mapHomeBtn.addEventListener("click", mapGoHome);
+  mapSetupBtn.addEventListener("click", openMapSetup);
+  mapSetupClose.addEventListener("click", () => { mapSetup.hidden = true; });
+  mapCopyUrlBtn.addEventListener("click", copyDisplayUrl);
+}
+
+/* ---------- entrar/sair do mapping mode ---------- */
+function activateMappingView() {
+  mapRoomLabel.textContent = ROOM;
+  wireMapUI();
+  setView("mapping");
+  initMappingSync();
+}
+function enterMapping() {
+  localStorage.setItem("mappingMode", "1");
+  mappingMode = true;
+  activateMappingView();
+  openMapSetup(); // instruções de setup aparecem primeiro, como pedido
+}
+function exitMapping() {
+  localStorage.removeItem("mappingMode");
+  mappingMode = false;
+  setView("attract");
+}
+
+/* ---------- diálogo de confirmação genérico (entrar/sair) ---------- */
+function showMapConfirm(text, okLabel, cancelLabel, onOk) {
+  mapConfirmText.textContent = text;
+  mapConfirmOk.textContent = okLabel;
+  mapConfirmCancel.textContent = cancelLabel;
+  mapConfirm.hidden = false;
+  mapConfirmOk.onclick = () => { mapConfirm.hidden = true; onOk(); };
+  mapConfirmCancel.onclick = () => { mapConfirm.hidden = true; };
+}
+
+/* ---------- hotspot invisível genérico: manter premido N ms dispara onFire,
+   cancela se largar ou mover demais. Dois hotspots usam isto (cantos
+   diferentes, timers independentes — nunca conflituam). ---------- */
+function wireHoldHotspot(el, ms, onFire) {
+  const TOL = 16; // px — mover mais do que isto cancela o hold
+  let timer = 0, sx = 0, sy = 0;
+  function onMove(e) { if (Math.hypot(e.clientX - sx, e.clientY - sy) > TOL) cancel(); }
+  function cancel() { clearTimeout(timer); timer = 0; document.removeEventListener("pointermove", onMove); }
+  el.addEventListener("pointerdown", e => {
+    sx = e.clientX; sy = e.clientY;
+    document.addEventListener("pointermove", onMove);
+    timer = setTimeout(() => { cancel(); onFire(); }, ms);
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach(ev => el.addEventListener(ev, cancel));
+}
+
+/* canto inferior direito, 10s: liga/desliga o mapping mode */
+const HOTSPOT_HOLD_MS = 10000;
+wireHoldHotspot(mapHotspot, HOTSPOT_HOLD_MS, () => {
+  if (mappingMode) {
+    showMapConfirm("Sair do mapping mode?", "Sair", "Cancelar", exitMapping);
+  } else {
+    showMapConfirm("MAPPING MODE — configurar esta instalação?", "OK", "Fechar", enterMapping);
+  }
+});
+
+/* canto superior direito, 3s: máquina do projetor — vai direto para o
+   display.html (preserva ?room= se existir), sem diálogo de confirmação */
+const DISPLAY_HOTSPOT_HOLD_MS = 3000;
+const displayHotspot = $("displayHotspot");
+wireHoldHotspot(displayHotspot, DISPLAY_HOTSPOT_HOLD_MS, () => { location.href = displayUrl(); });
+
+/* ---------- arranque: se o mapping mode já estava ativo, salta o attract ---------- */
+if (mappingMode) activateMappingView();
 </script>
 </body>
 </html>

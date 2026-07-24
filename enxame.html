@@ -1187,6 +1187,14 @@ async function start() {
   }
 }
 start();
+
+/* ================= ponte postMessage (shell de projeção) ================= */
+if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
+window.addEventListener("message", e => {
+  if (e.origin !== location.origin || e.data?.mapping !== 1) return;
+  // esconde só o vídeo de fundo (fica preto) — tracking/segmentação/partículas continuam
+  if (e.data.cmd === "campreview") camBg.style.opacity = e.data.on ? "" : "0";
+});
 </script>
 </body>
 </html>

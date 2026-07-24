@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mapping — ecrã de projeção</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: #eef2f8; }
+
+  /* ---------- camadas (baixo → cima) ---------- */
+  iframe#stage {
+    position: fixed; inset: 0; width: 100%; height: 100%; z-index: 1;
+    border: 0; display: none; background: #000;
+    transform-origin: 0 0; /* base do keystone (matrix3d aplicada aqui) */
+  }
+  iframe#stage.on { display: block; }
+
+  canvas#zoneCanvas { position: fixed; inset: 0; z-index: 5; display: block; pointer-events: none; }
+
+  #hint {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    color: #7a8399; font-size: 15px; letter-spacing: .01em; text-align: center;
+    z-index: 10; white-space: nowrap; pointer-events: none; opacity: .6;
+  }
+  #hint[hidden] { display: none; }
+</style>
+</head>
+<body>
+  <iframe id="stage" allow="camera; microphone; fullscreen; autoplay" allowfullscreen></iframe>
+  <canvas id="zoneCanvas"></canvas>
+  <div id="hint">Modo mapping — abre a home num tablet para controlar</div>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+const stage = $("stage");
+const hint = $("hint");
+const zoneCanvas = $("zoneCanvas"), zctx = zoneCanvas.getContext("2d");
+
+const APP_FILES = { scrub: "scrub.html", shadow: "shadow.html", draw: "draw.html", enxame: "enxame.html", magicdraw: "magicdraw-display.html" };
+
+/* ================= zonas de oclusão/inclusão (copiado de magicdraw-display.html) =================
+   Duas formas, normalizadas 0–1 (resolução-independentes):
+     - poly:    { id, type:'poly', pts:[[x,y]xN] (N>=3), smooth, mode }
+     - ellipse: { id, type:'ellipse', cx, cy, rx, ry, rot, mode }
+   mode: 'occlude' (tapa a preto) | 'include' (só aqui é que se projeta —
+   quando existe pelo menos uma, o resto do ecrã fica todo preto).
+   NOTA: traceZonePath/tracePolyPath/zoneHandlesPx têm de produzir EXATAMENTE
+   o mesmo desenho aqui e em magicdraw.html/magicdraw-display.html. */
+let zones = [];
+let zoneEditing = false;
+
+function normalizeZone(z) {
+  if (!z) return z;
+  const mode = z.mode === "include" ? "include" : "occlude";
+  if (z.type === "ellipse") return { ...z, mode };
+  return { id: z.id, type: "poly", pts: z.pts, smooth: !!z.smooth, mode };
+}
+
+function tracePolyPath(ctx, pts, w, h, smooth) {
+  const n = pts.length;
+  const P = pts.map(([x, y]) => [x * w, y * h]);
+  ctx.beginPath();
+  if (!smooth || n < 3) {
+    P.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+    ctx.closePath();
+    return;
+  }
+  ctx.moveTo(P[0][0], P[0][1]);
+  for (let i = 0; i < n; i++) {
+    const p0 = P[(i - 1 + n) % n], p1 = P[i], p2 = P[(i + 1) % n], p3 = P[(i + 2) % n];
+    const cp1x = p1[0] + (p2[0] - p0[0]) / 6, cp1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const cp2x = p2[0] - (p3[0] - p1[0]) / 6, cp2y = p2[1] - (p3[1] - p1[1]) / 6;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2[0], p2[1]);
+  }
+  ctx.closePath();
+}
+function traceEllipsePath(ctx, z, w, h) {
+  ctx.beginPath();
+  ctx.ellipse(z.cx * w, z.cy * h, Math.max(0.001, z.rx * w), Math.max(0.001, z.ry * h), z.rot || 0, 0, Math.PI * 2);
+}
+function traceZonePath(ctx, z, w, h) {
+  if (z.type === "ellipse") { traceEllipsePath(ctx, z, w, h); return; }
+  tracePolyPath(ctx, z.pts, w, h, !!z.smooth);
+}
+function zoneHandlesPx(z, w, h) {
+  if (z.type === "ellipse") {
+    const cx = z.cx * w, cy = z.cy * h, rx = z.rx * w, ry = z.ry * h, rot = z.rot || 0;
+    return [
+      { x: cx, y: cy, kind: "center" },
+      { x: cx + rx * Math.cos(rot), y: cy + rx * Math.sin(rot), kind: "rx" },
+      { x: cx - ry * Math.sin(rot), y: cy + ry * Math.cos(rot), kind: "ry" },
+    ];
+  }
+  return z.pts.map(([x, y], idx) => ({ x: x * w, y: y * h, kind: "vertex", idx }));
+}
+
+// sem 'include' → só occlude tapa a preto; com ≥1 'include' → ecrã todo preto,
+// recorte destination-out da união das include, occlude a preto por cima.
+function renderZones() {
+  zctx.clearRect(0, 0, ZW, ZH);
+  const usable = zones.filter(z => !(z.type === "poly" && (!z.pts || z.pts.length < 3)));
+
+  if (zoneEditing) {
+    for (const z of usable) {
+      const isInclude = z.mode === "include";
+      traceZonePath(zctx, z, ZW, ZH);
+      zctx.fillStyle = isInclude ? "rgba(0,220,120,0.4)" : "rgba(255,30,80,0.45)";
+      zctx.fill();
+      zctx.strokeStyle = isInclude ? "#00dc78" : "#ff2d55";
+      zctx.lineWidth = 2; zctx.stroke();
+      zctx.fillStyle = isInclude ? "#00dc78" : "#ff2d55";
+      for (const hpt of zoneHandlesPx(z, ZW, ZH)) {
+        zctx.beginPath();
+        zctx.arc(hpt.x, hpt.y, 8, 0, Math.PI * 2);
+        zctx.fill();
+      }
+    }
+    return;
+  }
+
+  const includeZones = usable.filter(z => z.mode === "include");
+  const occludeZones = usable.filter(z => z.mode !== "include");
+  if (includeZones.length) {
+    zctx.fillStyle = "#000"; zctx.fillRect(0, 0, ZW, ZH);
+    zctx.globalCompositeOperation = "destination-out";
+    for (const z of includeZones) { traceZonePath(zctx, z, ZW, ZH); zctx.fill(); }
+    zctx.globalCompositeOperation = "source-over";
+  }
+  for (const z of occludeZones) {
+    traceZonePath(zctx, z, ZW, ZH);
+    zctx.fillStyle = "#000"; zctx.fill();
+  }
+}
+
+/* ================= canvas sizing (DPR-aware) ================= */
+let ZW = 0, ZH = 0;
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  ZW = window.innerWidth; ZH = window.innerHeight;
+  zoneCanvas.width = ZW * dpr; zoneCanvas.height = ZH * dpr;
+  zoneCanvas.style.width = ZW + "px"; zoneCanvas.style.height = ZH + "px";
+  zctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  renderZones();
+  applyKeystone(); // depende de innerWidth/innerHeight — recalcula no resize
+}
+window.addEventListener("resize", resize);
+
+/* ================= keystone (homografia 4 cantos → matrix3d) =================
+   corners normalizados 0–1, ordem fixa: [top-left, top-right, bottom-right, bottom-left].
+   Sem keystone (null) = identidade. A UI de edição é doutra equipa — aqui só
+   se aplica e persiste o que chega pelo canal de comandos. */
+let keystoneCorners = null; // [[x,y]x4] normalizado, ou null
+
+function adj(m) {
+  return [
+    m[4] * m[8] - m[5] * m[7], m[2] * m[7] - m[1] * m[8], m[1] * m[5] - m[2] * m[4],
+    m[5] * m[6] - m[3] * m[8], m[0] * m[8] - m[2] * m[6], m[2] * m[3] - m[0] * m[5],
+    m[3] * m[7] - m[4] * m[6], m[1] * m[6] - m[0] * m[7], m[0] * m[4] - m[1] * m[3],
+  ];
+}
+function multmm(a, b) {
+  const c = Array(9);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    let cij = 0;
+    for (let k = 0; k < 3; k++) cij += a[3 * i + k] * b[3 * k + j];
+    c[3 * i + j] = cij;
+  }
+  return c;
+}
+function multmv(m, v) {
+  return [
+    m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
+    m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
+    m[6] * v[0] + m[7] * v[1] + m[8] * v[2],
+  ];
+}
+function basisToPoints(x1, y1, x2, y2, x3, y3, x4, y4) {
+  const m = [x1, x2, x3, y1, y2, y3, 1, 1, 1];
+  const v = multmv(adj(m), [x4, y4, 1]);
+  return multmm(m, [v[0], 0, 0, 0, v[1], 0, 0, 0, v[2]]);
+}
+// homografia standard (Heckbert): mapeia o retângulo fonte (0,0)-(w,h) para os 4 pontos destino
+function general2DProjection(w, h, d1, d2, d3, d4) {
+  const s = basisToPoints(0, 0, w, 0, w, h, 0, h);
+  const d = basisToPoints(d1[0], d1[1], d2[0], d2[1], d3[0], d3[1], d4[0], d4[1]);
+  return multmm(d, adj(s));
+}
+function applyKeystone() {
+  // DELIBERADO: o keystone warpa APENAS o conteúdo (iframe) — a máscara de
+  // zonas fica em coordenadas do viewport = espaço físico do projetor. As
+  // janelas/portas do edifício não se movem quando se ajusta o keystone; as
+  // zonas marcam geometria física fixa e warpá-las junto tirava-as das
+  // janelas reais a cada ajuste (review PR #36).
+  if (!keystoneCorners) { stage.style.transform = "none"; return; }
+  const w = window.innerWidth, h = window.innerHeight;
+  const px = keystoneCorners.map(([x, y]) => [x * w, y * h]);
+  const H = general2DProjection(w, h, px[0], px[1], px[2], px[3]);
+  const k = H[8] || 1;
+  const [a, b, c, d, e, f, g, hh] = H.map(v => v / k);
+  // matrix3d é column-major; z fica intocado (m13=0,m23=0,m33=1,m43=0)
+  stage.style.transform =
+    `matrix3d(${a},${d},0,${g}, ${b},${e},0,${hh}, 0,0,1,0, ${c},${f},0,1)`;
+}
+async function keystoneCloudLoad() {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.${encodeURIComponent(KEYSTONE_ID)}&select=data`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
+    });
+    if (!r.ok) return;
+    const cfg = (await r.json())[0]?.data;
+    if (cfg?.corners) { keystoneCorners = cfg.corners; applyKeystone(); }
+  } catch { /* offline: fica identidade até chegar um 'keystone' ao vivo */ }
+}
+function keystoneCloudSave(corners) {
+  fetch(`${SUPABASE_URL}/rest/v1/hand_config`, {
+    method: "POST",
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify([{ id: KEYSTONE_ID, data: { corners }, updated_at: new Date().toISOString() }]),
+  }).catch(() => { /* offline: fica só aplicado localmente */ });
+}
+
+/* ================= protocolo de sync (BroadcastChannel + Supabase Realtime) ================= */
+const SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
+const ROOM = (new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "") || "default";
+// rows por instalação (room 'default' mantém as rows históricas) — ver review PR #35
+const KEYSTONE_ID = ROOM === "default" ? "mapping-keystone" : "mapping-keystone:" + ROOM;
+const ZONES_ROW_ID = ROOM === "default" ? "magicdraw-zones" : "magicdraw-zones:" + ROOM;
+const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
+let seq = 0;
+
+const bcCmd = new BroadcastChannel("mapping:" + ROOM);
+const bcZones = new BroadcastChannel("mapping-zones:" + ROOM);
+let sbCmd = null, sbZones = null;
+let sbReady = false;
+
+function send(kind, extra = {}) {
+  const payload = { v: 1, src: CLIENT_ID, seq: ++seq, kind, ...extra };
+  try { bcCmd.postMessage(payload); } catch (e) { /* canal indisponível — ignora */ }
+  if (sbReady) {
+    try { sbCmd.send({ type: "broadcast", event: "msg", payload }); } catch (e) { /* ignora */ }
+  }
+}
+
+const lastSeqCmd = new Map();
+function onCmdMsg(payload) {
+  if (!payload || payload.v !== 1 || payload.src === CLIENT_ID) return;
+  const last = lastSeqCmd.get(payload.src) ?? -1;
+  if (payload.seq <= last) return;
+  lastSeqCmd.set(payload.src, payload.seq);
+  handleCmd(payload);
+}
+const lastSeqZones = new Map();
+function onZonesMsg(payload) {
+  if (!payload || payload.v !== 1 || payload.src === CLIENT_ID) return;
+  const last = lastSeqZones.get(payload.src) ?? -1;
+  if (payload.seq <= last) return;
+  lastSeqZones.set(payload.src, payload.seq);
+  handleZonesMsg(payload);
+}
+bcCmd.onmessage = e => onCmdMsg(e.data);
+bcZones.onmessage = e => onZonesMsg(e.data);
+
+(async () => {
+  try {
+    const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    sbCmd = sb.channel("mapping:" + ROOM);
+    sbCmd.on("broadcast", { event: "msg" }, ({ payload }) => onCmdMsg(payload)).subscribe(status => {
+      if (status === "SUBSCRIBED") { sbReady = true; send("hello"); }
+    });
+    sbZones = sb.channel("mapping-zones:" + ROOM);
+    sbZones.on("broadcast", { event: "msg" }, ({ payload }) => onZonesMsg(payload)).subscribe();
+  } catch (e) { /* offline/CDN em baixo: fica só o canal local */ }
+})();
+send("hello");
+
+/* ================= estado do iframe (app atual) ================= */
+let currentApp = null;
+let iframeReady = false;
+let pendingCampreview = null; // último {on} enviado antes do 'ready' (para re-enviar)
+let pendingScene = null;      // último {i} enviado antes do 'ready'
+
+function openApp(app) {
+  const file = APP_FILES[app];
+  if (!file || app === currentApp) return; // idempotente
+  currentApp = app;
+  iframeReady = false;
+  pendingCampreview = null; pendingScene = null;
+  // propaga o room à experiência: o magicdraw-display resolve os canais dele
+  // por ?room= — sem isto, num room não-default ele ouviria o room 'default'
+  // e o tablet da instalação certa não o controlava (review PR #36)
+  stage.src = ROOM === "default" ? file : file + "?room=" + encodeURIComponent(ROOM);
+  stage.classList.add("on");
+  hint.hidden = true;
+  send("status", { app: currentApp });
+}
+function goHome() {
+  if (currentApp === null) return; // idempotente
+  currentApp = null;
+  iframeReady = false;
+  stage.removeAttribute("src");
+  stage.classList.remove("on");
+  hint.hidden = false;
+  send("status", { app: null });
+}
+function toIframe(msg) {
+  if (!currentApp || !stage.contentWindow) return;
+  try { stage.contentWindow.postMessage({ mapping: 1, ...msg }, location.origin); } catch (e) { /* ignora */ }
+}
+
+function handleCmd(payload) {
+  switch (payload.kind) {
+    case "open":
+      openApp(payload.app);
+      break;
+    case "home":
+      goHome();
+      break;
+    case "campreview":
+      pendingCampreview = { on: !!payload.on };
+      toIframe({ cmd: "campreview", on: pendingCampreview.on });
+      break;
+    case "scene":
+      pendingScene = { i: payload.i };
+      toIframe({ cmd: "scene", i: pendingScene.i });
+      break;
+    case "keystone":
+      keystoneCorners = Array.isArray(payload.corners) ? payload.corners : null;
+      applyKeystone();
+      keystoneCloudSave(keystoneCorners);
+      break;
+    case "hello":
+      send("status", { app: currentApp });
+      break;
+  }
+}
+function handleZonesMsg(payload) {
+  if (payload.kind !== "zones") return;
+  zones = (Array.isArray(payload.zones) ? payload.zones : []).map(normalizeZone);
+  zoneEditing = !!payload.editing;
+  renderZones();
+}
+
+// evt 'ready' do iframe: reenvia o último estado conhecido (evita perder
+// campreview/scene enviados antes de a app lá dentro estar pronta a ouvir)
+window.addEventListener("message", e => {
+  if (e.origin !== location.origin) return;
+  const d = e.data;
+  if (!d || d.mapping !== 1) return;
+  if (d.evt === "ready") {
+    iframeReady = true;
+    if (pendingCampreview) toIframe({ cmd: "campreview", on: pendingCampreview.on });
+    if (pendingScene) toIframe({ cmd: "scene", i: pendingScene.i });
+  }
+});
+
+/* ================= carregamento inicial (zonas + keystone, hand_config) ================= */
+async function loadZonesFromCloud() {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.${encodeURIComponent(ZONES_ROW_ID)}&select=data`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
+    });
+    if (!r.ok) return;
+    const cfg = (await r.json())[0]?.data;
+    if (cfg?.zones) { zones = cfg.zones.map(normalizeZone); zoneEditing = false; renderZones(); }
+  } catch { /* offline: fica sem zonas até chegar uma mensagem 'zones' ao vivo */ }
+}
+resize();
+loadZonesFromCloud();
+keystoneCloudLoad();
+
+/* ================= teclas ================= */
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") location.href = "index.html";
+  if (e.key === "f" || e.key === "F") {
+    document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  }
+});
+</script>
+</body>
+</html>

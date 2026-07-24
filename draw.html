@@ -399,6 +399,15 @@ async function start() {
   }
 }
 start();
+
+/* ================= ponte postMessage (shell de projeção) ================= */
+const pipWrap = $("pipWrap");
+if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
+window.addEventListener("message", e => {
+  if (e.origin !== location.origin || e.data?.mapping !== 1) return;
+  // esconde/mostra o preview da câmara (canvas + vídeo fonte) sem tocar no tracking
+  if (e.data.cmd === "campreview") pipWrap.style.display = e.data.on ? "" : "none";
+});
 </script>
 </body>
 </html>
