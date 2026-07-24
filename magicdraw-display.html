@@ -30,6 +30,12 @@
   }
   video#cam.show { opacity: 1; }
 
+  /* saída WARPED (WebGL): composição de photo/draw/stroke/cursor/[cam] passada por
+     warp.render() — só visível quando o warp está ATIVO (ver applyWarpConfig/
+     setWarpActiveVisual no script). z-index igual ao grupo de conteúdo que substitui
+     (1-5), sempre ABAIXO do zoneCanvas(9) — a máscara de zonas nunca é deformada. */
+  canvas#warpCanvas { position: fixed; inset: 0; z-index: 1; display: none; }
+
   #photoOverlay { position: fixed; inset: 0; z-index: 6; pointer-events: none; }
   #countdownNum {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -104,6 +110,7 @@
   <canvas id="strokeCanvas"></canvas>
   <canvas id="cursorCanvas"></canvas>
   <video id="cam" playsinline muted></video>
+  <canvas id="warpCanvas"></canvas>
   <canvas id="zoneCanvas"></canvas>
 
   <div id="photoOverlay">
@@ -125,12 +132,15 @@
   </div>
 
 <script type="module">
+import { createWarp } from "./warp.js";
+
 const $ = id => document.getElementById(id);
 const photoCanvas = $("photoCanvas"), pctx = photoCanvas.getContext("2d");
 const drawCanvas = $("drawCanvas"), dctx = drawCanvas.getContext("2d");
 const strokeCanvas = $("strokeCanvas"), sctx = strokeCanvas.getContext("2d");
 const cursorCanvas = $("cursorCanvas"), cctx = cursorCanvas.getContext("2d");
 const zoneCanvas = $("zoneCanvas"), zctx = zoneCanvas.getContext("2d");
+const warpCanvas = $("warpCanvas");
 const cam = $("cam");
 const notice = $("notice");
 const hint = $("hint");
@@ -277,6 +287,83 @@ function renderZones() {
 function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
 function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
 
+/* ================= warp de projeção N×N (deformar a saída p/ casar com o edifício) =================
+   FICA FORA do warp (decisão de design): zoneCanvas (máscara em espaço-projetor —
+   mesma decisão do keystone do shell, review PR #36) e os overlays informativos
+   (countdown/flash/notice/hint) — só a "luz projetada" real (foto+desenho+cursores+
+   vídeo da foto) é deformada. Quando INATIVO (grelha identidade e sem teste): zero
+   custo WebGL — bypass total, warpCanvas escondido, camadas normais visíveis. */
+let warp = null, warpAvailable = false;
+let warpActive = false;       // !isIdentity() OU testPattern — cache, recalculado só ao aplicar config
+let warpIsIdentityCache = true;
+let warpTestOn = false;
+let warpN = 5;
+let warpLive = false;         // já chegou uma mensagem 'warp' ao vivo? o cloudLoad atrasado não a pode esmagar
+try {
+  warp = createWarp(warpCanvas);
+  warpAvailable = true;
+} catch (e) {
+  warpAvailable = false; // sem WebGL neste dispositivo: degrade — conteúdo sem warp, aviso ao utilizador
+  showNotice("⚠️ warp indisponível (sem WebGL) — projeção sem correção de deformação");
+}
+// canvas offscreen onde as camadas de CONTEÚDO são compostas por frame antes do
+// warp.render() — dimensionado ao pixel nativo (W*dpr×H*dpr), ver resizeWarpOffscreen()
+const warpOffscreen = document.createElement("canvas");
+const warpOffCtx = warpOffscreen.getContext("2d");
+
+// aplica uma config completa (mensagem 'warp' OU carregamento da cloud) — protocolo
+// NÃO usa deltas, tal como 'state'/'zones': vem sempre { n, points, testPattern }
+function applyWarpConfig(n, points, testPattern) {
+  if (!warpAvailable) return;
+  if (n && n !== warpN) { warp.setGrid(n); warpN = n; }
+  if (points === null || points === undefined) warp.identity();
+  else warp.setPoints(Float32Array.from(points));
+  warp.showTestPattern(!!testPattern);
+  warpTestOn = !!testPattern;
+  warpIsIdentityCache = warp.isIdentity();
+  setWarpActiveVisual(warpTestOn || !warpIsIdentityCache);
+  // um warp carregado da cloud pode ativar ANTES do 1º rAF (prompt de câmara
+  // pendente): compõe já um frame para não ficar tudo preto até o loop andar (T31)
+  if (warpActive) composeAndWarp();
+}
+
+// alterna a visibilidade das camadas SÓ quando o estado ativo/inativo muda — evita
+// escritas de estilo redundantes por frame (o bypass tem de custar zero).
+function setWarpActiveVisual(active) {
+  if (active === warpActive) return;
+  warpActive = active;
+  const vis = active ? "hidden" : "";
+  photoCanvas.style.visibility = vis;
+  drawCanvas.style.visibility = vis;
+  strokeCanvas.style.visibility = vis;
+  cursorCanvas.style.visibility = vis;
+  cam.style.visibility = vis; // o vídeo da foto, quando visível, entra na composição em vez de ficar à vista diretamente
+  warpCanvas.style.display = active ? "block" : "none";
+}
+
+// compõe as camadas de conteúdo no offscreen e passa por warp.render() — chamado
+// pelo rAF existente (loop/muralLoop) só quando warpActive.
+function composeAndWarp() {
+  warpOffCtx.clearRect(0, 0, W, H);
+  warpOffCtx.drawImage(photoCanvas, 0, 0, W, H);
+  warpOffCtx.drawImage(drawCanvas, 0, 0, W, H);
+  warpOffCtx.drawImage(strokeCanvas, 0, 0, W, H);
+  warpOffCtx.drawImage(cursorCanvas, 0, 0, W, H);
+  if (cam.classList.contains("show")) drawVideoCover(warpOffCtx, cam); // vídeo da sequência de foto, mesma geometria cover+espelho
+  warp.render(warpOffscreen);
+}
+
+// exposto só para inspeção/depuração (mesmo padrão do window.__mdDebug abaixo) —
+// dá para provar o bypass (nenhuma chamada a .render() em identidade) envolvendo
+// warp.render na consola sem editar este ficheiro.
+window.__warpDebug = {
+  get instance() { return warp; },
+  get available() { return warpAvailable; },
+  get active() { return warpActive; },
+  get n() { return warpN; },
+  get testPattern() { return warpTestOn; },
+};
+
 /* ================= canvas sizing (DPR-aware) ================= */
 // ponytail: o resize limpa o desenho e a foto (canvas perde o buffer ao
 // mudar de tamanho) — aceitável para este ecrã de projeção, que fica fixo
@@ -290,6 +377,13 @@ function resize() {
     cv.style.width = W + "px"; cv.style.height = H + "px";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
+  // warpCanvas (WebGL) + o offscreen de composição: mesma resolução nativa das
+  // camadas de conteúdo, para o warp não perder nitidez.
+  warpCanvas.width = W * dpr; warpCanvas.height = H * dpr;
+  warpCanvas.style.width = W + "px"; warpCanvas.style.height = H + "px";
+  warpOffscreen.width = W * dpr; warpOffscreen.height = H * dpr;
+  warpOffCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (warp) warp.resize();
   undoStack = []; redoStack = []; // snapshots à resolução antiga deixam de bater certo
   renderZones(); // vetorial: não se perde no resize, só recalcula a partir de x/y normalizados
 }
@@ -425,6 +519,10 @@ function handleMsg(payload) {
     case "undo": undo(); break; // FIX E — aditivo ao protocolo, sem payload
     case "redo": redo(); break;
     case "tstroke": handleTstroke(payload); break; // FEATURE "✏️ Desenhar": traço do tablet (aditivo)
+    case "warp": // FEATURE "📐 Warp": deformar a projeção (aditivo, kind novo)
+      warpLive = true;
+      applyWarpConfig(payload.n, payload.points, payload.testPattern);
+      break;
   }
 }
 
@@ -443,6 +541,24 @@ async function loadZonesFromCloud() {
   } catch { /* offline: fica sem zonas até chegar uma mensagem 'zones' ao vivo */ }
 }
 loadZonesFromCloud();
+
+/* ================= warp: carregamento inicial da cloud (Supabase · hand_config) =================
+   Antes de chegar qualquer mensagem 'warp' ao vivo, aplica a config já guardada
+   pelo controlo (com testPattern SEMPRE false — a grelha de teste nunca persiste
+   ligada) — sobrevive a reload, mesmo padrão de loadZonesFromCloud acima. */
+async function loadWarpFromCloud() {
+  if (!warpAvailable) return;
+  try {
+    const warpId = ROOM === "default" ? "magicdraw-warp" : "magicdraw-warp:" + ROOM;
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.${encodeURIComponent(warpId)}&select=data`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
+    });
+    if (!r.ok) return;
+    const cfg = (await r.json())[0]?.data;
+    if (cfg && !warpLive) applyWarpConfig(cfg.n, cfg.points, false);
+  } catch { /* offline: fica em identidade até chegar uma mensagem 'warp' ao vivo */ }
+}
+loadWarpFromCloud();
 
 /* ================= transformação cover (mesma matemática de enxame.html) ================= */
 function coverTransform(fw, fh) {
@@ -949,6 +1065,7 @@ function loop() {
   }
   renderActiveStrokes(); // FIX B: redesenha o traço em curso como path contínuo, todo frame
   drawCursors();
+  if (warpActive) composeAndWarp(); // warp INATIVO: bypass total, nem sequer chamado
   requestAnimationFrame(loop);
 }
 
@@ -958,6 +1075,7 @@ function loop() {
 function muralLoop() {
   if (running) return; // a câmara arrancou entretanto: loop() assume o rAF
   renderActiveStrokes();
+  if (warpActive) composeAndWarp();
   requestAnimationFrame(muralLoop);
 }
 function enterMuralMode(noticeMsg) {
