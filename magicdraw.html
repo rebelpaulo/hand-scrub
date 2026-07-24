@@ -697,6 +697,7 @@ let zoneUndoStack = [], zoneRedoStack = [];
 const deepCopyZones = z => JSON.parse(JSON.stringify(z));
 // chamar ANTES de qualquer operação que mute `zones` — guarda o estado pré-operação
 // e limpa a pilha de redo (nova operação invalida os "refazer" pendentes)
+let pendingZoneSnap = null; // snapshot capturado no pointerdown; só vira histórico no 1º movimento
 function pushZoneHistory() {
   zoneUndoStack.push(deepCopyZones(zones));
   if (zoneUndoStack.length > ZONE_HISTORY_MAX) zoneUndoStack.shift();
@@ -1063,7 +1064,7 @@ adminCanvas.addEventListener("pointerdown", e => {
     }
   }
   if (best) {
-    pushZoneHistory(); // início de um drag = 1 passo de histórico (não por tick do throttle)
+    pendingZoneSnap = deepCopyZones(zones); // só entra no histórico se houver arrasto real (tap-select não gera passo no-op)
     selectedZoneId = best.zone.id;
     selectedVertexIdx = best.handle.kind === "vertex" ? best.handle.idx : null;
     dragging = { zoneId: best.zone.id, kind: best.handle.kind, idx: best.handle.idx };
@@ -1091,7 +1092,7 @@ adminCanvas.addEventListener("pointerdown", e => {
   selectedZoneId = hitZone ? hitZone.id : null;
   selectedVertexIdx = null;
   if (hitZone) {
-    pushZoneHistory(); // início de um drag = 1 passo de histórico
+    pendingZoneSnap = deepCopyZones(zones); // idem: histórico só com arrasto real
     dragging = {
       zoneId: hitZone.id, kind: "body", startNX: nx, startNY: ny,
       startPts: hitZone.type === "ellipse" ? [[hitZone.cx, hitZone.cy]] : hitZone.pts.map(p => [p[0], p[1]]),
@@ -1104,6 +1105,13 @@ adminCanvas.addEventListener("pointermove", e => {
   const { x, y, w, h, nx, ny } = getCanvasPt(e);
   const z = zones.find(zz => zz.id === dragging.zoneId);
   if (!z) return;
+  if (pendingZoneSnap) { // 1º movimento real do drag: agora sim, 1 passo de histórico
+    zoneUndoStack.push(pendingZoneSnap);
+    if (zoneUndoStack.length > ZONE_HISTORY_MAX) zoneUndoStack.shift();
+    zoneRedoStack = [];
+    pendingZoneSnap = null;
+    updateZoneButtons();
+  }
   if (dragging.kind === "vertex") {
     z.pts[dragging.idx] = [clamp01(nx), clamp01(ny)];
   } else if (dragging.kind === "center") {
@@ -1134,6 +1142,7 @@ adminCanvas.addEventListener("pointermove", e => {
   zonesCloudSave();
 });
 function endDrag() {
+  pendingZoneSnap = null; // tap sem arrasto: o snapshot pendente morre aqui, sem passo no-op
   if (!dragging) return;
   dragging = null;
   sendZones(true); // garante que a posição final chega, sem esperar pelo throttle

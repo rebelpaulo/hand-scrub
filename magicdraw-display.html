@@ -952,13 +952,26 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
+/* Sem câmara, o display continua a ser um MURAL só-tablet (T30 finding 1):
+   o overlay de arranque sai na mesma e um rAF leve mantém o eco dos traços
+   'tstroke' a animar — só o desenho por pinch é que fica indisponível. */
+function muralLoop() {
+  if (running) return; // a câmara arrancou entretanto: loop() assume o rAF
+  renderActiveStrokes();
+  requestAnimationFrame(muralLoop);
+}
+function enterMuralMode(noticeMsg) {
+  showNotice(noticeMsg);
+  dismissOverlay();
+  requestAnimationFrame(muralLoop);
+}
+
 async function start() {
   setLoadStatus("a carregar o modelo de mãos");
   try {
     await initModel();
   } catch (e) {
-    showNotice("⚠️ não foi possível carregar o modelo de mãos — verifica a ligação e recarrega");
-    setLoadStatus("falhou — recarrega a página para tentar de novo");
+    enterMuralMode("⚠️ sem modelo de mãos (rede?) — desenho por pinch indisponível; o tablet continua a funcionar");
     return;
   }
   try {
@@ -974,12 +987,11 @@ async function start() {
         const st = handState[hand];
         st.visible = false; st.pinching = false; st.stroke = null;
       }
-      showNotice("📷 câmara indisponível — câmara desligada");
+      enterMuralMode("📷 câmara desligada — o tablet continua a funcionar");
     });
     loop();
   } catch (e) {
-    showNotice("📷 câmara indisponível — verifica as permissões");
-    setLoadStatus("falhou — recarrega a página para tentar de novo");
+    enterMuralMode("📷 câmara indisponível — desenho por pinch desligado; o tablet continua a funcionar");
   }
 }
 start();
