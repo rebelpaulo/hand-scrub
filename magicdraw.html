@@ -96,21 +96,35 @@
     margin-top: clamp(52px, 9vh, 64px); /* espaço para a barra de estado fixa */
     margin-bottom: var(--tabbar-h);
   }
-  .page {
-    position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-    display: flex; flex-direction: column; gap: 12px; padding: 10px 12px;
-    transition: transform .5s cubic-bezier(.34, 1.56, .64, 1), opacity .35s ease; /* mola */
-  }
-  body[data-page="brushes"] #pageBrushes,
-  body[data-page="colors"]  #pageColors,
-  body[data-page="magic"]   #pageMagic  { transform: translateX(0); opacity: 1; }
-  body[data-page="colors"]  #pageBrushes,
-  body[data-page="magic"]   #pageBrushes { transform: translateX(-100%); opacity: 0; pointer-events: none; }
-  body[data-page="brushes"] #pageColors,
-  body[data-page="magic"]   #pageColors  { transform: translateX(100%); opacity: 0; pointer-events: none; }
-  body[data-page="brushes"] #pageMagic,
-  body[data-page="colors"]  #pageMagic   { transform: translateX(100%); opacity: 0; pointer-events: none; }
+  /* regra base (landscape/fallback): fluxo normal, SEM position/transform/
+     pointer-events — o sistema de páginas (abaixo) só existe dentro da media
+     query de retrato estreito. Em landscape as 3 .page nunca recebem
+     pointer-events:none nem opacity:0 — ver FIX F1 (Codex PR #41: as regras
+     de página herdavam por baixo do display:contents e matavam 2/3 colunas
+     ao toque no landscape). */
+  .page { display: flex; flex-direction: column; gap: 12px; padding: 10px 12px; }
   .grp { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+
+  /* ---------- sistema de páginas (retrato estreito, telemóvel): 3 páginas
+     deslizantes com translateX + mola. CONFINADO a esta media query de
+     propósito — nunca deve aplicar-se em landscape (ver nota acima). Usa a
+     negação exata da media query do landscape (linha ~215): largura<700px
+     OU orientação portrait cobre tudo o que a grelha de tablet não cobre. ---------- */
+  @media (max-width: 699.98px), (orientation: portrait) {
+    .page {
+      position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      transition: transform .5s cubic-bezier(.34, 1.56, .64, 1), opacity .35s ease; /* mola */
+    }
+    body[data-page="brushes"] #pageBrushes,
+    body[data-page="colors"]  #pageColors,
+    body[data-page="magic"]   #pageMagic  { transform: translateX(0); opacity: 1; }
+    body[data-page="colors"]  #pageBrushes,
+    body[data-page="magic"]   #pageBrushes { transform: translateX(-100%); opacity: 0; pointer-events: none; }
+    body[data-page="brushes"] #pageColors,
+    body[data-page="magic"]   #pageColors  { transform: translateX(100%); opacity: 0; pointer-events: none; }
+    body[data-page="brushes"] #pageMagic,
+    body[data-page="colors"]  #pageMagic   { transform: translateX(100%); opacity: 0; pointer-events: none; }
+  }
 
   /* ---------- tab bar: fundo, zona do polegar — só telemóvel (escondida em landscape) ---------- */
   #tabBar {
@@ -1536,7 +1550,11 @@ function openAdmin() {
   adminOverlay.hidden = false;
   requestAnimationFrame(sizeAdminCanvas); // overlay precisa de estar visível para medir o canvas
   updateZoneButtons();
-  sendZones(true); // entra no modo admin
+  // FIX F4 (Codex PR #41): mesmo gate do 'hello' — em rede lenta zonesCloudLoad()
+  // pode ainda não ter resolvido quando o admin abre; sem isto empurrava zones=[]
+  // para o display por cima da calibração persistida. Pendente flui sozinho
+  // (zonesCloudLoad() reenvia no finally quando resolver).
+  if (zonesHydrated) sendZones(true); else pendingHelloZones = true; // entra no modo admin
   if (!refImgLoadedOnce) { refImgLoadedOnce = true; refImgCloudLoad(); } // imagem de referência: só carrega da cloud na 1ª abertura
 }
 function closeAdmin() {
@@ -1822,14 +1840,17 @@ warpCloudLoad(); // hidrata pontos guardados antes de o ecrã de warp abrir pela
    um edifício guardado num room fica disponível para carregar noutro.
    ================================================================== */
 const BUILDINGS_INDEX_ID = "buildings-index";
-const BUILDING_SLUG_MAX = 56; // a coluna id de hand_config tem check <=64; "building:" ocupa 9
+// FIX F2 (Codex PR #41): "building:" (prefixo) tem 9 chars + slug <=55 = id
+// <=64, exatamente o check da coluna. Era 56 (65 total, sempre > 64 \u2014 POST
+// 400 em qualquer nome cujo slug batesse no limite).
+const BUILDING_SLUG_MAX = 55; // a coluna id de hand_config tem check <=64; "building:" ocupa 9
 const BUILDING_SIZE_CEILING = 1.5 * 1024 * 1024; // pg_column_size(data) <= 1.5MB (check da tabela)
 
-// minúsculas, [a-z0-9-], sem acentos, colapsa separadores, corta a 56 chars
+// min\u00fasculas, [a-z0-9-], sem acentos, colapsa separadores, corta a 55 chars
 function slugifyBuildingName(name) {
   const s = name
     .toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove acentos (ex.: "Câmara" -> "camara")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove acentos (ex.: "C\u00e2mara" -> "camara")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return (s || "edificio").slice(0, BUILDING_SLUG_MAX).replace(/-+$/g, "") || "edificio";
@@ -1841,34 +1862,41 @@ async function buildingsIndexLoad() {
     if (!r.ok) return { list: [] };
     const cfg = (await r.json())[0]?.data;
     return cfg && Array.isArray(cfg.list) ? cfg : { list: [] };
-  } catch { return { list: [] }; } // offline: lista vazia, a próxima abertura tenta de novo
+  } catch { return { list: [] }; } // offline: lista vazia, a pr\u00f3xima abertura tenta de novo
 }
+// FIX F2: devolve se o POST teve sucesso \u2014 os chamadores (buildingsIndexUpsert/
+// Remove, e por sua vez saveBuildingAs) usam isto para NUNCA reportar sucesso
+// nem limpar a UI quando a escrita real falhou (id grande demais, rede, etc.).
 async function buildingsIndexSave(idx) {
   try {
-    await fetch(`${SB_URL}/rest/v1/hand_config`, {
+    const r = await fetch(`${SB_URL}/rest/v1/hand_config`, {
       method: "POST",
       headers: { ...SB_HDRS, Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify([{ id: BUILDINGS_INDEX_ID, data: idx, updated_at: new Date().toISOString() }]),
     });
-  } catch { /* offline: a lista fica desatualizada até à próxima gravação */ }
+    return r.ok;
+  } catch { return false; } // offline: a lista fica desatualizada at\u00e9 \u00e0 pr\u00f3xima grava\u00e7\u00e3o
 }
-// ponytail: leitura-modificação-escrita sem locking — dois admins a guardar/apagar
-// em simultâneo podem perder uma entrada (last-write-wins no índice). Ceiling
-// aceitável para um só operador por instalação; upgrade seria uma função RPC
-// atómica no Postgres (array_append/array_remove) se isso passar a acontecer.
+// ponytail: leitura-modifica\u00e7\u00e3o-escrita sem locking \u2014 dois admins a guardar/apagar
+// em simult\u00e2neo podem perder uma entrada (last-write-wins no \u00edndice). Ceiling
+// aceit\u00e1vel para um s\u00f3 operador por instala\u00e7\u00e3o; upgrade seria uma fun\u00e7\u00e3o RPC
+// at\u00f3mica no Postgres (array_append/array_remove) se isso passar a acontecer.
 async function buildingsIndexUpsert(entry) {
   const idx = await buildingsIndexLoad();
   const list = idx.list.filter(b => b.id !== entry.id);
   list.push(entry);
-  await buildingsIndexSave({ list });
+  return await buildingsIndexSave({ list });
 }
 async function buildingsIndexRemove(id) {
   const idx = await buildingsIndexLoad();
-  await buildingsIndexSave({ list: idx.list.filter(b => b.id !== id) });
+  return await buildingsIndexSave({ list: idx.list.filter(b => b.id !== id) });
 }
 
 // snapshot do estado ATUAL (zonas + warp + refimg) para uma row hand_config nova;
-// se ultrapassar o ceiling de tamanho da row, tenta de novo sem a imagem
+// se ultrapassar o ceiling de tamanho da row, tenta de novo sem a imagem.
+// FIX F2: verifica r.ok do POST da row E do POST do índice — em qualquer falha
+// devolve {ok:false} SEM tocar no índice, para o chamador não limpar o input
+// nem reportar sucesso com uma entrada fantasma (row falhou) ou órfã (índice falhou).
 async function saveBuildingAs(name) {
   const slug = slugifyBuildingName(name);
   const buildingId = "building:" + slug; // guardar por cima de um nome existente = mesmo slug = merge-duplicates substitui
@@ -1884,8 +1912,9 @@ async function saveBuildingAs(name) {
     data = { ...full, refimg: null };
     droppedImg = true;
   }
+  let r;
   try {
-    await fetch(`${SB_URL}/rest/v1/hand_config`, {
+    r = await fetch(`${SB_URL}/rest/v1/hand_config`, {
       method: "POST",
       headers: { ...SB_HDRS, Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify([{ id: buildingId, data, updated_at: new Date().toISOString() }]),
@@ -1893,7 +1922,9 @@ async function saveBuildingAs(name) {
   } catch {
     return { ok: false };
   }
-  await buildingsIndexUpsert({ id: buildingId, name });
+  if (!r.ok) return { ok: false }; // POST da row falhou (400/etc.) — não avança para o índice
+  const indexed = await buildingsIndexUpsert({ id: buildingId, name });
+  if (!indexed) return { ok: false }; // row gravada mas índice falhou: reporta falha em vez de UI incoerente
   return { ok: true, droppedImg };
 }
 
@@ -1934,14 +1965,9 @@ async function loadBuilding(buildingId) {
 }
 
 async function deleteBuilding(buildingId) {
-  // CONHECIDO: a tabela hand_config só tem policies RLS anon de INSERT/SELECT/
-  // UPDATE (verificado via MCP Supabase) — SEM policy de DELETE. O pedido abaixo
-  // responde 204 mas apaga 0 linhas (RLS filtra a linha antes do DELETE a
-  // "ver"), pelo que a row fica órfã na tabela mesmo com sucesso aparente. O
-  // essencial para a UI está safe: sai da lista/índice (buildingsIndexRemove) e
-  // deixa de poder ser carregada — mas o espaço na tabela não é reclamado até
-  // alguém adicionar `create policy "hand_config anon delete" on hand_config
-  // for delete to anon using (true);` (mesmo padrão das 3 policies existentes).
+  // FIX F3: a tabela hand_config tem policy RLS anon de DELETE
+  // ("hand_config_delete_anon", verificado via MCP Supabase) — este pedido
+  // apaga mesmo a row, não é só cosmético via índice.
   try {
     await fetch(`${SB_URL}/rest/v1/hand_config?id=eq.${buildingId}`, { method: "DELETE", headers: SB_HDRS });
   } catch { /* offline: a row fica órfã; removida do índice na mesma, não volta a aparecer na lista */ }
@@ -1995,6 +2021,7 @@ async function renderBuildingsList() {
 }
 
 const buildingsNameInput = $("buildingsNameInput"), buildingsSaveBtn = $("buildingsSaveBtn"), buildingsSaveWarn = $("buildingsSaveWarn");
+const buildingsSaveBtnOriginal = buildingsSaveBtn.innerHTML;
 buildingsSaveBtn.onclick = async () => {
   const name = buildingsNameInput.value.trim();
   if (!name) return;
@@ -2006,6 +2033,11 @@ buildingsSaveBtn.onclick = async () => {
     buildingsSaveWarn.hidden = !res.droppedImg;
     if (res.droppedImg) setTimeout(() => { buildingsSaveWarn.hidden = true; }, 5000);
     renderBuildingsList();
+  } else {
+    // FIX F2: falha no POST (row ou índice) — feedback visível no próprio botão,
+    // índice/lista NÃO tocados e o nome fica no input para o operador tentar de novo
+    buildingsSaveBtn.innerHTML = "⚠️<br>falhou";
+    setTimeout(() => { buildingsSaveBtn.innerHTML = buildingsSaveBtnOriginal; }, 3000);
   }
 };
 $("buildingsOpenBtn").onclick = () => {
@@ -2190,21 +2222,27 @@ dCanvas.addEventListener("pointercancel", endTabletStroke);
 
 /* ================= tab bar (telemóvel): 3 páginas deslizantes ================= */
 // só layout/wiring — não mexe em nenhum estado de sync; "página ativa" é puramente
-// visual (data-page no <body>, ver CSS de #panelRoot/.page) e ignorada em landscape
-// (.page vira display:contents, a grelha mostra as 3 "páginas" ao mesmo tempo)
+// visual (data-page no <body>, ver CSS de #panelRoot/.page). O sistema de páginas
+// (transform/opacity/pointer-events das .page) está confinado à media query de
+// retrato estreito — em landscape a grelha de tablet mostra as 3 colunas sempre
+// vivas (FIX F1, Codex PR #41: mql abaixo é a MESMA condição da media query CSS
+// — só troca de página quando é essa a media query ativa; sem isto o swipe
+// trocava a "coluna viva" em landscape sem qualquer indicação visual).
 const PAGE_ORDER = ["brushes", "colors", "magic"];
+const portraitLayoutMql = window.matchMedia("(max-width: 699.98px), (orientation: portrait)");
 const tabBtnEls = document.querySelectorAll(".tabBtn");
 function setActivePage(name) {
   document.body.dataset.page = name;
   tabBtnEls.forEach(b => b.classList.toggle("on", b.dataset.tabtarget === name));
 }
 tabBtnEls.forEach(b => b.onclick = () => setActivePage(b.dataset.tabtarget));
-// swipe horizontal no #panelRoot troca de página (além do toque nos separadores)
+// swipe horizontal no #panelRoot troca de página (além do toque nos separadores) —
+// só em retrato estreito; em landscape as 3 colunas são estáticas, sem swipe
 const panelRootEl = $("panelRoot");
 let swipeStartX = null, swipeStartY = null;
 panelRootEl.addEventListener("pointerdown", e => { swipeStartX = e.clientX; swipeStartY = e.clientY; });
 panelRootEl.addEventListener("pointerup", e => {
-  if (swipeStartX == null) return;
+  if (swipeStartX == null || !portraitLayoutMql.matches) { swipeStartX = null; swipeStartY = null; return; }
   const dx = e.clientX - swipeStartX, dy = e.clientY - swipeStartY;
   swipeStartX = null; swipeStartY = null;
   if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy)) return; // nem foi swipe, nem foi horizontal

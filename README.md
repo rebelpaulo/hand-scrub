@@ -181,10 +181,13 @@ npx serve -l 8777
     traço, 📸 Foto e 🗑 Limpar com confirmação. **Layout responsivo, sem
     duplicar nenhum botão** (os mesmos ids/listeners servem os dois modos):
     em **landscape/16:9 (tablet, modo principal)** tudo cabe num ecrã sem
-    scroll, numa grelha fluida de 3 colunas — esquerda 8 pincéis, centro
-    cores+tamanho+simetria, direita pré-visualização + coluna de ações
-    (Desenhar/Foto/Desfazer‑Refazer/Limpar) — testado sem scroll de
-    1024×768 a 4K; em **retrato estreito (telemóvel)** vira 3 "páginas"
+    scroll, numa grelha fluida de 3 colunas **estáticas e sempre clicáveis
+    em simultâneo** — esquerda 8 pincéis, centro cores+tamanho+simetria,
+    direita pré-visualização + coluna de ações (Desenhar/Foto/Desfazer‑
+    Refazer/Limpar) — testado sem scroll de 1024×768 a 4K; o sistema de
+    páginas/tab-bar/swipe do telemóvel está confinado à media query de
+    retrato estreito e nunca entra em jogo aqui (as 3 colunas não são
+    "páginas" a alternar). Em **retrato estreito (telemóvel)** vira 3 "páginas"
     deslizantes com mola (🖌 Pincéis · 🎨 Cores · ✨ Magia) trocadas por uma
     tab bar no fundo (zona do polegar, alvos ≥72px) ou por swipe, com uma
     barra de estado persistente no topo (chip do pincel/cor/tamanho atuais +
@@ -244,15 +247,15 @@ npx serve -l 8777
     com dupla confirmação); no fundo, um campo de nome + **💾 Guardar**
     grava o estado atual (guardar por cima de um nome existente substitui-o).
     Persistência: uma row `hand_config` por edifício (id `building:<slug>`,
-    slug até 56 carateres) + uma row-índice global `buildings-index` com a
-    lista `{id,nome}`, atualizada a cada guardar/apagar. Se a imagem de
-    referência não couber no limite de tamanho da row (~1.5MB), guarda sem
-    ela e avisa no ecrã. *Nota de operação:* a tabela `hand_config` só tem
-    policies RLS `anon` de INSERT/SELECT/UPDATE — sem policy de DELETE — por
-    isso apagar um edifício limpa-o da lista/índice (deixa de aparecer e de
-    poder ser carregado) mas a row em si fica órfã na tabela; para reclamar
-    esse espaço também, falta uma policy `for delete to anon using (true)`
-    igual às três já existentes.
+    slug até 55 carateres — 9 do prefixo `building:` + 55 = 64, o check da
+    coluna) + uma row-índice global `buildings-index` com a lista
+    `{id,nome}`, atualizada a cada guardar/apagar. Se a imagem de referência
+    não couber no limite de tamanho da row (~1.5MB), guarda sem ela e avisa
+    no ecrã; se a própria gravação falhar (rede, id inválido, etc.), o botão
+    mostra "⚠️ falhou" por instantes e NEM o índice nem a lista são tocados —
+    sem entradas fantasma. Apagar exige dupla confirmação e remove mesmo a
+    row (a tabela `hand_config` tem policy RLS `anon` de DELETE, além das já
+    existentes de INSERT/SELECT/UPDATE).
   - **Sincronização robusta a corridas de arranque**: um painel recém-aberto
     só reenvia `zones`/`warp` em resposta a um `hello` DEPOIS de hidratar o
     seu próprio estado a partir da cloud (ou de uma edição local, que conta
