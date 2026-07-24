@@ -20,26 +20,30 @@
   /* fundo preto = body background acima */
   canvas#photoCanvas   { position: fixed; inset: 0; z-index: 1; display: block; }
   canvas#drawCanvas    { position: fixed; inset: 0; z-index: 2; display: block; }
-  canvas#cursorCanvas  { position: fixed; inset: 0; z-index: 3; display: block; }
+  /* traço ATIVO (em curso), redesenhado por frame como path contínuo — FIX B */
+  canvas#strokeCanvas  { position: fixed; inset: 0; z-index: 3; display: block; pointer-events: none; }
+  canvas#cursorCanvas  { position: fixed; inset: 0; z-index: 4; display: block; }
   video#cam {
-    position: fixed; inset: 0; width: 100%; height: 100%; z-index: 4;
+    position: fixed; inset: 0; width: 100%; height: 100%; z-index: 5;
     object-fit: cover; transform: scaleX(-1); /* mesma geometria "cover" do tracking */
     opacity: 0; pointer-events: none; background: #000;
   }
   video#cam.show { opacity: 1; }
 
-  #photoOverlay { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+  #photoOverlay { position: fixed; inset: 0; z-index: 6; pointer-events: none; }
   #countdownNum {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     font-size: min(40vw, 40vh); font-weight: 800; color: #fff;
     text-shadow: 0 0 60px rgba(255,255,255,.6);
-    z-index: 6; pointer-events: none;
+    z-index: 7; pointer-events: none;
   }
   #countdownNum[hidden] { display: none; }
   #flash {
-    position: fixed; inset: 0; background: #fff; opacity: 0; z-index: 7;
+    position: fixed; inset: 0; background: #fff; opacity: 0; z-index: 8;
     pointer-events: none; transition: opacity .12s linear;
   }
+  /* ---------- zonas de oclusão: topo de tudo o que é "luz projetada" ---------- */
+  canvas#zoneCanvas { position: fixed; inset: 0; z-index: 9; display: block; pointer-events: none; }
 
   /* ---------- hint discreto (some ao primeiro 'state') ---------- */
   #hint {
@@ -97,8 +101,10 @@
 
   <canvas id="photoCanvas"></canvas>
   <canvas id="drawCanvas"></canvas>
+  <canvas id="strokeCanvas"></canvas>
   <canvas id="cursorCanvas"></canvas>
   <video id="cam" playsinline muted></video>
+  <canvas id="zoneCanvas"></canvas>
 
   <div id="photoOverlay">
     <div id="countdownNum" hidden></div>
@@ -122,7 +128,9 @@
 const $ = id => document.getElementById(id);
 const photoCanvas = $("photoCanvas"), pctx = photoCanvas.getContext("2d");
 const drawCanvas = $("drawCanvas"), dctx = drawCanvas.getContext("2d");
+const strokeCanvas = $("strokeCanvas"), sctx = strokeCanvas.getContext("2d");
 const cursorCanvas = $("cursorCanvas"), cctx = cursorCanvas.getContext("2d");
+const zoneCanvas = $("zoneCanvas"), zctx = zoneCanvas.getContext("2d");
 const cam = $("cam");
 const notice = $("notice");
 const hint = $("hint");
@@ -139,6 +147,123 @@ const STAMP_EMOJIS = ["⭐", "❤️", "🌸", "✨", "🦋", "😀"];
 
 const DEFAULT_STATE = { tool: "neon", color: "#00ffcc", size: 14, mirror: 0 };
 let currentState = { ...DEFAULT_STATE };
+// rev monotónico (FIX A): um 'state' só é aplicado se rev >= currentStateRev,
+// para um 2º painel de controlo aberto não conseguir esmagar a última escolha
+// humana com o keepalive de 3s de um estado mais antigo. Retro-compat: rev em falta = 0.
+let currentStateRev = 0;
+let lastStateSrc = null;   // desempate: em rev igual só o mesmo painel re-aplica (keepalive idempotente)
+let photoOnDisplay = false; // há foto congelada? — respondido ao 'hello' de um painel recarregado
+let zonesLive = false;      // já chegaram zonas ao vivo? o cloudLoad atrasado não as pode esmagar
+// pilhas de undo/redo do drawCanvas (FIX E) — declaradas cedo porque resize()
+// (chamado já no arranque) as limpa: snapshots presos ao tamanho antigo do
+// canvas deixam de bater certo depois de um resize.
+let undoStack = [], redoStack = [];
+
+/* ================= zonas de oclusão (janelas/portas do edifício) =================
+   Duas formas, normalizadas 0–1 (resolução-independentes):
+     - poly:    { id, type:'poly', pts:[[x,y]xN] (N>=3), smooth }
+     - ellipse: { id, type:'ellipse', cx, cy, rx, ry, rot }  (rx à largura, ry à altura)
+   Fora do modo admin (zoneEditing=false) tapam a luz projetada a preto opaco;
+   durante a edição ficam a vermelho translúcido com as pegas visíveis para
+   alinhar com o edifício real.
+   NOTA: traceZonePath/tracePolyPath/traceEllipsePath/zoneHandlesPx têm de
+   produzir EXATAMENTE o mesmo desenho aqui e em magicdraw.html — o que o
+   admin vê no tablet tem de bater certo com o que é projetado. */
+let zones = [];         // [{ id, type, ... }]
+let zoneEditing = false;
+
+// zonas antigas (antes do type/smooth/mode existirem) contam como poly reto,
+// mode 'occlude' (retro-compat: era o único comportamento antes do FIX G2)
+function normalizeZone(z) {
+  if (!z) return z;
+  const mode = z.mode === "include" ? "include" : "occlude";
+  if (z.type === "ellipse") return { ...z, mode };
+  return { id: z.id, type: "poly", pts: z.pts, smooth: !!z.smooth, mode };
+}
+
+// traça o contorno da zona no ctx dado (poly reto/curvo ou elipse), em pixels (w×h)
+function tracePolyPath(ctx, pts, w, h, smooth) {
+  const n = pts.length;
+  const P = pts.map(([x, y]) => [x * w, y * h]);
+  ctx.beginPath();
+  if (!smooth || n < 3) {
+    P.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+    ctx.closePath();
+    return;
+  }
+  // spline Catmull-Rom fechada, convertida em beziers (wrap-around pelos N pontos)
+  ctx.moveTo(P[0][0], P[0][1]);
+  for (let i = 0; i < n; i++) {
+    const p0 = P[(i - 1 + n) % n], p1 = P[i], p2 = P[(i + 1) % n], p3 = P[(i + 2) % n];
+    const cp1x = p1[0] + (p2[0] - p0[0]) / 6, cp1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const cp2x = p2[0] - (p3[0] - p1[0]) / 6, cp2y = p2[1] - (p3[1] - p1[1]) / 6;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2[0], p2[1]);
+  }
+  ctx.closePath();
+}
+function traceZonePath(ctx, z, w, h) {
+  if (z.type === "ellipse") {
+    ctx.beginPath();
+    ctx.ellipse(z.cx * w, z.cy * h, Math.max(0.001, z.rx * w), Math.max(0.001, z.ry * h), z.rot || 0, 0, Math.PI * 2);
+    return;
+  }
+  tracePolyPath(ctx, z.pts, w, h, !!z.smooth);
+}
+// pegas em pixels: vértices reais (poly) ou centro+eixo-rx+eixo-ry (ellipse)
+function zoneHandlesPx(z, w, h) {
+  if (z.type === "ellipse") {
+    const cx = z.cx * w, cy = z.cy * h, rx = z.rx * w, ry = z.ry * h, rot = z.rot || 0;
+    return [
+      { x: cx, y: cy, kind: "center" },
+      { x: cx + rx * Math.cos(rot), y: cy + rx * Math.sin(rot), kind: "rx" },
+      { x: cx - ry * Math.sin(rot), y: cy + ry * Math.cos(rot), kind: "ry" },
+    ];
+  }
+  return z.pts.map(([x, y], idx) => ({ x: x * w, y: y * h, kind: "vertex", idx }));
+}
+
+// FIX G2: zonas 'include' (áreas de desenho, verde) são o INVERSO da oclusão —
+// fora de edição, se existir ≥1 'include' o zoneCanvas fica todo preto exceto
+// dentro da união das zonas include (destination-out), e as 'occlude' voltam
+// a tapar a preto por cima (janelas/portas dentro da própria casa). Sem
+// nenhuma 'include', comportamento igual ao de antes (só occlude tapa).
+function renderZones() {
+  zctx.clearRect(0, 0, W, H);
+  const usable = zones.filter(z => !(z.type === "poly" && (!z.pts || z.pts.length < 3)));
+
+  if (zoneEditing) {
+    for (const z of usable) {
+      const isInclude = (z.mode || "occlude") === "include";
+      traceZonePath(zctx, z, W, H);
+      zctx.fillStyle = isInclude ? "rgba(0,220,120,0.4)" : "rgba(255,30,80,0.45)";
+      zctx.fill();
+      zctx.strokeStyle = isInclude ? "#00dc78" : "#ff2d55";
+      zctx.lineWidth = 2; zctx.stroke();
+      zctx.fillStyle = isInclude ? "#00dc78" : "#ff2d55";
+      // FIX G1: raio VISUAL reduzido (~60%) — hit-test de arrasto no controlo fica igual
+      for (const hpt of zoneHandlesPx(z, W, H)) {
+        zctx.beginPath();
+        zctx.arc(hpt.x, hpt.y, 6, 0, Math.PI * 2);
+        zctx.fill();
+      }
+    }
+    return;
+  }
+
+  // fora de edição: máscara real projetada
+  const includeZones = usable.filter(z => (z.mode || "occlude") === "include");
+  const occludeZones = usable.filter(z => (z.mode || "occlude") !== "include");
+  if (includeZones.length) {
+    zctx.fillStyle = "#000"; zctx.fillRect(0, 0, W, H); // tudo tapado por omissão...
+    zctx.globalCompositeOperation = "destination-out";
+    for (const z of includeZones) { traceZonePath(zctx, z, W, H); zctx.fill(); } // ...exceto dentro da casa
+    zctx.globalCompositeOperation = "source-over";
+  }
+  for (const z of occludeZones) {
+    traceZonePath(zctx, z, W, H);
+    zctx.fillStyle = "#000"; zctx.fill(); // janelas/portas continuam tapadas por cima
+  }
+}
 
 function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
 function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
@@ -151,11 +276,13 @@ let W = 0, H = 0;
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   W = window.innerWidth; H = window.innerHeight;
-  for (const [cv, ctx] of [[photoCanvas, pctx], [drawCanvas, dctx], [cursorCanvas, cctx]]) {
+  for (const [cv, ctx] of [[photoCanvas, pctx], [drawCanvas, dctx], [strokeCanvas, sctx], [cursorCanvas, cctx], [zoneCanvas, zctx]]) {
     cv.width = W * dpr; cv.height = H * dpr;
     cv.style.width = W + "px"; cv.style.height = H + "px";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
+  undoStack = []; redoStack = []; // snapshots à resolução antiga deixam de bater certo
+  renderZones(); // vetorial: não se perde no resize, só recalcula a partir de x/y normalizados
 }
 window.addEventListener("resize", resize);
 resize();
@@ -170,6 +297,10 @@ const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let seq = 0;
 
 const bc = new BroadcastChannel("magicdraw:" + ROOM);
+// canal GLOBAL de zonas do edifício (partilhado com o mapping mode): edições
+// feitas na landing/shell chegam aqui ao vivo — herança nos dois sentidos.
+const bcZones = new BroadcastChannel("mapping-zones:" + ROOM);
+bcZones.onmessage = e => onMsg(e.data);
 let sbChannel = null; // null se o CDN falhar — o BroadcastChannel local continua a funcionar
 let sbReady = false;
 
@@ -202,26 +333,102 @@ bc.onmessage = e => onMsg(e.data);
     sbChannel.on("broadcast", { event: "msg" }, ({ payload }) => onMsg(payload)).subscribe(status => {
       if (status === "SUBSCRIBED") { sbReady = true; send("hello"); }
     });
+    // canal global de zonas (mapping mode) — mesma dedup (src,seq) absorve duplicados
+    sb.channel("mapping-zones:" + ROOM)
+      .on("broadcast", { event: "msg" }, ({ payload }) => onMsg(payload)).subscribe();
   } catch (e) { /* offline/CDN em baixo: fica só o canal local */ }
 })();
 send("hello"); // já dispara via BroadcastChannel de imediato; o supabase repete quando subscrito
 
+// exposto só para inspeção/depuração (não faz parte do protocolo de sync) —
+// simulateStroke/releaseStroke acionam o motor de desenho real sem depender
+// da câmara/mediapipe, para dar para testar FIX B/E num browser sem câmara.
+window.__mdDebug = {
+  get state() { return currentState; },
+  get rev() { return currentStateRev; },
+  get hasUndo() { return undoStack.length; },
+  get hasRedo() { return redoStack.length; },
+  simulateStroke(hand, pts) {
+    const st = handState[hand];
+    st.stroke = { pts: [], buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null, preSnap: snapshotDrawCanvas(), brush: { ...currentState } };
+    st.pinching = true; st.sx = undefined;
+    for (const p of pts) onPinchPoint(hand, p);
+    renderActiveStrokes();
+  },
+  releaseStroke(hand) {
+    const st = handState[hand];
+    bakeStroke(st);
+    st.stroke = null; st.pinching = false;
+    renderActiveStrokes();
+  },
+};
+
 let gotFirstState = false;
 function handleMsg(payload) {
   switch (payload.kind) {
-    case "state":
+    case "state": {
+      const rev = payload.rev || 0;
+      if (rev < currentStateRev) break; // mensagem mais velha (2º painel/keepalive atrasado): ignora
+      // empate de rev de OUTRO painel (2 ações no mesmo ms): fica quem chegou primeiro, sem flip-flop
+      if (rev === currentStateRev && currentStateRev > 0 && payload.src !== lastStateSrc) break;
+      currentStateRev = rev; lastStateSrc = payload.src;
       currentState = { ...DEFAULT_STATE, ...payload.state };
       if (!gotFirstState) { gotFirstState = true; hint.hidden = true; }
       break;
-    case "clear":
+    }
+    case "clear": {
+      const scope = payload.scope || "all"; // retro-compat: sem scope = 'all'
+      pushUndo(snapshotDrawCanvas()); // FIX E: o clear passa a ser desfazível (só o drawCanvas participa)
       dctx.clearRect(0, 0, W, H);
-      pctx.clearRect(0, 0, W, H);
+      sctx.clearRect(0, 0, W, H); // traço em curso (FIX B) também some
+      if (scope === "all") { pctx.clearRect(0, 0, W, H); photoOnDisplay = false; }
+      // cancela traços ATIVOS: senão o rAF seguinte redesenha-os e a largada
+      // assava-os — o limpar "ressuscitava" parte do desenho (review PR #35)
+      for (const hand of ["Left", "Right"]) {
+        const st = handState[hand];
+        if (st.stroke) {
+          st.stroke = st.pinching
+            ? { pts: [], buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null, preSnap: snapshotDrawCanvas(), brush: { ...currentState } }
+            : null; // pinch já largado: nada a continuar
+        }
+      }
       break;
+    }
     case "photo":
+      photoOnDisplay = true; // otimista: a sequência congela ~4s depois
       startPhotoSequence();
       break;
+    case "hello":
+      // um painel (re)carregado pergunta pelo mundo: diz-lhe se há foto congelada
+      send("dstate", { hasPhoto: photoOnDisplay });
+      break;
+    case "zones":
+      // substitui o estado por completo (nunca deltas, mesmo padrão do 'state')
+      zonesLive = true;
+      zones = (Array.isArray(payload.zones) ? payload.zones : []).map(normalizeZone);
+      zoneEditing = !!payload.editing;
+      renderZones();
+      break;
+    case "undo": undo(); break; // FIX E — aditivo ao protocolo, sem payload
+    case "redo": redo(); break;
   }
 }
+
+/* ================= zonas: carregamento inicial da cloud (Supabase · hand_config) =================
+   Antes de chegar qualquer mensagem 'zones' ao vivo, mostra as zonas já
+   guardadas pelo controlo (a preto, modo não-edição) — sobrevive a reload. */
+async function loadZonesFromCloud() {
+  try {
+    const zonesId = ROOM === "default" ? "magicdraw-zones" : "magicdraw-zones:" + ROOM; // row por instalação
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.${encodeURIComponent(zonesId)}&select=data`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
+    });
+    if (!r.ok) return;
+    const cfg = (await r.json())[0]?.data;
+    if (cfg?.zones && !zonesLive) { zones = cfg.zones.map(normalizeZone); zoneEditing = false; renderZones(); }
+  } catch { /* offline: fica sem zonas até chegar uma mensagem 'zones' ao vivo */ }
+}
+loadZonesFromCloud();
 
 /* ================= transformação cover (mesma matemática de enxame.html) ================= */
 function coverTransform(fw, fh) {
@@ -264,22 +471,105 @@ async function startPhotoSequence() {
   photoBusy = false;
 }
 
-/* ================= motor de desenho (8 pincéis) ================= */
+/* ================= motor de desenho (8 pincéis) =================
+   FIX B: neon/rainbow/marker/crayon + a linha do glitter passam a ser
+   pincéis de PATH — o traço em curso guarda o array COMPLETO de pontos
+   suavizados e é redesenhado como UM path contínuo por frame no
+   strokeCanvas (alpha/glow aplicados uma única vez ao path inteiro, sem
+   segmentos sobrepostos = sem "bolinha-tracinho-bolinha"); só é "assado"
+   no drawCanvas persistente UMA vez, na largada do pinch.
+   spray/stamp/eraser ficam INCREMENTAIS como estavam (eventos pontuais ou
+   destination-out — sem problema de juntas), e as estrelinhas do glitter
+   continuam eventos incrementais direto no drawCanvas. */
+const PATH_TOOLS = new Set(["neon", "rainbow", "marker", "crayon", "glitter"]);
 function resetCtx() { dctx.globalAlpha = 1; dctx.globalCompositeOperation = "source-over"; dctx.shadowBlur = 0; }
-function traceQuad(A, C, B) { dctx.beginPath(); dctx.moveTo(A.x, A.y); dctx.quadraticCurveTo(C.x, C.y, B.x, B.y); }
-
-function drawNeon(A, C, B, color, size) {
-  dctx.lineCap = "round"; dctx.lineJoin = "round";
-  dctx.globalCompositeOperation = "lighter";
-  dctx.strokeStyle = color; dctx.shadowColor = color; dctx.shadowBlur = size * 1.6;
-  dctx.lineWidth = size; dctx.globalAlpha = 0.9;
-  traceQuad(A, C, B); dctx.stroke();
-  dctx.globalCompositeOperation = "source-over";
-  dctx.shadowColor = "#fff"; dctx.shadowBlur = size * 0.5;
-  dctx.strokeStyle = "#fff"; dctx.lineWidth = Math.max(1, size * 0.28); dctx.globalAlpha = 0.95;
-  traceQuad(A, C, B); dctx.stroke();
-  resetCtx();
+function traceQuad(ctx, A, C, B) { ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.quadraticCurveTo(C.x, C.y, B.x, B.y); }
+// traça pts[] como UM path contínuo (quadraticCurveTo por pontos médios,
+// controlo = ponto real — mesma técnica de draw.html, estendida ao array todo)
+function tracePathPts(ctx, pts) {
+  if (pts.length < 2) return false;
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const p1 = pts[i], p2 = pts[i + 1], m = mid(p1, p2);
+    ctx.quadraticCurveTo(p1.x, p1.y, m.x, m.y);
+  }
+  const last = pts[pts.length - 1];
+  ctx.lineTo(last.x, last.y);
+  return true;
 }
+function rotatePt(p, cx, cy, ang) {
+  const dx = p.x - cx, dy = p.y - cy, cos = Math.cos(ang), sin = Math.sin(ang);
+  return { ...p, x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos }; // preserva hue/jit por ponto
+}
+
+/* ---- pincéis de PATH: um path contínuo por chamada, ctx passado (strokeCanvas por frame OU drawCanvas ao assar) ---- */
+function drawNeonPath(ctx, pts, color, size) {
+  if (!tracePathPts(ctx, pts)) return;
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = color; ctx.shadowColor = color; ctx.shadowBlur = size * 1.6;
+  ctx.lineWidth = size; ctx.globalAlpha = 0.9;
+  ctx.stroke();
+  ctx.globalCompositeOperation = "source-over";
+  ctx.shadowColor = "#fff"; ctx.shadowBlur = size * 0.5;
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = Math.max(1, size * 0.28); ctx.globalAlpha = 0.95;
+  ctx.stroke();
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.shadowBlur = 0;
+}
+// hue avança ao longo do path por segmento (semeado por ponto no append, ver
+// onPinchPoint) — desenhado opaco/source-over para não criar contas nas juntas
+function drawRainbowPath(ctx, pts, size) {
+  if (pts.length < 2) return;
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+  ctx.shadowColor = "#fff"; ctx.shadowBlur = 6; ctx.lineWidth = size;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    ctx.strokeStyle = `hsl(${(a.hue || 0).toFixed(1)},100%,60%)`;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+}
+function drawMarkerPath(ctx, pts, color, size) {
+  if (!tracePathPts(ctx, pts)) return;
+  ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.shadowBlur = 0;
+  ctx.strokeStyle = color; ctx.lineWidth = size; ctx.globalAlpha = 0.45;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+// jitter SEMEADO por ponto no momento do append (pt.jit, ver onPinchPoint) —
+// reusar esses offsets em vez de sortear de novo torna o redesenho por frame estável
+function drawCrayonPath(ctx, pts, color, size) {
+  ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.shadowBlur = 0;
+  ctx.strokeStyle = color; ctx.lineWidth = Math.max(1, size * 0.35); ctx.globalAlpha = 0.5;
+  for (let pass = 0; pass < 3; pass++) {
+    const jittered = pts.map(p => {
+      const j = p.jit?.[pass] || [0, 0];
+      return { x: p.x + j[0], y: p.y + j[1] };
+    });
+    if (tracePathPts(ctx, jittered)) ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+function drawGlitterLinePath(ctx, pts, color, size) {
+  if (!tracePathPts(ctx, pts)) return;
+  ctx.lineCap = "round"; ctx.shadowBlur = 0;
+  ctx.strokeStyle = color; ctx.lineWidth = Math.max(1, size * 0.25); ctx.globalAlpha = 0.8;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+function tracePathTool(ctx, tool, pts, color, size) {
+  switch (tool) {
+    case "neon": drawNeonPath(ctx, pts, color, size); break;
+    case "rainbow": drawRainbowPath(ctx, pts, size); break;
+    case "marker": drawMarkerPath(ctx, pts, color, size); break;
+    case "crayon": drawCrayonPath(ctx, pts, color, size); break;
+    case "glitter": drawGlitterLinePath(ctx, pts, color, size); break;
+  }
+}
+
+/* ---- pincéis INCREMENTAIS: eventos pontuais direto no drawCanvas, como antes ---- */
 function drawStar(p, r, color, alpha) {
   dctx.save(); dctx.translate(p.x, p.y); dctx.rotate(Math.random() * Math.PI);
   dctx.globalAlpha = alpha; dctx.fillStyle = color;
@@ -291,16 +581,12 @@ function drawStar(p, r, color, alpha) {
   }
   dctx.closePath(); dctx.fill(); dctx.restore();
 }
-function drawGlitter(A, C, B, color, size) {
-  dctx.lineCap = "round"; dctx.shadowBlur = 0;
-  dctx.strokeStyle = color; dctx.lineWidth = Math.max(1, size * 0.25); dctx.globalAlpha = 0.8;
-  traceQuad(A, C, B); dctx.stroke();
+function spawnGlitterStar(A, B, color, size) {
   if (Math.random() < 0.6) {
     const t = Math.random();
     const p = { x: A.x + (B.x - A.x) * t, y: A.y + (B.y - A.y) * t };
     drawStar(p, 2 + Math.random() * size * 0.4, Math.random() < 0.5 ? "#fff" : color, 0.4 + Math.random() * 0.5);
   }
-  resetCtx();
 }
 function drawStamp(pt, size, emoji) {
   dctx.save(); dctx.globalAlpha = 1; dctx.font = `${Math.round(size * 2)}px serif`;
@@ -321,48 +607,24 @@ function drawSpray(pt, color, size) {
   }
   resetCtx();
 }
-function drawMarker(A, C, B, color, size) {
-  dctx.lineCap = "round"; dctx.lineJoin = "round"; dctx.shadowBlur = 0;
-  dctx.strokeStyle = color; dctx.lineWidth = size; dctx.globalAlpha = 0.45;
-  traceQuad(A, C, B); dctx.stroke();
-  resetCtx();
-}
-function drawCrayon(A, C, B, color, size) {
-  dctx.lineCap = "round"; dctx.lineJoin = "round"; dctx.shadowBlur = 0;
-  dctx.strokeStyle = color; dctx.lineWidth = Math.max(1, size * 0.35); dctx.globalAlpha = 0.5;
-  for (let i = 0; i < 3; i++) {
-    const jx = (Math.random() - 0.5) * size * 0.3, jy = (Math.random() - 0.5) * size * 0.3;
-    traceQuad({ x: A.x + jx, y: A.y + jy }, { x: C.x + jx, y: C.y + jy }, { x: B.x + jx, y: B.y + jy });
-    dctx.stroke();
-  }
-  resetCtx();
-}
 function drawEraser(A, C, B, size) {
   dctx.globalCompositeOperation = "destination-out";
   dctx.lineCap = "round"; dctx.lineJoin = "round";
   dctx.lineWidth = size * 2.5; dctx.globalAlpha = 1;
-  traceQuad(A, C, B); dctx.stroke();
+  traceQuad(dctx, A, C, B); dctx.stroke();
   resetCtx();
 }
 
-function rotatePt(p, cx, cy, ang) {
-  const dx = p.x - cx, dy = p.y - cy, cos = Math.cos(ang), sin = Math.sin(ang);
-  return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
-}
-
-// desenha um segmento suavizado (A -> controlo C -> B), replicando-o em
-// mandala à volta do centro do ecrã quando mirror = 2/4/8 (mesma cor/pincel).
-function strokeSegment(strokeObj, A, C, B) {
-  const state = currentState;
+// segmento incremental (A -> controlo C -> B) para os pincéis que continuam
+// eventos pontuais: spray/stamp/eraser + as estrelinhas do glitter. Pincéis
+// de PATH puros (neon/rainbow/marker/crayon) não passam por aqui — são
+// redesenhados por frame a partir do array completo de pontos (ver render loop).
+function incrementalSegment(strokeObj, A, C, B) {
+  const state = strokeObj.brush || currentState; // pincel do arranque do traço
   const segLen = dist(A, B);
   const n = (state.mirror && state.mirror > 0) ? state.mirror : 1;
   const cx = W / 2, cy = H / 2;
 
-  let color = state.color;
-  if (state.tool === "rainbow") {
-    strokeObj.hue = (strokeObj.hue + segLen * 0.4) % 360;
-    color = `hsl(${strokeObj.hue.toFixed(1)},100%,60%)`;
-  }
   let doStamp = false;
   if (state.tool === "stamp") {
     strokeObj.distSinceStamp = (strokeObj.distSinceStamp || 0) + segLen;
@@ -378,16 +640,62 @@ function strokeSegment(strokeObj, A, C, B) {
     const rC = n === 1 ? C : rotatePt(C, cx, cy, ang);
     const rB = n === 1 ? B : rotatePt(B, cx, cy, ang);
     switch (state.tool) {
-      case "neon": case "rainbow": drawNeon(rA, rC, rB, color, state.size); break;
-      case "glitter": drawGlitter(rA, rC, rB, color, state.size); break;
       case "stamp": if (doStamp) drawStamp(rB, state.size, strokeObj.emoji); break;
-      case "spray": drawSpray(rB, color, state.size); break;
-      case "marker": drawMarker(rA, rC, rB, color, state.size); break;
-      case "crayon": drawCrayon(rA, rC, rB, color, state.size); break;
+      case "spray": drawSpray(rB, state.color, state.size); break;
       case "eraser": drawEraser(rA, rC, rB, state.size); break;
-      default: drawNeon(rA, rC, rB, color, state.size);
+      case "glitter": spawnGlitterStar(rA, rB, state.color, state.size); break;
     }
   }
+}
+
+/* ---- desenha o traço ATIVO de uma mão como path contínuo (mandala incluída) ----
+   usado tanto no redesenho por frame (strokeCanvas) como no "assar" final (drawCanvas) */
+function renderStrokePath(ctx, tool, pts, color, size, mirror) {
+  const n = (mirror && mirror > 0) ? mirror : 1;
+  const cx = W / 2, cy = H / 2;
+  for (let k = 0; k < n; k++) {
+    const kpts = k === 0 ? pts : pts.map(p => rotatePt(p, cx, cy, k * (2 * Math.PI / n)));
+    tracePathTool(ctx, tool, kpts, color, size);
+  }
+}
+
+/* ================= desfazer/refazer do desenho (FIX E) =================
+   Pilha de snapshots do drawCanvas em canvas offscreen à resolução nativa.
+   ponytail: profundidade máx. 10 (~8MB/snapshot a 1080p) — memória limitada
+   de propósito; sobe MAX_HISTORY se um evento pedir mais passos de undo.
+   Um passo = uma largada de pinch (qualquer pincel) OU um 'clear'; a FOTO
+   nunca participa (só o drawCanvas é versionado). */
+const MAX_HISTORY = 10;
+function snapshotDrawCanvas() {
+  const c = document.createElement("canvas");
+  c.width = drawCanvas.width; c.height = drawCanvas.height;
+  c.getContext("2d").drawImage(drawCanvas, 0, 0);
+  return c;
+}
+function restoreSnapshot(c) {
+  // espaço de pixels nativo (sem o transform de DPR) — 1:1 com o snapshot
+  dctx.save(); dctx.setTransform(1, 0, 0, 1, 0, 0);
+  dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  if (c) dctx.drawImage(c, 0, 0);
+  dctx.restore();
+}
+function pushUndo(snapshot) {
+  if (!snapshot) return;
+  undoStack.push(snapshot);
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  redoStack = []; // nova operação: invalida o que estava para refazer
+}
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(snapshotDrawCanvas());
+  if (redoStack.length > MAX_HISTORY) redoStack.shift();
+  restoreSnapshot(undoStack.pop());
+}
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(snapshotDrawCanvas());
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  restoreSnapshot(redoStack.pop());
 }
 
 /* ================= estado por mão (tracking + traço) ================= */
@@ -396,24 +704,76 @@ const handState = {
   Right: { visible: false, pinching: false, belowSince: undefined, sx: 0, sy: 0, x: 0, y: 0, stroke: null },
 };
 
-// novo ponto de pinch: suaviza (EMA), respeita o espaçamento mínimo e
-// alimenta o buffer de suavização quadraticCurveTo (por ponto médio,
-// padrão de draw.html) que emite o segmento a desenhar.
+// novo ponto de pinch: suaviza (EMA), respeita o espaçamento mínimo, guarda-o
+// no array COMPLETO do traço (pts, para o redesenho por frame dos pincéis de
+// PATH — FIX B) e alimenta em paralelo o buffer de 3 (buf) que continua a
+// disparar os pincéis incrementais exatamente como antes.
 function onPinchPoint(hand, rawPt) {
   const st = handState[hand];
-  if (st.sx === undefined || !st.stroke.buf.length) { st.sx = rawPt.x; st.sy = rawPt.y; }
+  const strokeObj = st.stroke;
+  if (st.sx === undefined || !strokeObj.pts.length) { st.sx = rawPt.x; st.sy = rawPt.y; }
   else { st.sx += (rawPt.x - st.sx) * EMA_ALPHA; st.sy += (rawPt.y - st.sy) * EMA_ALPHA; }
   st.x = st.sx; st.y = st.sy;
 
-  const buf = st.stroke.buf;
-  const lastPt = buf[buf.length - 1];
+  const pts = strokeObj.pts;
+  const lastPt = pts[pts.length - 1];
   if (lastPt && Math.hypot(st.sx - lastPt.x, st.sy - lastPt.y) < MIN_POINT_DIST) return;
+
+  const size = currentState.size;
+  const newPt = { x: st.sx, y: st.sy };
+  // crayon: 3 offsets de jitter semeados AGORA (estáveis nos redesenhos por frame)
+  newPt.jit = [0, 1, 2].map(() => [(Math.random() - 0.5) * size * 0.3, (Math.random() - 0.5) * size * 0.3]);
+  // rainbow: hue avança ao longo do path por segmento, semeado por ponto
+  if (lastPt) strokeObj.hue = (strokeObj.hue + dist(lastPt, newPt) * 0.4) % 360;
+  newPt.hue = strokeObj.hue;
+  pts.push(newPt);
+
+  const buf = strokeObj.buf;
   buf.push({ x: st.sx, y: st.sy });
   if (buf.length > 3) buf.shift();
   if (buf.length === 3) {
     const [p0, p1, p2] = buf;
-    strokeSegment(st.stroke, mid(p0, p1), p1, mid(p1, p2));
+    incrementalSegment(strokeObj, mid(p0, p1), p1, mid(p1, p2));
     buf.shift(); // mantém [p1, p2] para ligar ao próximo segmento sem juntas visíveis
+  }
+}
+
+// redesenha por frame, no strokeCanvas, o(s) traço(s) ATIVO(S) (pinch em
+// curso) como path contínuo — FIX B. Chamado a cada rAF (loop()).
+function renderActiveStrokes() {
+  sctx.clearRect(0, 0, W, H);
+  for (const hand of ["Left", "Right"]) {
+    const st = handState[hand];
+    if (!st.pinching || !st.stroke || st.stroke.pts.length < 2) continue;
+    // pincel CONGELADO no arranque do traço — trocar de ferramenta a meio de
+    // um pinch já não perde o troço desenhado nem muda o traço a meio
+    const b = st.stroke.brush || currentState;
+    if (!PATH_TOOLS.has(b.tool)) continue; // pincéis incrementais já vão direto ao drawCanvas
+    renderStrokePath(sctx, b.tool, st.stroke.pts, b.color, b.size, b.mirror);
+  }
+}
+
+// larga o pinch: 1 passo de undo (qualquer pincel) + "assa" o path contínuo
+// (se o pincel ATUAL for de PATH) uma única vez no drawCanvas persistente
+function bakeStroke(st) {
+  const strokeObj = st.stroke;
+  if (!strokeObj) return;
+  const b = strokeObj.brush || currentState; // pincel do arranque do traço
+  if (PATH_TOOLS.has(b.tool)) {
+    // path: nada foi para o drawCanvas até agora — o snapshot NO MOMENTO DO
+    // BAKE já inclui o traço da outra mão assado entretanto (review PR #35:
+    // o preSnap do arranque apagava o 1º traço ao desfazer o 2º)
+    if (strokeObj.pts.length >= 2) {
+      pushUndo(snapshotDrawCanvas());
+      renderStrokePath(dctx, b.tool, strokeObj.pts, b.color, b.size, b.mirror);
+      resetCtx();
+    }
+  } else {
+    // incrementais (spray/carimbos/brilhos/borracha): os píxeis já estão no
+    // drawCanvas — o preSnap do arranque é o único "antes" possível.
+    // ponytail: 2 mãos incrementais SIMULTÂNEAS entrelaçam píxeis; o undo do
+    // 2º traço leva o troço do 1º pintado depois do seu arranque — aceite.
+    pushUndo(strokeObj.preSnap);
   }
 }
 
@@ -447,18 +807,20 @@ function processHands(res, now) {
 
     if (st.pinching && !was) {
       st.sx = undefined; // sem lag-in: primeiro ponto do traço é o ponto cru
-      st.stroke = { buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null };
+      // preSnap: estado do drawCanvas ANTES deste traço — FIX E, o "antes" do undo
+      st.stroke = { pts: [], buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null, preSnap: snapshotDrawCanvas(), brush: { ...currentState } };
     }
     if (st.pinching) {
       onPinchPoint(userHand, p);
     } else {
       st.x = p.x; st.y = p.y;
-      if (was) st.stroke = null; // largou: fecha o traço, o próximo pinch começa outro
+      if (was) { bakeStroke(st); st.stroke = null; } // largou: assa o path (se aplicável) e fecha o traço
     }
   }
   for (const hand of ["Left", "Right"]) {
     if (!seen[hand]) {
       const st = handState[hand];
+      if (st.pinching && st.stroke) bakeStroke(st); // mão saiu do enquadramento a meio do pinch
       st.visible = false; st.pinching = false; st.belowSince = undefined; st.stroke = null;
     }
   }
@@ -520,6 +882,7 @@ function loop() {
     processHands(res, now);
     dismissOverlay();
   }
+  renderActiveStrokes(); // FIX B: redesenha o traço em curso como path contínuo, todo frame
   drawCursors();
   requestAnimationFrame(loop);
 }

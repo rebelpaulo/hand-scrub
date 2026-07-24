@@ -176,5 +176,19 @@ npx serve -l 8777
     3s como keepalive. Acrescenta `?room=<nome>` ao URL das DUAS páginas
     para emparelhar um tablet com a sua projeção (sem isto ambas usam o
     room `default` — instalações separadas devem usar rooms separados).
+  - **Zonas de oclusão** (janelas/portas do edifício): um modo **admin** no
+    controlo — long-press de 3s no ⚙️ discreto do rodapé (toque curto não faz
+    nada) — abre um editor 16:9 onde se criam quadriláteros/polígonos
+    (**➕ Criar zona**, N pontos ≥3: toca num "+" no meio de uma aresta para
+    inserir um vértice, **− Ponto** remove o selecionado) ou **⭕ círculos**
+    (elipse com pegas de centro, raio-X e raio-Y — a do raio-X também roda a
+    forma). **◠ Curvas** converte o contorno reto num spline Catmull-Rom
+    fechado. No display estas zonas ficam **acima de tudo** (foto, desenho,
+    cursores, flash): a vermelho translúcido com pegas enquanto o admin edita
+    (para alinhar com as janelas reais projetadas no edifício), e **pretas
+    opacas** assim que se sai do admin — a pintura "passa por trás" delas.
+    Persistem no Supabase (`hand_config`, id `magicdraw-zones`) e sobrevivem
+    a reload; o kind `zones` do protocolo de sync segue o mesmo padrão
+    `v/src/seq` dos outros.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).
