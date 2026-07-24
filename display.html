@@ -284,7 +284,10 @@ function openApp(app) {
   currentApp = app;
   iframeReady = false;
   pendingCampreview = null; pendingScene = null;
-  stage.src = file;
+  // propaga o room à experiência: o magicdraw-display resolve os canais dele
+  // por ?room= — sem isto, num room não-default ele ouviria o room 'default'
+  // e o tablet da instalação certa não o controlava (review PR #36)
+  stage.src = ROOM === "default" ? file : file + "?room=" + encodeURIComponent(ROOM);
   stage.classList.add("on");
   hint.hidden = true;
   send("status", { app: currentApp });
