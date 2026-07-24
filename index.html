@@ -939,7 +939,9 @@ const MAP_SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
 const MAP_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
 const MAP_CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let mapSeq = 0, mapBc = null, mapSbChannel = null, mapSbReady = false, mapSyncStarted = false;
-let mapWired = false, mapActiveApp = null, mapCamPreviewOn = false, mapActiveScene = null;
+// campreview começa ON: é o default das experiências ao abrir — assim o botão
+// reflete a realidade e o 1º toque esconde de facto (T28b finding 3)
+let mapWired = false, mapActiveApp = null, mapCamPreviewOn = true, mapActiveScene = null;
 
 function mapSend(kind, extra = {}) {
   const payload = { v: 1, src: MAP_CLIENT_ID, seq: ++mapSeq, kind, ...extra };
@@ -1096,6 +1098,7 @@ function wireMapUI() {
     card.addEventListener("click", () => openMapApp(card.dataset.app));
   });
   mapCamBtn.addEventListener("click", toggleMapCamPreview);
+  mapCamBtn.classList.toggle("on", mapCamPreviewOn); // estado visual inicial coerente
   mapHomeBtn.addEventListener("click", mapGoHome);
   mapSetupBtn.addEventListener("click", openMapSetup);
   mapSetupClose.addEventListener("click", () => { mapSetup.hidden = true; });
