@@ -188,6 +188,11 @@ function general2DProjection(w, h, d1, d2, d3, d4) {
   return multmm(d, adj(s));
 }
 function applyKeystone() {
+  // DELIBERADO: o keystone warpa APENAS o conteúdo (iframe) — a máscara de
+  // zonas fica em coordenadas do viewport = espaço físico do projetor. As
+  // janelas/portas do edifício não se movem quando se ajusta o keystone; as
+  // zonas marcam geometria física fixa e warpá-las junto tirava-as das
+  // janelas reais a cada ajuste (review PR #36).
   if (!keystoneCorners) { stage.style.transform = "none"; return; }
   const w = window.innerWidth, h = window.innerHeight;
   const px = keystoneCorners.map(([x, y]) => [x * w, y * h]);
