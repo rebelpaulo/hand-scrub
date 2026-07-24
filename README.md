@@ -208,5 +208,16 @@ npx serve -l 8777
     Persistem no Supabase (`hand_config`, id `magicdraw-zones`) e sobrevivem
     a reload; o kind `zones` do protocolo de sync segue o mesmo padrão
     `v/src/seq` dos outros.
+  - **📐 Warp** (deformar a projeção): um 2º ecrã do admin (botão 📐 Warp,
+    dentro do editor de zonas) onde se arrasta uma grelha N×N (2/3/5/9/17
+    pontos por lado, `warp.js`) sobre a imagem de referência — serve para
+    corrigir paredes curvas, um projetor fora de eixo ou superfícies
+    irregulares do edifício. **🔲 Grelha de teste** projeta um padrão
+    axadrezado (passa pela mesma deformação) para calibrar a olho; **↺
+    Reset** volta à identidade. No display, o warp só entra em WebGL (via
+    `warp.js`) quando ativo (grelha ≠ identidade ou teste ligado) — em
+    identidade é bypass total, sem custo — e nunca deforma as zonas de
+    oclusão nem os overlays informativos (contagem/flash/aviso). Persiste
+    no Supabase (`hand_config`, id `magicdraw-warp`).
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).

@@ -165,6 +165,19 @@
   #zoneTypeBtn.mode-occlude { border-color: #ff4d5555; }
   #zoneDoneBtn { border-color: #00ffcc; background: #0f2b26; flex-basis: 100%; }
   #refImgBtn.confirm { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
+  #warpOpenBtn { border-color: #00ffcc55; }
+
+  /* ---------- overlay admin: warp (grelha de projeção N×N) — 2º ecrã do admin ---------- */
+  #warpOverlay { position: fixed; inset: 0; z-index: 200; background: #05060ae6; display: flex; align-items: center; justify-content: center; padding: 14px; backdrop-filter: blur(6px); }
+  #warpOverlay[hidden] { display: none; }
+  #warpCanvas { width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 12px; touch-action: none; display: block; }
+  #warpNSelect { display: flex; gap: 8px; }
+  #warpNSelect button { flex: 1; min-height: 54px; font-size: 14px; font-weight: 800; }
+  #warpNSelect button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
+  #warpActions { display: flex; flex-wrap: wrap; gap: 10px; }
+  #warpActions button { flex: 1; min-width: 90px; min-height: 60px; font-size: 12px; font-weight: 800; }
+  #warpTestBtn.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
+  #warpDoneBtn { border-color: #00ffcc; background: #0f2b26; flex-basis: 100%; }
 
   /* ---------- seletor: áreas de desenho (verde) vs zonas de oclusão (vermelho) ---------- */
   #zoneModeSelect { display: flex; gap: 8px; }
@@ -269,10 +282,37 @@
         <button id="zoneDelBtn" disabled>🗑<br>Apagar</button>
         <button id="zoneUndoBtn" disabled>↩️<br>Desfazer</button>
         <button id="zoneRedoBtn" disabled>↪️<br>Refazer</button>
+        <button id="warpOpenBtn">📐<br>Warp</button>
         <button id="zoneDoneBtn">✔<br>Concluir</button>
       </div>
     </div>
   </div>
+
+  <!-- ================= overlay admin: warp (grelha de projeção N×N) — 2º ecrã do
+       admin (aberto pelo botão 📐 Warp acima), para deformar a saída do display e
+       casar com paredes curvas, projetor fora de eixo ou superfícies irregulares.
+       Estado próprio (warpN/warpTool), TOTALMENTE à parte do undo/redo das zonas
+       (fora de scope, ver nota junto ao warpTool abaixo). ================= -->
+  <div id="warpOverlay" hidden>
+    <div class="admin-panel">
+      <h2 class="section">📐 Warp</h2>
+      <p class="hint">arrasta os pontos da grelha para deformar a projeção e alinhar com o edifício</p>
+      <div id="warpNSelect"></div>
+      <canvas id="warpCanvas"></canvas>
+      <p class="hint">arrasta um ponto (linha 0 = topo) · N muda a densidade da grelha, preservando os 4 cantos</p>
+      <div id="warpActions">
+        <button id="warpTestBtn">🔲<br>Grelha de teste</button>
+        <button id="warpResetBtn">↺<br>Reset</button>
+        <button id="warpBackBtn">←<br>Zonas</button>
+        <button id="warpDoneBtn">✔<br>Concluir</button>
+      </div>
+    </div>
+  </div>
+  <!-- canvas 1x1 nunca anexado visualmente: só serve para uma instância real de
+       warp.js (createWarp) fazer a gestão dos pontos (setGrid/setPoints/identity/
+       isIdentity) — reaproveita a MESMA lógica testada do módulo em vez de duplicar
+       a interpolação que preserva os 4 cantos ao mudar N. Nunca chama .render(). -->
+  <canvas id="warpStateCanvas" style="display:none"></canvas>
 
   <!-- ================= ecrã de desenho: crianças/operador desenham no tablet, sai
        projetado no edifício via kind 'tstroke' (aditivo, ver Parte "Desenhar no tablet") ================= -->
@@ -293,6 +333,8 @@
   </div>
 
 <script type="module">
+import { createWarp } from "./warp.js";
+
 /* ==================================================================
    Magic Draw — painel de controlo (touch-only, sem câmara)
    Emite o estado em tempo real para magicdraw-display.html via dois
@@ -354,7 +396,7 @@ function onMsg(msg) {
   const prev = lastSeq.get(msg.src) ?? -1;
   if (msg.seq <= prev) return;
   lastSeq.set(msg.src, msg.seq);
-  if (msg.kind === "hello") { sendState(); sendZones(adminOpen); } // display recarregado a meio: reenvia estado + zonas (em modo edição se o admin estiver aberto)
+  if (msg.kind === "hello") { sendState(); sendZones(adminOpen); sendWarp(); } // display recarregado a meio: reenvia estado + zonas + warp
   if (msg.kind === "state") lastSeenRev = Math.max(lastSeenRev, msg.rev || 0); // outro controlo: só acerta o relógio lógico, NUNCA adota a UI daqui
   if (msg.kind === "photo") hasPhoto = true;
   if (msg.kind === "clear" && (!msg.scope || msg.scope === "all")) hasPhoto = false;
@@ -1277,6 +1319,231 @@ adminGearBtn.addEventListener("pointerleave", cancelPress);
 adminGearBtn.addEventListener("pointercancel", cancelPress);
 
 zonesCloudLoad(); // hidrata zonas guardadas antes de o admin abrir pela 1ª vez
+
+/* ==================================================================
+   Warp de projeção N×N (📐 Warp, 2º ecrã do admin) — deforma a saída do
+   display para casar com paredes curvas, projetor fora de eixo ou
+   superfícies irregulares. Estado TOTALMENTE à parte do desenho (state) e
+   das zonas (zones/undo/redo) — o undo/redo do editor de zonas NÃO cobre
+   o warp (fora de scope deste ticket).
+   ================================================================== */
+// warpTool: instância REAL de warp.js, só para bookkeeping dos pontos
+// (setGrid/setPoints/getPoints/identity/isIdentity) — nunca chama .render()
+// aqui (não há conteúdo local para pré-visualizar warped, só a grelha de
+// pontos sobre a imagem de referência). Reaproveita a MESMA interpolação
+// que preserva os 4 cantos ao mudar N em vez de duplicar o algoritmo.
+let warpTool = null, warpToolAvailable = false;
+try {
+  warpTool = createWarp($("warpStateCanvas"), { n: 5 });
+  warpToolAvailable = true;
+} catch (e) {
+  warpToolAvailable = false; // sem WebGL neste tablet: 📐 Warp fica desativado (ver abaixo)
+}
+let warpN = 5;
+let warpTestPatternOn = false;
+let warpDragIdx = -1;
+const WARP_N_OPTIONS = [2, 3, 5, 9, 17];
+const WARP_HIT_R = 30; // px CSS, mesmo raio generoso do editor de zonas (VERTEX_HIT_R)
+
+const warpOverlay = $("warpOverlay"), warpCanvasEl = $("warpCanvas"), wctx = warpCanvasEl.getContext("2d");
+$("warpOpenBtn").disabled = !warpToolAvailable;
+
+/* ---- persistência cloud (Supabase · hand_config, id "magicdraw-warp") ----
+   Mesmo padrão de zonesCloudLoad/zonesCloudSave: row por room, debounce
+   ~1s a gravar. testPattern NUNCA persiste true — grava-se sempre false,
+   para um reload nunca vir com a grelha de calibração ligada. */
+const WARP_ID = ROOM === "default" ? "magicdraw-warp" : "magicdraw-warp:" + ROOM;
+let warpCloudSaveT = 0;
+let warpTouchedLocally = false;
+async function warpCloudLoad() {
+  if (!warpToolAvailable) return;
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/hand_config?id=eq.${WARP_ID}&select=data`, { headers: SB_HDRS });
+    if (!r.ok) return;
+    const cfg = (await r.json())[0]?.data;
+    if (cfg && !warpTouchedLocally) {
+      const nn = cfg.n || 5;
+      if (nn !== warpN) { warpTool.setGrid(nn); warpN = nn; }
+      if (Array.isArray(cfg.points)) warpTool.setPoints(Float32Array.from(cfg.points));
+      else warpTool.identity();
+      renderWarpNSelect(); renderWarpCanvas();
+    }
+  } catch { /* offline: fica em identidade até à próxima gravação */ }
+}
+function warpCloudSave() {
+  warpTouchedLocally = true;
+  clearTimeout(warpCloudSaveT);
+  warpCloudSaveT = setTimeout(async () => {
+    try {
+      await fetch(`${SB_URL}/rest/v1/hand_config`, {
+        method: "POST",
+        headers: { ...SB_HDRS, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify([{ id: WARP_ID, data: { n: warpN, points: warpPointsForProtocol(), testPattern: false }, updated_at: new Date().toISOString() }]),
+      });
+    } catch { /* offline: tenta gravar na próxima mudança */ }
+  }, 1000);
+}
+
+/* ---- emissão em tempo real (protocolo kind:'warp', mesmo canal magicdraw:<room>) ----
+   points null = identidade (mesma convenção do warp.js) — payload SEMPRE completo
+   (n + points + testPattern), nunca deltas, tal como 'state'/'zones'. */
+function warpPointsForProtocol() {
+  if (!warpToolAvailable || warpTool.isIdentity()) return null;
+  return Array.from(warpTool.getPoints()).map(r4);
+}
+function sendWarp() {
+  if (!warpToolAvailable) return;
+  send({ kind: "warp", n: warpN, points: warpPointsForProtocol(), testPattern: warpTestPatternOn });
+}
+// throttle ~80ms durante drags (leading + trailing, mesmo padrão de sendZonesThrottled)
+let warpThrottleTimer = null, warpThrottlePending = false;
+function sendWarpThrottled() {
+  if (warpThrottleTimer) { warpThrottlePending = true; return; }
+  sendWarp();
+  warpThrottleTimer = setTimeout(() => {
+    warpThrottleTimer = null;
+    if (warpThrottlePending) { warpThrottlePending = false; sendWarp(); }
+  }, 80);
+}
+
+/* ---- canvas 16:9: imagem de referência (mesma do editor de zonas) + grelha N×N ---- */
+function sizeWarpCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = warpCanvasEl.clientWidth, h = warpCanvasEl.clientHeight;
+  warpCanvasEl.width = w * dpr; warpCanvasEl.height = h * dpr;
+  wctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  renderWarpCanvas();
+}
+function renderWarpCanvas() {
+  const w = warpCanvasEl.clientWidth, h = warpCanvasEl.clientHeight;
+  wctx.clearRect(0, 0, w, h);
+  wctx.fillStyle = "#000"; wctx.fillRect(0, 0, w, h);
+  if (refImg) { wctx.globalAlpha = 0.55; wctx.drawImage(refImg, 0, 0, w, h); wctx.globalAlpha = 1; }
+  if (!warpToolAvailable) return;
+  const pts = warpTool.getPoints(); // flat, row-major, linha 0 = topo (mesma convenção do warp.js)
+  const n = warpN;
+  const px = i => pts[i * 2] * w, py = i => pts[i * 2 + 1] * h;
+  wctx.strokeStyle = "rgba(0,255,204,0.55)"; wctx.lineWidth = 1.5;
+  for (let row = 0; row < n; row++) { // linhas horizontais da grelha
+    wctx.beginPath();
+    for (let col = 0; col < n; col++) {
+      const idx = row * n + col;
+      col ? wctx.lineTo(px(idx), py(idx)) : wctx.moveTo(px(idx), py(idx));
+    }
+    wctx.stroke();
+  }
+  for (let col = 0; col < n; col++) { // linhas verticais da grelha
+    wctx.beginPath();
+    for (let row = 0; row < n; row++) {
+      const idx = row * n + col;
+      row ? wctx.lineTo(px(idx), py(idx)) : wctx.moveTo(px(idx), py(idx));
+    }
+    wctx.stroke();
+  }
+  for (let i = 0; i < n * n; i++) { // pontos, pequenos (visual discreto, hit-test é que é generoso)
+    wctx.beginPath();
+    wctx.arc(px(i), py(i), i === warpDragIdx ? 6 : 4, 0, Math.PI * 2);
+    wctx.fillStyle = i === warpDragIdx ? "#fff" : "#00ffcc";
+    wctx.fill();
+    wctx.strokeStyle = "#05060a"; wctx.lineWidth = 1.5; wctx.stroke();
+  }
+}
+window.addEventListener("resize", () => { if (!warpOverlay.hidden) sizeWarpCanvas(); });
+
+function getWarpPt(e) {
+  const rect = warpCanvasEl.getBoundingClientRect();
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top, w: rect.width, h: rect.height };
+}
+warpCanvasEl.addEventListener("pointerdown", e => {
+  if (!warpToolAvailable) return;
+  warpCanvasEl.setPointerCapture(e.pointerId);
+  const { x, y, w, h } = getWarpPt(e);
+  const pts = warpTool.getPoints();
+  let best = -1, bestD = WARP_HIT_R;
+  for (let i = 0; i < pts.length / 2; i++) {
+    const d = Math.hypot(pts[i * 2] * w - x, pts[i * 2 + 1] * h - y);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  if (best >= 0) { warpDragIdx = best; renderWarpCanvas(); sendWarp(); } // emissão imediata no down
+});
+warpCanvasEl.addEventListener("pointermove", e => {
+  if (warpDragIdx < 0) return;
+  const { x, y, w, h } = getWarpPt(e);
+  const pts = warpTool.getPoints();
+  // mesmo intervalo do warp-test.html: permite arrastar ligeiramente fora de
+  // [0,1] para correções tipo keystone (POINT_MIN/POINT_RANGE do warp.js)
+  pts[warpDragIdx * 2] = Math.min(1.5, Math.max(-0.5, x / w));
+  pts[warpDragIdx * 2 + 1] = Math.min(1.5, Math.max(-0.5, y / h));
+  warpTool.setPoints(pts);
+  renderWarpCanvas();
+  sendWarpThrottled();
+  warpCloudSave();
+});
+function endWarpDrag() {
+  if (warpDragIdx < 0) return;
+  warpDragIdx = -1;
+  renderWarpCanvas();
+  sendWarp(); // emissão imediata no up (garante que a posição final chega, sem esperar pelo throttle)
+  warpCloudSave();
+}
+warpCanvasEl.addEventListener("pointerup", endWarpDrag);
+warpCanvasEl.addEventListener("pointercancel", endWarpDrag);
+
+/* ---- seletor de N (2/3/5/9/17): muda a densidade preservando os 4 cantos ---- */
+const warpNSelectEl = $("warpNSelect");
+for (const nn of WARP_N_OPTIONS) {
+  const btn = document.createElement("button");
+  btn.dataset.n = nn;
+  btn.textContent = nn;
+  btn.disabled = !warpToolAvailable;
+  btn.onclick = () => {
+    if (!warpToolAvailable || nn === warpN) return;
+    warpTool.setGrid(nn); // preserva os 4 cantos e re-interpola — mesma regra do warp.js
+    warpN = nn;
+    warpDragIdx = -1;
+    renderWarpNSelect(); renderWarpCanvas();
+    sendWarp(); warpCloudSave(); // imediata (ação discreta, como um toggle)
+  };
+  warpNSelectEl.appendChild(btn);
+}
+function renderWarpNSelect() {
+  for (const btn of warpNSelectEl.children) btn.classList.toggle("on", +btn.dataset.n === warpN);
+}
+renderWarpNSelect();
+
+/* ---- grelha de teste / reset / navegação ---- */
+const warpTestBtn = $("warpTestBtn");
+warpTestBtn.disabled = !warpToolAvailable;
+warpTestBtn.onclick = () => {
+  if (!warpToolAvailable) return;
+  warpTestPatternOn = !warpTestPatternOn;
+  warpTestBtn.classList.toggle("on", warpTestPatternOn);
+  sendWarp(); // imediata (toggle) — testPattern é ao vivo, nunca persiste true (ver warpCloudSave)
+};
+$("warpResetBtn").disabled = !warpToolAvailable;
+$("warpResetBtn").onclick = () => {
+  if (!warpToolAvailable) return;
+  warpTool.identity();
+  warpDragIdx = -1;
+  renderWarpCanvas();
+  sendWarp(); warpCloudSave(); // imediata
+};
+$("warpBackBtn").onclick = () => { warpOverlay.hidden = true; adminOverlay.hidden = false; };
+$("warpDoneBtn").onclick = () => {
+  if (warpTestPatternOn) { warpTestPatternOn = false; warpTestBtn.classList.remove("on"); sendWarp(); } // desliga a grelha de teste se ficou ligada
+  warpOverlay.hidden = true;
+  closeAdmin(); // fecha o admin por completo (reaproveita o mesmo fecho do editor de zonas)
+};
+$("warpOpenBtn").onclick = () => {
+  if (!warpToolAvailable) return;
+  adminOverlay.hidden = true;
+  warpOverlay.hidden = false;
+  requestAnimationFrame(sizeWarpCanvas);
+  renderWarpNSelect();
+  warpTestBtn.classList.toggle("on", warpTestPatternOn);
+};
+
+warpCloudLoad(); // hidrata pontos guardados antes de o ecrã de warp abrir pela 1ª vez
 
 /* ==================================================================
    Ecrã de desenho (✏️ Desenhar): operador/miúdos desenham no touch do
