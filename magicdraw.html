@@ -75,7 +75,7 @@
   /* ---------- cores: swatches redondos, caixa de lápis ---------- */
   #colors { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
   .swatch {
-    width: 54px; height: 54px; min-width: 54px; border-radius: 50%;
+    width: 90px; height: 90px; min-width: 90px; border-radius: 50%;
     border: 3px solid #0000; box-shadow: inset 0 0 0 1px #ffffff22;
     padding: 0;
   }
@@ -179,7 +179,7 @@ let sbChannel = null;
 // dedup no recetor: última seq vista por src
 const lastSeq = new Map();
 function onMsg(msg) {
-  if (!msg || msg.src === CLIENT_ID) return;
+  if (!msg || msg.v !== 1 || msg.src === CLIENT_ID) return;
   const prev = lastSeq.get(msg.src) ?? -1;
   if (msg.seq <= prev) return;
   lastSeq.set(msg.src, msg.seq);
@@ -342,7 +342,7 @@ function renderPreview() {
     pctx.font = `${Math.max(14, size)}px sans-serif`;
     pctx.textAlign = "center"; pctx.textBaseline = "middle";
     for (let i = 0; i < pts.length; i += 10) {
-      pctx.fillText(emojis[(i / 10) | 0 % emojis.length], pts[i].x, pts[i].y);
+      pctx.fillText(emojis[((i / 10) | 0) % emojis.length], pts[i].x, pts[i].y);
     }
     return;
   }
