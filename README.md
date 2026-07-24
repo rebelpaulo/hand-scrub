@@ -178,7 +178,18 @@ npx serve -l 8777
   - **`magicdraw.html`** (o painel de controlo, num tablet): touch-only, sem
     câmara — botões grandes (≥90px, para crianças), 14 cores estilo caixa de
     lápis + swatch 🌈, 4 bolas de tamanho, simetria, pré-visualização do
-    traço, 📸 Foto e 🗑 Limpar com confirmação.
+    traço, 📸 Foto e 🗑 Limpar com confirmação. **Layout responsivo, sem
+    duplicar nenhum botão** (os mesmos ids/listeners servem os dois modos):
+    em **landscape/16:9 (tablet, modo principal)** tudo cabe num ecrã sem
+    scroll, numa grelha fluida de 3 colunas — esquerda 8 pincéis, centro
+    cores+tamanho+simetria, direita pré-visualização + coluna de ações
+    (Desenhar/Foto/Desfazer‑Refazer/Limpar) — testado sem scroll de
+    1024×768 a 4K; em **retrato estreito (telemóvel)** vira 3 "páginas"
+    deslizantes com mola (🖌 Pincéis · 🎨 Cores · ✨ Magia) trocadas por uma
+    tab bar no fundo (zona do polegar, alvos ≥72px) ou por swipe, com uma
+    barra de estado persistente no topo (chip do pincel/cor/tamanho atuais +
+    🟢/🟡 de ligação, visível nos dois layouts). Tempero: fundo com deriva
+    lentíssima, mola (bounce) ao selecionar e glow pulsante no 📸.
   - **✏️ Desenhar** (no painel do tablet): troca para um ecrã de desenho a
     ecrã inteiro — ferramentas encolhidas numa moldura nas bordas (pincéis no
     topo, cores + tamanhos na lateral, ↩️↪️/📸/🗑/fechar no rodapé), canvas
@@ -218,6 +229,35 @@ npx serve -l 8777
     `warp.js`) quando ativo (grelha ≠ identidade ou teste ligado) — em
     identidade é bypass total, sem custo — e nunca deforma as zonas de
     oclusão nem os overlays informativos (contagem/flash/aviso). Persiste
-    no Supabase (`hand_config`, id `magicdraw-warp`).
+    no Supabase (`hand_config`, id `magicdraw-warp`). Fechar o admin por
+    QUALQUER caminho (✔ Concluir das zonas, ✔ Concluir do warp, Escape)
+    passa por um único ponto de fecho que desliga a 🔲 grelha de teste se
+    tiver ficado ligada — evita ficar projetada sem controlo visível depois
+    de ir a "← Zonas" a partir do ecrã de warp.
+  - **💾 Edifícios** (3º ecrã do admin, botão ao lado do 📐 Warp): guarda o
+    setup completo ATUAL (zonas + warp + imagem de referência) como um
+    preset nomeado — útil para alternar entre edifícios/instalações
+    diferentes sem reconfigurar tudo à mão. Lista os edifícios guardados
+    (**Carregar** aplica-os ao room atual — substitui zonas/warp/imagem
+    locais, reemite `zones`/`warp` pelos canais existentes para o display
+    atualizar ao vivo e grava-os nas rows do room, sem reload; **🗑** apaga
+    com dupla confirmação); no fundo, um campo de nome + **💾 Guardar**
+    grava o estado atual (guardar por cima de um nome existente substitui-o).
+    Persistência: uma row `hand_config` por edifício (id `building:<slug>`,
+    slug até 56 carateres) + uma row-índice global `buildings-index` com a
+    lista `{id,nome}`, atualizada a cada guardar/apagar. Se a imagem de
+    referência não couber no limite de tamanho da row (~1.5MB), guarda sem
+    ela e avisa no ecrã. *Nota de operação:* a tabela `hand_config` só tem
+    policies RLS `anon` de INSERT/SELECT/UPDATE — sem policy de DELETE — por
+    isso apagar um edifício limpa-o da lista/índice (deixa de aparecer e de
+    poder ser carregado) mas a row em si fica órfã na tabela; para reclamar
+    esse espaço também, falta uma policy `for delete to anon using (true)`
+    igual às três já existentes.
+  - **Sincronização robusta a corridas de arranque**: um painel recém-aberto
+    só reenvia `zones`/`warp` em resposta a um `hello` DEPOIS de hidratar o
+    seu próprio estado a partir da cloud (ou de uma edição local, que conta
+    logo como hidratação) — sem isto, um `hello` chegado a meio do carregamento
+    podia reenviar zonas vazias/warp identidade por cima da calibração
+    persistida do display.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).
