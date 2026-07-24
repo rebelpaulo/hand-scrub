@@ -40,6 +40,8 @@
     position: fixed; inset: 0; background: #fff; opacity: 0; z-index: 7;
     pointer-events: none; transition: opacity .12s linear;
   }
+  /* ---------- zonas de oclusão: topo de tudo o que é "luz projetada" ---------- */
+  canvas#zoneCanvas { position: fixed; inset: 0; z-index: 8; display: block; pointer-events: none; }
 
   /* ---------- hint discreto (some ao primeiro 'state') ---------- */
   #hint {
@@ -99,6 +101,7 @@
   <canvas id="drawCanvas"></canvas>
   <canvas id="cursorCanvas"></canvas>
   <video id="cam" playsinline muted></video>
+  <canvas id="zoneCanvas"></canvas>
 
   <div id="photoOverlay">
     <div id="countdownNum" hidden></div>
@@ -123,6 +126,7 @@ const $ = id => document.getElementById(id);
 const photoCanvas = $("photoCanvas"), pctx = photoCanvas.getContext("2d");
 const drawCanvas = $("drawCanvas"), dctx = drawCanvas.getContext("2d");
 const cursorCanvas = $("cursorCanvas"), cctx = cursorCanvas.getContext("2d");
+const zoneCanvas = $("zoneCanvas"), zctx = zoneCanvas.getContext("2d");
 const cam = $("cam");
 const notice = $("notice");
 const hint = $("hint");
@@ -140,6 +144,87 @@ const STAMP_EMOJIS = ["⭐", "❤️", "🌸", "✨", "🦋", "😀"];
 const DEFAULT_STATE = { tool: "neon", color: "#00ffcc", size: 14, mirror: 0 };
 let currentState = { ...DEFAULT_STATE };
 
+/* ================= zonas de oclusão (janelas/portas do edifício) =================
+   Duas formas, normalizadas 0–1 (resolução-independentes):
+     - poly:    { id, type:'poly', pts:[[x,y]xN] (N>=3), smooth }
+     - ellipse: { id, type:'ellipse', cx, cy, rx, ry, rot }  (rx à largura, ry à altura)
+   Fora do modo admin (zoneEditing=false) tapam a luz projetada a preto opaco;
+   durante a edição ficam a vermelho translúcido com as pegas visíveis para
+   alinhar com o edifício real.
+   NOTA: traceZonePath/tracePolyPath/traceEllipsePath/zoneHandlesPx têm de
+   produzir EXATAMENTE o mesmo desenho aqui e em magicdraw.html — o que o
+   admin vê no tablet tem de bater certo com o que é projetado. */
+let zones = [];         // [{ id, type, ... }]
+let zoneEditing = false;
+
+// zonas antigas (antes do type/smooth existirem) contam como poly reto
+function normalizeZone(z) {
+  if (!z) return z;
+  if (z.type === "ellipse") return z;
+  return { id: z.id, type: "poly", pts: z.pts, smooth: !!z.smooth };
+}
+
+// traça o contorno da zona no ctx dado (poly reto/curvo ou elipse), em pixels (w×h)
+function tracePolyPath(ctx, pts, w, h, smooth) {
+  const n = pts.length;
+  const P = pts.map(([x, y]) => [x * w, y * h]);
+  ctx.beginPath();
+  if (!smooth || n < 3) {
+    P.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+    ctx.closePath();
+    return;
+  }
+  // spline Catmull-Rom fechada, convertida em beziers (wrap-around pelos N pontos)
+  ctx.moveTo(P[0][0], P[0][1]);
+  for (let i = 0; i < n; i++) {
+    const p0 = P[(i - 1 + n) % n], p1 = P[i], p2 = P[(i + 1) % n], p3 = P[(i + 2) % n];
+    const cp1x = p1[0] + (p2[0] - p0[0]) / 6, cp1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const cp2x = p2[0] - (p3[0] - p1[0]) / 6, cp2y = p2[1] - (p3[1] - p1[1]) / 6;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2[0], p2[1]);
+  }
+  ctx.closePath();
+}
+function traceZonePath(ctx, z, w, h) {
+  if (z.type === "ellipse") {
+    ctx.beginPath();
+    ctx.ellipse(z.cx * w, z.cy * h, Math.max(0.001, z.rx * w), Math.max(0.001, z.ry * h), z.rot || 0, 0, Math.PI * 2);
+    return;
+  }
+  tracePolyPath(ctx, z.pts, w, h, !!z.smooth);
+}
+// pegas em pixels: vértices reais (poly) ou centro+eixo-rx+eixo-ry (ellipse)
+function zoneHandlesPx(z, w, h) {
+  if (z.type === "ellipse") {
+    const cx = z.cx * w, cy = z.cy * h, rx = z.rx * w, ry = z.ry * h, rot = z.rot || 0;
+    return [
+      { x: cx, y: cy, kind: "center" },
+      { x: cx + rx * Math.cos(rot), y: cy + rx * Math.sin(rot), kind: "rx" },
+      { x: cx - ry * Math.sin(rot), y: cy + ry * Math.cos(rot), kind: "ry" },
+    ];
+  }
+  return z.pts.map(([x, y], idx) => ({ x: x * w, y: y * h, kind: "vertex", idx }));
+}
+
+function renderZones() {
+  zctx.clearRect(0, 0, W, H);
+  for (const z of zones) {
+    if (z.type === "poly" && (!z.pts || z.pts.length < 3)) continue;
+    traceZonePath(zctx, z, W, H);
+    if (zoneEditing) {
+      zctx.fillStyle = "rgba(255,30,80,0.45)"; zctx.fill();
+      zctx.strokeStyle = "#ff2d55"; zctx.lineWidth = 2; zctx.stroke();
+      zctx.fillStyle = "#ff2d55";
+      for (const hpt of zoneHandlesPx(z, W, H)) {
+        zctx.beginPath();
+        zctx.arc(hpt.x, hpt.y, 10, 0, Math.PI * 2);
+        zctx.fill();
+      }
+    } else {
+      zctx.fillStyle = "#000"; zctx.fill(); // oclusão real: opaco, sem contorno
+    }
+  }
+}
+
 function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
 function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
 
@@ -151,11 +236,12 @@ let W = 0, H = 0;
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   W = window.innerWidth; H = window.innerHeight;
-  for (const [cv, ctx] of [[photoCanvas, pctx], [drawCanvas, dctx], [cursorCanvas, cctx]]) {
+  for (const [cv, ctx] of [[photoCanvas, pctx], [drawCanvas, dctx], [cursorCanvas, cctx], [zoneCanvas, zctx]]) {
     cv.width = W * dpr; cv.height = H * dpr;
     cv.style.width = W + "px"; cv.style.height = H + "px";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
+  renderZones(); // vetorial: não se perde no resize, só recalcula a partir de x/y normalizados
 }
 window.addEventListener("resize", resize);
 resize();
@@ -220,8 +306,29 @@ function handleMsg(payload) {
     case "photo":
       startPhotoSequence();
       break;
+    case "zones":
+      // substitui o estado por completo (nunca deltas, mesmo padrão do 'state')
+      zones = (Array.isArray(payload.zones) ? payload.zones : []).map(normalizeZone);
+      zoneEditing = !!payload.editing;
+      renderZones();
+      break;
   }
 }
+
+/* ================= zonas: carregamento inicial da cloud (Supabase · hand_config) =================
+   Antes de chegar qualquer mensagem 'zones' ao vivo, mostra as zonas já
+   guardadas pelo controlo (a preto, modo não-edição) — sobrevive a reload. */
+async function loadZonesFromCloud() {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.magicdraw-zones&select=data`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
+    });
+    if (!r.ok) return;
+    const cfg = (await r.json())[0]?.data;
+    if (cfg?.zones) { zones = cfg.zones.map(normalizeZone); zoneEditing = false; renderZones(); }
+  } catch { /* offline: fica sem zonas até chegar uma mensagem 'zones' ao vivo */ }
+}
+loadZonesFromCloud();
 
 /* ================= transformação cover (mesma matemática de enxame.html) ================= */
 function coverTransform(fw, fh) {
