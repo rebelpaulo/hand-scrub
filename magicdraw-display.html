@@ -222,6 +222,14 @@ function zoneHandlesPx(z, w, h) {
   return z.pts.map(([x, y], idx) => ({ x: x * w, y: y * h, kind: "vertex", idx }));
 }
 
+// UNIFICAÇÃO DOS DISPLAYS: a display.html corre isto dentro de um <iframe> e
+// já desenha a SUA PRÓPRIA máscara de zonas por cima do iframe inteiro (o
+// shell) — se esta página desenhasse também a dela, a zona ficaria com
+// dupla opacidade (vermelho/verde mais escuro no modo edição, preto por
+// cima de preto fora dele). Dentro de iframe fica sempre transparente;
+// aberta standalone (sem shell por cima) continua a mascarar como sempre.
+const INSIDE_IFRAME = window.parent !== window;
+
 // FIX G2: zonas 'include' (áreas de desenho, verde) são o INVERSO da oclusão —
 // fora de edição, se existir ≥1 'include' o zoneCanvas fica todo preto exceto
 // dentro da união das zonas include (destination-out), e as 'occlude' voltam
@@ -229,6 +237,7 @@ function zoneHandlesPx(z, w, h) {
 // nenhuma 'include', comportamento igual ao de antes (só occlude tapa).
 function renderZones() {
   zctx.clearRect(0, 0, W, H);
+  if (INSIDE_IFRAME) return; // shell (display.html) já mascara por cima — ver nota acima
   const usable = zones.filter(z => !(z.type === "poly" && (!z.pts || z.pts.length < 3)));
 
   if (zoneEditing) {
@@ -357,10 +366,13 @@ window.__mdDebug = {
   },
   releaseStroke(hand) {
     const st = handState[hand];
-    bakeStroke(st);
+    bakeStroke(st.stroke);
     st.stroke = null; st.pinching = false;
     renderActiveStrokes();
   },
+  // idem, para injetar sequências 'tstroke' do tablet sem depender do touch real
+  get tabletStrokeCount() { return tabletStrokes.size; },
+  injectTstroke(payload) { handleTstroke(payload); },
 };
 
 let gotFirstState = false;
@@ -392,6 +404,7 @@ function handleMsg(payload) {
             : null; // pinch já largado: nada a continuar
         }
       }
+      tabletStrokes.clear(); // idem para os traços do tablet em curso — sem 'end' pendente para os assar
       break;
     }
     case "photo":
@@ -411,6 +424,7 @@ function handleMsg(payload) {
       break;
     case "undo": undo(); break; // FIX E — aditivo ao protocolo, sem payload
     case "redo": redo(); break;
+    case "tstroke": handleTstroke(payload); break; // FEATURE "✏️ Desenhar": traço do tablet (aditivo)
   }
 }
 
@@ -704,23 +718,29 @@ const handState = {
   Right: { visible: false, pinching: false, belowSince: undefined, sx: 0, sy: 0, x: 0, y: 0, stroke: null },
 };
 
-// novo ponto de pinch: suaviza (EMA), respeita o espaçamento mínimo, guarda-o
-// no array COMPLETO do traço (pts, para o redesenho por frame dos pincéis de
-// PATH — FIX B) e alimenta em paralelo o buffer de 3 (buf) que continua a
-// disparar os pincéis incrementais exatamente como antes.
+// novo ponto de pinch: suaviza (EMA) e delega no apêndice partilhado abaixo.
 function onPinchPoint(hand, rawPt) {
   const st = handState[hand];
   const strokeObj = st.stroke;
   if (st.sx === undefined || !strokeObj.pts.length) { st.sx = rawPt.x; st.sy = rawPt.y; }
   else { st.sx += (rawPt.x - st.sx) * EMA_ALPHA; st.sy += (rawPt.y - st.sy) * EMA_ALPHA; }
   st.x = st.sx; st.y = st.sy;
+  appendStrokePoint(strokeObj, st.sx, st.sy);
+}
 
+// apêndice de ponto PARTILHADO pelo pinch (mãos, via onPinchPoint acima, já
+// suavizado por EMA) e pelos traços do tablet (via handleTstroke abaixo, já
+// vêm do touch sem precisar de EMA) — respeita o espaçamento mínimo, guarda
+// no array COMPLETO do traço (pts, para o redesenho por frame dos pincéis de
+// PATH — FIX B) e alimenta em paralelo o buffer de 3 (buf) que dispara os
+// pincéis incrementais.
+function appendStrokePoint(strokeObj, px, py) {
   const pts = strokeObj.pts;
   const lastPt = pts[pts.length - 1];
-  if (lastPt && Math.hypot(st.sx - lastPt.x, st.sy - lastPt.y) < MIN_POINT_DIST) return;
+  if (lastPt && Math.hypot(px - lastPt.x, py - lastPt.y) < MIN_POINT_DIST) return;
 
-  const size = currentState.size;
-  const newPt = { x: st.sx, y: st.sy };
+  const size = (strokeObj.brush || currentState).size;
+  const newPt = { x: px, y: py };
   // crayon: 3 offsets de jitter semeados AGORA (estáveis nos redesenhos por frame)
   newPt.jit = [0, 1, 2].map(() => [(Math.random() - 0.5) * size * 0.3, (Math.random() - 0.5) * size * 0.3]);
   // rainbow: hue avança ao longo do path por segmento, semeado por ponto
@@ -729,7 +749,7 @@ function onPinchPoint(hand, rawPt) {
   pts.push(newPt);
 
   const buf = strokeObj.buf;
-  buf.push({ x: st.sx, y: st.sy });
+  buf.push({ x: px, y: py });
   if (buf.length > 3) buf.shift();
   if (buf.length === 3) {
     const [p0, p1, p2] = buf;
@@ -738,8 +758,9 @@ function onPinchPoint(hand, rawPt) {
   }
 }
 
-// redesenha por frame, no strokeCanvas, o(s) traço(s) ATIVO(S) (pinch em
-// curso) como path contínuo — FIX B. Chamado a cada rAF (loop()).
+// redesenha por frame, no strokeCanvas, o(s) traço(s) ATIVO(S) — pinch em
+// curso E traços do tablet em curso — como path contínuo — FIX B. Chamado a
+// cada rAF (loop()).
 function renderActiveStrokes() {
   sctx.clearRect(0, 0, W, H);
   for (const hand of ["Left", "Right"]) {
@@ -751,18 +772,24 @@ function renderActiveStrokes() {
     if (!PATH_TOOLS.has(b.tool)) continue; // pincéis incrementais já vão direto ao drawCanvas
     renderStrokePath(sctx, b.tool, st.stroke.pts, b.color, b.size, b.mirror);
   }
+  for (const strokeObj of tabletStrokes.values()) {
+    if (strokeObj.pts.length < 2) continue;
+    const b = strokeObj.brush || currentState;
+    if (!PATH_TOOLS.has(b.tool)) continue;
+    renderStrokePath(sctx, b.tool, strokeObj.pts, b.color, b.size, b.mirror);
+  }
 }
 
-// larga o pinch: 1 passo de undo (qualquer pincel) + "assa" o path contínuo
-// (se o pincel ATUAL for de PATH) uma única vez no drawCanvas persistente
-function bakeStroke(st) {
-  const strokeObj = st.stroke;
+// "assa" um traço (qualquer origem — pinch OU tablet) no drawCanvas
+// persistente: 1 passo de undo (qualquer pincel) + o path contínuo (se o
+// pincel ATUAL for de PATH), uma única vez.
+function bakeStroke(strokeObj) {
   if (!strokeObj) return;
   const b = strokeObj.brush || currentState; // pincel do arranque do traço
   if (PATH_TOOLS.has(b.tool)) {
     // path: nada foi para o drawCanvas até agora — o snapshot NO MOMENTO DO
-    // BAKE já inclui o traço da outra mão assado entretanto (review PR #35:
-    // o preSnap do arranque apagava o 1º traço ao desfazer o 2º)
+    // BAKE já inclui outros traços assados entretanto (review PR #35: o
+    // preSnap do arranque apagava o 1º traço ao desfazer o 2º)
     if (strokeObj.pts.length >= 2) {
       pushUndo(snapshotDrawCanvas());
       renderStrokePath(dctx, b.tool, strokeObj.pts, b.color, b.size, b.mirror);
@@ -771,11 +798,49 @@ function bakeStroke(st) {
   } else {
     // incrementais (spray/carimbos/brilhos/borracha): os píxeis já estão no
     // drawCanvas — o preSnap do arranque é o único "antes" possível.
-    // ponytail: 2 mãos incrementais SIMULTÂNEAS entrelaçam píxeis; o undo do
-    // 2º traço leva o troço do 1º pintado depois do seu arranque — aceite.
+    // ponytail: traços incrementais SIMULTÂNEOS (mãos e/ou tablets)
+    // entrelaçam píxeis; o undo de um leva o troço dos outros pintado depois
+    // do seu arranque — aceite, mesmo comportamento de sempre entre 2 mãos.
     pushUndo(strokeObj.preSnap);
   }
 }
+
+/* ================= traços do tablet (kind 'tstroke', FEATURE "✏️ Desenhar") =================
+   Aditivo ao protocolo — mesmo canal magicdraw:<room>. Um traço por
+   (src,sid), alimentado pelo MESMO pipeline do pinch (appendStrokePoint/
+   incrementalSegment/renderStrokePath/bakeStroke) — grátis por reuso. */
+const tabletStrokes = new Map(); // "src:sid" -> strokeObj (mesma forma do st.stroke do pinch)
+const TABLET_STROKE_TIMEOUT_MS = 10000; // órfão: 'start' sem 'end' há mais de 10s
+function handleTstroke(payload) {
+  const key = payload.src + ":" + payload.sid;
+  if (payload.phase === "start") {
+    const brush = { ...DEFAULT_STATE, ...(payload.brush || {}) }; // brush vem SEMPRE no 'start' — congelado por traço, como no pinch
+    const strokeObj = { pts: [], buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null, preSnap: snapshotDrawCanvas(), brush, lastSeen: Date.now() };
+    tabletStrokes.set(key, strokeObj);
+    for (const [nx, ny] of payload.pts || []) appendStrokePoint(strokeObj, nx * W, ny * H);
+    return;
+  }
+  const strokeObj = tabletStrokes.get(key);
+  if (!strokeObj) return; // 'move'/'end' sem 'start' correspondente (ex.: display recarregado a meio do traço) — ignora
+  strokeObj.lastSeen = Date.now();
+  if (payload.phase === "move") {
+    for (const [nx, ny] of payload.pts || []) appendStrokePoint(strokeObj, nx * W, ny * H);
+    return;
+  }
+  if (payload.phase === "end") {
+    for (const [nx, ny] of payload.pts || []) appendStrokePoint(strokeObj, nx * W, ny * H); // pts finais, se houver
+    bakeStroke(strokeObj);
+    tabletStrokes.delete(key);
+  }
+}
+// garbage collect: traços órfãos (start sem end há >10s, ex. tablet que
+// perdeu ligação a meio do gesto) são assados e limpos do mapa
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, strokeObj] of tabletStrokes) {
+    if (now - strokeObj.lastSeen > TABLET_STROKE_TIMEOUT_MS) { bakeStroke(strokeObj); tabletStrokes.delete(key); }
+  }
+}, 3000);
 
 function processHands(res, now) {
   const hands = res.landmarks || [];
@@ -814,13 +879,13 @@ function processHands(res, now) {
       onPinchPoint(userHand, p);
     } else {
       st.x = p.x; st.y = p.y;
-      if (was) { bakeStroke(st); st.stroke = null; } // largou: assa o path (se aplicável) e fecha o traço
+      if (was) { bakeStroke(st.stroke); st.stroke = null; } // largou: assa o path (se aplicável) e fecha o traço
     }
   }
   for (const hand of ["Left", "Right"]) {
     if (!seen[hand]) {
       const st = handState[hand];
-      if (st.pinching && st.stroke) bakeStroke(st); // mão saiu do enquadramento a meio do pinch
+      if (st.pinching && st.stroke) bakeStroke(st.stroke); // mão saiu do enquadramento a meio do pinch
       st.visible = false; st.pinching = false; st.belowSince = undefined; st.stroke = null;
     }
   }
@@ -887,13 +952,26 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
+/* Sem câmara, o display continua a ser um MURAL só-tablet (T30 finding 1):
+   o overlay de arranque sai na mesma e um rAF leve mantém o eco dos traços
+   'tstroke' a animar — só o desenho por pinch é que fica indisponível. */
+function muralLoop() {
+  if (running) return; // a câmara arrancou entretanto: loop() assume o rAF
+  renderActiveStrokes();
+  requestAnimationFrame(muralLoop);
+}
+function enterMuralMode(noticeMsg) {
+  showNotice(noticeMsg);
+  dismissOverlay();
+  requestAnimationFrame(muralLoop);
+}
+
 async function start() {
   setLoadStatus("a carregar o modelo de mãos");
   try {
     await initModel();
   } catch (e) {
-    showNotice("⚠️ não foi possível carregar o modelo de mãos — verifica a ligação e recarrega");
-    setLoadStatus("falhou — recarrega a página para tentar de novo");
+    enterMuralMode("⚠️ sem modelo de mãos (rede?) — desenho por pinch indisponível; o tablet continua a funcionar");
     return;
   }
   try {
@@ -909,12 +987,11 @@ async function start() {
         const st = handState[hand];
         st.visible = false; st.pinching = false; st.stroke = null;
       }
-      showNotice("📷 câmara indisponível — câmara desligada");
+      enterMuralMode("📷 câmara desligada — o tablet continua a funcionar");
     });
     loop();
   } catch (e) {
-    showNotice("📷 câmara indisponível — verifica as permissões");
-    setLoadStatus("falhou — recarrega a página para tentar de novo");
+    enterMuralMode("📷 câmara indisponível — desenho por pinch desligado; o tablet continua a funcionar");
   }
 }
 start();

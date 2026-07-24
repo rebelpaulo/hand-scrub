@@ -164,12 +164,53 @@
   #zoneTypeBtn.mode-include { border-color: #00dc7855; }
   #zoneTypeBtn.mode-occlude { border-color: #ff4d5555; }
   #zoneDoneBtn { border-color: #00ffcc; background: #0f2b26; flex-basis: 100%; }
+  #refImgBtn.confirm { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
 
   /* ---------- seletor: áreas de desenho (verde) vs zonas de oclusão (vermelho) ---------- */
   #zoneModeSelect { display: flex; gap: 8px; }
   #zoneModeSelect button { flex: 1; min-height: 54px; font-size: 13px; font-weight: 800; }
   #zoneModeSelect button[data-mode="include"].on { border-color: #00dc78; background: #0a2b1c; box-shadow: 0 0 0 3px #00dc7833; }
   #zoneModeSelect button[data-mode="occlude"].on { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
+
+  /* ---------- botão que entra no ecrã de desenho ---------- */
+  #drawModeBtn { width: 100%; min-height: 76px; font-size: 15px; font-weight: 800; background: linear-gradient(160deg, #0f2a1f, #1a1e2ac0); border-color: #00ffcc55; }
+  #drawModeBtn .ic { font-size: 30px; }
+
+  /* ==================================================================
+     Ecrã de desenho (✏️ Desenhar): ferramentas encolhidas numa MOLDURA
+     nas bordas (grid) — o centro fica livre para o canvas 16:9. Os
+     mesmos dados (data-tool/data-color/data-size) das secções normais,
+     só que em botões mini — renderBrushes/renderColors/renderSizes já
+     percorrem o documento inteiro, por isso ficam sincronizados de graça.
+     ================================================================== */
+  #drawScreen {
+    position: fixed; inset: 0; z-index: 150; background: #000;
+    display: grid; grid-template-columns: 78px 1fr; grid-template-rows: 60px 1fr 72px;
+  }
+  #drawScreen[hidden] { display: none; }
+  #drawTop {
+    grid-column: 1 / 3; grid-row: 1; display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px; overflow-x: auto; background: #0c0e14cc; border-bottom: 1px solid var(--line);
+  }
+  #drawTop button { min-width: 44px; min-height: 44px; flex: 0 0 auto; padding: 0; font-size: 20px; }
+  #drawTop button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
+  #drawSide {
+    grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 8px;
+    padding: 8px 6px; overflow: hidden; background: #0c0e14cc; border-right: 1px solid var(--line);
+  }
+  #drawColors { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; overflow-y: auto; }
+  #drawColors .swatch.mini { width: 40px; height: 40px; min-width: 40px; }
+  #drawSizes { display: flex; flex-direction: column; gap: 6px; }
+  #drawSizes button { min-height: 44px; font-size: 9px; padding: 2px; }
+  #drawSizes button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
+  #drawCanvasWrap { grid-column: 2; grid-row: 2; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 6px; }
+  canvas#drawCanvasT { display: block; border-radius: 8px; touch-action: none; background: #000; }
+  #drawBottom {
+    grid-column: 1 / 3; grid-row: 3; display: flex; gap: 8px; padding: 8px;
+    background: #0c0e14cc; border-top: 1px solid var(--line);
+  }
+  #drawBottom button { flex: 1; min-height: 56px; font-size: 12px; font-weight: 800; }
+  #drawCloseBtn { border-color: #ff4d5555; }
 </style>
 </head>
 <body>
@@ -202,6 +243,8 @@
     <button id="redoBtn"><span class="ic">↪️</span><span>Refazer</span></button>
   </div>
 
+  <button id="drawModeBtn"><span class="ic">✏️</span><span>Desenhar</span></button>
+
   <footer>Magic Draw · painel touch</footer>
   <button id="adminGearBtn" aria-label="Modo admin: zonas de oclusão (mantém premido 3s)">⚙️</button>
 
@@ -219,12 +262,33 @@
       <div id="adminActions">
         <button id="zoneAddBtn">➕<br>Criar zona</button>
         <button id="zoneCircleBtn">⭕<br>Criar círculo</button>
+        <button id="refImgBtn">🖼<br>Imagem</button>
         <button id="zoneCurveBtn" disabled>◠<br>Curvas</button>
         <button id="zoneTypeBtn" disabled>🔁<br>Tipo</button>
         <button id="zonePointDelBtn" disabled>−<br>Ponto</button>
         <button id="zoneDelBtn" disabled>🗑<br>Apagar</button>
+        <button id="zoneUndoBtn" disabled>↩️<br>Desfazer</button>
+        <button id="zoneRedoBtn" disabled>↪️<br>Refazer</button>
         <button id="zoneDoneBtn">✔<br>Concluir</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ================= ecrã de desenho: crianças/operador desenham no tablet, sai
+       projetado no edifício via kind 'tstroke' (aditivo, ver Parte "Desenhar no tablet") ================= -->
+  <div id="drawScreen" hidden>
+    <div id="drawTop"></div>
+    <div id="drawSide">
+      <div id="drawColors"></div>
+      <div id="drawSizes"></div>
+    </div>
+    <div id="drawCanvasWrap"><canvas id="drawCanvasT"></canvas></div>
+    <div id="drawBottom">
+      <button id="drawUndoBtn">↩️</button>
+      <button id="drawRedoBtn">↪️</button>
+      <button id="drawPhotoBtn">📸</button>
+      <button id="drawClearBtn">🗑</button>
+      <button id="drawCloseBtn">✖ Fechar</button>
     </div>
   </div>
 
@@ -338,20 +402,26 @@ const BRUSHES = [
   { tool: "crayon",  ic: "🖍️", label: "Lápis de cera" },
   { tool: "eraser",  ic: "🧽", label: "Borracha" },
 ];
+// selectTool/selectColor/selectRainbow/selectSize: partilhados entre os
+// botões normais (grelhas grandes) e os mini-botões do ecrã de desenho —
+// ver renderBrushes/renderColors/renderSizes abaixo, que percorrem TODO o
+// documento (não só um container), por isso os dois conjuntos de botões
+// ficam sincronizados sem lógica duplicada.
+function selectTool(tool) {
+  state.tool = tool;
+  if (tool !== "rainbow") lastNonRainbowTool = tool;
+  renderBrushes(); renderColors(); renderPreview(); bumpRevAndSend();
+}
 const brushesEl = $("brushes");
 for (const b of BRUSHES) {
   const btn = document.createElement("button");
   btn.dataset.tool = b.tool;
   btn.innerHTML = `<span class="ic">${b.ic}</span><span>${b.label}</span>`;
-  btn.onclick = () => {
-    state.tool = b.tool;
-    if (b.tool !== "rainbow") lastNonRainbowTool = b.tool;
-    renderBrushes(); renderColors(); renderPreview(); bumpRevAndSend();
-  };
+  btn.onclick = () => selectTool(b.tool);
   brushesEl.appendChild(btn);
 }
 function renderBrushes() {
-  for (const btn of brushesEl.children) btn.classList.toggle("on", btn.dataset.tool === state.tool);
+  document.querySelectorAll("[data-tool]").forEach(btn => btn.classList.toggle("on", btn.dataset.tool === state.tool));
 }
 
 /* ================= cores ================= */
@@ -359,49 +429,52 @@ const COLORS = [
   "#ffffff", "#ff3b3b", "#ff9500", "#ffee00", "#c6ff00", "#39ff14", "#00ffb3",
   "#00e5ff", "#2979ff", "#0040ff", "#8a2be2", "#b026ff", "#ff2d95", "#ff00c8",
 ];
-const colorsEl = $("colors");
-for (const c of COLORS) {
+function selectColor(c) {
+  state.color = c;
+  state.tool = state.tool === "rainbow" ? lastNonRainbowTool : state.tool; // escolher cor sólida sai do modo arco-íris
+  renderBrushes(); renderColors(); renderPreview(); bumpRevAndSend();
+}
+function selectRainbow() {
+  state.tool = "rainbow"; // mantém o último 'color' escolhido
+  renderBrushes(); renderColors(); renderPreview(); bumpRevAndSend();
+}
+function makeSwatch(c) {
   const btn = document.createElement("button");
   btn.className = "swatch";
   btn.style.background = c;
   btn.style.color = c;
   btn.dataset.color = c;
-  btn.onclick = () => {
-    state.color = c;
-    state.tool = state.tool === "rainbow" ? lastNonRainbowTool : state.tool; // escolher cor sólida sai do modo arco-íris
-    renderBrushes(); renderColors(); renderPreview(); bumpRevAndSend();
-  };
-  colorsEl.appendChild(btn);
+  btn.onclick = () => selectColor(c);
+  return btn;
 }
+const colorsEl = $("colors");
+for (const c of COLORS) colorsEl.appendChild(makeSwatch(c));
 const rainbowBtn = document.createElement("button");
 rainbowBtn.className = "swatch rainbow";
 rainbowBtn.dataset.rainbow = "1";
-rainbowBtn.onclick = () => {
-  state.tool = "rainbow"; // mantém o último 'color' escolhido
-  renderBrushes(); renderColors(); renderPreview(); bumpRevAndSend();
-};
+rainbowBtn.onclick = selectRainbow;
 colorsEl.appendChild(rainbowBtn);
 function renderColors() {
-  for (const btn of colorsEl.children) {
-    const isRainbowSwatch = btn.dataset.rainbow === "1";
-    if (isRainbowSwatch) { btn.classList.toggle("on", state.tool === "rainbow"); continue; }
+  document.querySelectorAll(".swatch").forEach(btn => {
+    if (btn.dataset.rainbow === "1") { btn.classList.toggle("on", state.tool === "rainbow"); return; }
     btn.classList.toggle("on", state.tool !== "rainbow" && btn.dataset.color === state.color);
-  }
+  });
 }
 
 /* ================= tamanhos: bolas crescentes ================= */
 const SIZES = [6, 14, 26, 44];
+function selectSize(s) { state.size = s; renderSizes(); renderPreview(); bumpRevAndSend(); }
 const sizesEl = $("sizes");
 for (const s of SIZES) {
   const btn = document.createElement("button");
   btn.dataset.size = s;
   const px = Math.round(14 + s * 0.9); // bola desenhada à escala, limitada ao botão
   btn.innerHTML = `<span class="dot" style="width:${px}px;height:${px}px"></span><span class="lbl">${s}px</span>`;
-  btn.onclick = () => { state.size = s; renderSizes(); renderPreview(); bumpRevAndSend(); };
+  btn.onclick = () => selectSize(s);
   sizesEl.appendChild(btn);
 }
 function renderSizes() {
-  for (const btn of sizesEl.children) btn.classList.toggle("on", +btn.dataset.size === state.size);
+  document.querySelectorAll("[data-size]").forEach(btn => btn.classList.toggle("on", +btn.dataset.size === state.size));
 }
 
 /* ================= simetria ================= */
@@ -616,6 +689,45 @@ let selectedZoneId = null;
 let selectedVertexIdx = null; // vértice tocado (só poly) — para "− Ponto"
 let adminOpen = false;
 
+/* ---- undo/redo da edição de zonas (snapshots do array `zones`, profundidade máx. 50) ----
+   NÃO é o undo/redo do desenho (kinds 'undo'/'redo' enviados ao display, botões
+   #undoBtn/#redoBtn lá em cima) — são pilhas e protocolos totalmente separados. */
+const ZONE_HISTORY_MAX = 50;
+let zoneUndoStack = [], zoneRedoStack = [];
+const deepCopyZones = z => JSON.parse(JSON.stringify(z));
+// chamar ANTES de qualquer operação que mute `zones` — guarda o estado pré-operação
+// e limpa a pilha de redo (nova operação invalida os "refazer" pendentes)
+let pendingZoneSnap = null; // snapshot capturado no pointerdown; só vira histórico no 1º movimento
+function pushZoneHistory() {
+  zoneUndoStack.push(deepCopyZones(zones));
+  if (zoneUndoStack.length > ZONE_HISTORY_MAX) zoneUndoStack.shift();
+  zoneRedoStack = [];
+}
+function applyZonesSnapshot(snap) {
+  zones = deepCopyZones(snap);
+  selectedZoneId = null; selectedVertexIdx = null;
+  renderAdminCanvas(); updateZoneButtons();
+  sendZones(true); zonesCloudSave();
+}
+function zoneUndo() {
+  if (!zoneUndoStack.length) return;
+  const snap = zoneUndoStack.pop();
+  zoneRedoStack.push(deepCopyZones(zones));
+  if (zoneRedoStack.length > ZONE_HISTORY_MAX) zoneRedoStack.shift();
+  applyZonesSnapshot(snap);
+}
+function zoneRedo() {
+  if (!zoneRedoStack.length) return;
+  const snap = zoneRedoStack.pop();
+  zoneUndoStack.push(deepCopyZones(zones));
+  if (zoneUndoStack.length > ZONE_HISTORY_MAX) zoneUndoStack.shift();
+  applyZonesSnapshot(snap);
+}
+$("zoneUndoBtn").onclick = zoneUndo;
+$("zoneRedoBtn").onclick = zoneRedo;
+// exposto só para inspeção/depuração (mesmo padrão do window.__mdDebug acima)
+window.__zonesDebug = { get undoLen() { return zoneUndoStack.length; }, get redoLen() { return zoneRedoStack.length; }, get zones() { return JSON.parse(JSON.stringify(zones)); } };
+
 // zonas antigas (antes do type/smooth/mode existirem) contam como poly reto,
 // mode 'occlude' (retro-compat: era o único comportamento antes do FIX G2)
 function normalizeZone(z) {
@@ -707,6 +819,99 @@ function zonesCloudSave() {
   }, 1000);
 }
 
+/* ---- imagem de referência (contorno da casa, só editor/tablet) ----
+   NUNCA é enviada por BroadcastChannel/Supabase Realtime nem aparece no display —
+   só serve de guia visual no admin. Persiste à parte das zonas (row própria) e
+   fica FORA do undo/redo da Parte 1 (não entra nos snapshots de `zones`). */
+const REFIMG_ID = ROOM === "default" ? "magicdraw-refimg" : "magicdraw-refimg:" + ROOM;
+let refImg = null; // Image() decodificada, pronta a desenhar
+let refImgDataUrl = null;
+let refImgLoadedOnce = false; // carrega da cloud só na 1ª vez que o admin abre
+let refImgCloudSaveT = 0;
+function refImgCloudSave() {
+  clearTimeout(refImgCloudSaveT);
+  refImgCloudSaveT = setTimeout(async () => {
+    try {
+      await fetch(`${SB_URL}/rest/v1/hand_config`, {
+        method: "POST",
+        headers: { ...SB_HDRS, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify([{ id: REFIMG_ID, data: refImgDataUrl ? { img: refImgDataUrl } : {}, updated_at: new Date().toISOString() }]),
+      });
+    } catch { /* offline: tenta gravar na próxima mudança */ }
+  }, 1500);
+}
+async function refImgCloudLoad() {
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/hand_config?id=eq.${REFIMG_ID}&select=data`, { headers: SB_HDRS });
+    if (!r.ok) return;
+    const cfg = (await r.json())[0]?.data;
+    if (cfg?.img) setRefImg(cfg.img, false); // já vem gravado: não regravar
+  } catch { /* offline: fica sem imagem de fundo até à próxima abertura */ }
+}
+function setRefImg(dataUrl, save) {
+  refImgDataUrl = dataUrl;
+  refImg = null;
+  if (dataUrl) {
+    const im = new Image();
+    // o load é assíncrono: redesenha os DOIS canvases que usam a imagem — o
+    // do admin e o do modo Desenhar (podia estar aberto antes do cloud-load
+    // chegar e ficava preto até um resize; review PR #40)
+    im.onload = () => { refImg = im; renderAdminCanvas(); renderDrawBase(); };
+    im.src = dataUrl;
+  }
+  renderAdminCanvas();
+  updateRefImgButton();
+  if (save) refImgCloudSave();
+}
+// reduz para lado maior <=maxSide e converte para JPEG na qualidade q (canvas offscreen)
+function downscaleToDataUrl(img, maxSide, q) {
+  const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+  const oc = document.createElement("canvas");
+  oc.width = w; oc.height = h;
+  oc.getContext("2d").drawImage(img, 0, 0, w, h);
+  return oc.toDataURL("image/jpeg", q);
+}
+const refImgInput = document.createElement("input");
+refImgInput.type = "file"; refImgInput.accept = "image/*"; refImgInput.hidden = true;
+document.body.appendChild(refImgInput);
+refImgInput.onchange = () => {
+  const file = refImgInput.files[0];
+  refImgInput.value = ""; // permite escolher o mesmo ficheiro outra vez
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      let dataUrl = downscaleToDataUrl(img, 1600, 0.8);
+      // row é jsonb, não abusar: se ainda pesar muito depois da 1ª compressão, aperta mais
+      if (dataUrl.length > 900 * 1024) dataUrl = downscaleToDataUrl(img, 1200, 0.7);
+      setRefImg(dataUrl, true);
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+};
+const refImgBtn = $("refImgBtn");
+let refImgConfirmTimer = null;
+function updateRefImgButton() {
+  clearTimeout(refImgConfirmTimer);
+  refImgBtn.classList.remove("confirm");
+  refImgBtn.innerHTML = refImgDataUrl ? "🗑<br>Imagem" : "🖼<br>Imagem";
+}
+refImgBtn.onclick = () => {
+  if (!refImgDataUrl) { refImgInput.click(); return; } // sem imagem: abre o seletor de ficheiro
+  // com imagem carregada: apagar exige confirmação de 2 toques (mesmo padrão do Limpar antigo)
+  if (refImgBtn.classList.contains("confirm")) {
+    clearTimeout(refImgConfirmTimer);
+    setRefImg(null, true);
+    return;
+  }
+  refImgBtn.classList.add("confirm");
+  refImgBtn.textContent = "confirmar?";
+  refImgConfirmTimer = setTimeout(updateRefImgButton, 3000);
+};
+
 /* ---- emissão em tempo real (protocolo kind:'zones', mesmos dois canais) ---- */
 const r4 = n => +n.toFixed(4);
 function sendZones(editing) {
@@ -749,6 +954,14 @@ function renderAdminCanvas() {
   const w = adminCanvas.clientWidth, h = adminCanvas.clientHeight;
   actx.clearRect(0, 0, w, h);
   actx.fillStyle = "#000"; actx.fillRect(0, 0, w, h);
+  // imagem de referência (contorno da casa): camada de fundo, esticada ao canvas 16:9 —
+  // o operador deve carregar já uma foto/desenho enquadrado 16:9. Alpha reduzido para
+  // as zonas verdes/vermelhas continuarem legíveis por cima.
+  if (refImg) {
+    actx.globalAlpha = 0.55;
+    actx.drawImage(refImg, 0, 0, w, h);
+    actx.globalAlpha = 1;
+  }
   for (const z of zones) {
     const selected = z.id === selectedZoneId;
     // FIX G2: verde = área de desenho (include), vermelho = oclusão (occlude, omissão)
@@ -796,6 +1009,8 @@ function updateZoneButtons() {
   $("zoneCurveBtn").disabled = !z || z.type !== "poly";
   $("zoneCurveBtn").classList.toggle("on", !!(z && z.type === "poly" && z.smooth));
   $("zonePointDelBtn").disabled = !(z && z.type === "poly" && selectedVertexIdx != null && z.pts.length > 3);
+  $("zoneUndoBtn").disabled = !zoneUndoStack.length;
+  $("zoneRedoBtn").disabled = !zoneRedoStack.length;
 }
 
 function pointInPoly(px, py, pts) {
@@ -852,6 +1067,7 @@ adminCanvas.addEventListener("pointerdown", e => {
     }
   }
   if (best) {
+    pendingZoneSnap = deepCopyZones(zones); // só entra no histórico se houver arrasto real (tap-select não gera passo no-op)
     selectedZoneId = best.zone.id;
     selectedVertexIdx = best.handle.kind === "vertex" ? best.handle.idx : null;
     dragging = { zoneId: best.zone.id, kind: best.handle.kind, idx: best.handle.idx };
@@ -864,6 +1080,7 @@ adminCanvas.addEventListener("pointerdown", e => {
   if (selZone && selZone.type === "poly") {
     for (const mp of zoneMidpointsPx(selZone, w, h)) {
       if (Math.hypot(mp.x - x, mp.y - y) < VERTEX_HIT_R) {
+        pushZoneHistory();
         selZone.pts.splice(mp.edgeAfter + 1, 0, [clamp01(nx), clamp01(ny)]);
         selectedVertexIdx = mp.edgeAfter + 1;
         renderAdminCanvas(); updateZoneButtons();
@@ -878,6 +1095,7 @@ adminCanvas.addEventListener("pointerdown", e => {
   selectedZoneId = hitZone ? hitZone.id : null;
   selectedVertexIdx = null;
   if (hitZone) {
+    pendingZoneSnap = deepCopyZones(zones); // idem: histórico só com arrasto real
     dragging = {
       zoneId: hitZone.id, kind: "body", startNX: nx, startNY: ny,
       startPts: hitZone.type === "ellipse" ? [[hitZone.cx, hitZone.cy]] : hitZone.pts.map(p => [p[0], p[1]]),
@@ -890,6 +1108,13 @@ adminCanvas.addEventListener("pointermove", e => {
   const { x, y, w, h, nx, ny } = getCanvasPt(e);
   const z = zones.find(zz => zz.id === dragging.zoneId);
   if (!z) return;
+  if (pendingZoneSnap) { // 1º movimento real do drag: agora sim, 1 passo de histórico
+    zoneUndoStack.push(pendingZoneSnap);
+    if (zoneUndoStack.length > ZONE_HISTORY_MAX) zoneUndoStack.shift();
+    zoneRedoStack = [];
+    pendingZoneSnap = null;
+    updateZoneButtons();
+  }
   if (dragging.kind === "vertex") {
     z.pts[dragging.idx] = [clamp01(nx), clamp01(ny)];
   } else if (dragging.kind === "center") {
@@ -920,6 +1145,7 @@ adminCanvas.addEventListener("pointermove", e => {
   zonesCloudSave();
 });
 function endDrag() {
+  pendingZoneSnap = null; // tap sem arrasto: o snapshot pendente morre aqui, sem passo no-op
   if (!dragging) return;
   dragging = null;
   sendZones(true); // garante que a posição final chega, sem esperar pelo throttle
@@ -948,6 +1174,7 @@ function nextSpawnOffset() {
   return [off, off];
 }
 $("zoneAddBtn").onclick = () => {
+  pushZoneHistory();
   const id = "z" + Math.random().toString(36).slice(2, 8);
   const [ox, oy] = nextSpawnOffset();
   // quadrilátero, ~25% do ecrã de lado, centrado no ecrã + deslocamento de cascata
@@ -963,6 +1190,7 @@ $("zoneAddBtn").onclick = () => {
   sendZones(true); zonesCloudSave();
 };
 $("zoneCircleBtn").onclick = () => {
+  pushZoneHistory();
   const id = "z" + Math.random().toString(36).slice(2, 8);
   const [ox, oy] = nextSpawnOffset();
   // elipse, raio ~12.5% do ecrã (diâmetro ~25%, mesma escala da zona quadrada) + cascata
@@ -974,6 +1202,7 @@ $("zoneCircleBtn").onclick = () => {
 $("zoneCurveBtn").onclick = () => {
   const z = zones.find(zz => zz.id === selectedZoneId);
   if (!z || z.type !== "poly") return;
+  pushZoneHistory();
   z.smooth = !z.smooth;
   renderAdminCanvas(); updateZoneButtons();
   sendZones(true); zonesCloudSave();
@@ -983,6 +1212,7 @@ $("zoneCurveBtn").onclick = () => {
 $("zoneTypeBtn").onclick = () => {
   const z = zones.find(zz => zz.id === selectedZoneId);
   if (!z) return;
+  pushZoneHistory();
   z.mode = (z.mode || "occlude") === "include" ? "occlude" : "include";
   renderAdminCanvas(); updateZoneButtons();
   sendZones(true); zonesCloudSave();
@@ -990,6 +1220,7 @@ $("zoneTypeBtn").onclick = () => {
 $("zonePointDelBtn").onclick = () => {
   const z = zones.find(zz => zz.id === selectedZoneId);
   if (!z || z.type !== "poly" || selectedVertexIdx == null || z.pts.length <= 3) return;
+  pushZoneHistory();
   z.pts.splice(selectedVertexIdx, 1);
   selectedVertexIdx = null;
   renderAdminCanvas(); updateZoneButtons();
@@ -997,6 +1228,7 @@ $("zonePointDelBtn").onclick = () => {
 };
 $("zoneDelBtn").onclick = () => {
   if (!selectedZoneId) return;
+  pushZoneHistory();
   zones = zones.filter(z => z.id !== selectedZoneId);
   selectedZoneId = null; selectedVertexIdx = null;
   renderAdminCanvas(); updateZoneButtons();
@@ -1012,6 +1244,7 @@ function openAdmin() {
   requestAnimationFrame(sizeAdminCanvas); // overlay precisa de estar visível para medir o canvas
   updateZoneButtons();
   sendZones(true); // entra no modo admin
+  if (!refImgLoadedOnce) { refImgLoadedOnce = true; refImgCloudLoad(); } // imagem de referência: só carrega da cloud na 1ª abertura
 }
 function closeAdmin() {
   adminOpen = false;
@@ -1045,6 +1278,178 @@ adminGearBtn.addEventListener("pointercancel", cancelPress);
 
 zonesCloudLoad(); // hidrata zonas guardadas antes de o admin abrir pela 1ª vez
 
+/* ==================================================================
+   Ecrã de desenho (✏️ Desenhar): operador/miúdos desenham no touch do
+   tablet, o traço sai projetado no edifício em tempo real. Kind novo
+   'tstroke' no MESMO canal magicdraw:<room> (aditivo — não mexe em
+   'state'/'zones'/etc.). O display mantém o traço por sid e alimenta-o
+   pelo MESMO pipeline do pinch (incrementalSegment/renderStrokePath) —
+   aqui só fica o envio + um eco local aproximado (o render fiel é lá).
+   ================================================================== */
+const drawScreen = $("drawScreen");
+const dCanvas = $("drawCanvasT"), dctx = dCanvas.getContext("2d");
+let drawScreenOpen = false;
+const STAMP_EMOJIS_TABLET = ["⭐", "❤️", "🌸", "✨", "🦋", "😀"]; // mesmo conjunto do display
+
+// mini pincéis (faixa do topo) + cores (rail lateral) + tamanhos (rail lateral) —
+// reaproveitam BRUSHES/COLORS/SIZES e selectTool/selectColor/selectSize já
+// definidos acima; renderBrushes/renderColors/renderSizes (document-wide)
+// tratam de os manter em sincronia com a grelha normal.
+const drawTopEl = $("drawTop"), drawColorsEl = $("drawColors"), drawSizesEl = $("drawSizes");
+for (const b of BRUSHES) {
+  const btn = document.createElement("button");
+  btn.dataset.tool = b.tool;
+  btn.innerHTML = `<span class="ic">${b.ic}</span>`;
+  btn.title = b.label;
+  btn.onclick = () => selectTool(b.tool);
+  drawTopEl.appendChild(btn);
+}
+for (const c of COLORS) {
+  const sw = makeSwatch(c);
+  sw.classList.add("mini");
+  drawColorsEl.appendChild(sw);
+}
+const drawRainbowBtn = document.createElement("button");
+drawRainbowBtn.className = "swatch mini rainbow";
+drawRainbowBtn.dataset.rainbow = "1";
+drawRainbowBtn.onclick = selectRainbow;
+drawColorsEl.appendChild(drawRainbowBtn);
+for (const s of SIZES) {
+  const btn = document.createElement("button");
+  btn.dataset.size = s;
+  btn.textContent = s + "px";
+  btn.onclick = () => selectSize(s);
+  drawSizesEl.appendChild(btn);
+}
+
+// fundo preto + imagem de referência (alpha ~0.5, se existir) — eco local,
+// os traços entram por cima; qualidade aproximada, o render fiel é no display
+function renderDrawBase() {
+  const w = dCanvas.clientWidth, h = dCanvas.clientHeight;
+  dctx.clearRect(0, 0, w, h);
+  dctx.fillStyle = "#000"; dctx.fillRect(0, 0, w, h);
+  if (refImg) { dctx.globalAlpha = 0.5; dctx.drawImage(refImg, 0, 0, w, h); dctx.globalAlpha = 1; }
+}
+function sizeDrawCanvas() {
+  // maior retângulo 16:9 que cabe no espaço disponível (a moldura de
+  // ferramentas à volta já reserva o resto) — mesmo padrão DPR-aware do #adminCanvas
+  const wrap = dCanvas.parentElement;
+  let cw = wrap.clientWidth, ch = cw * 9 / 16;
+  if (ch > wrap.clientHeight) { ch = wrap.clientHeight; cw = ch * 16 / 9; }
+  const dpr = window.devicePixelRatio || 1;
+  dCanvas.style.width = cw + "px"; dCanvas.style.height = ch + "px";
+  dCanvas.width = cw * dpr; dCanvas.height = ch * dpr;
+  dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  renderDrawBase();
+}
+window.addEventListener("resize", () => { if (drawScreenOpen) sizeDrawCanvas(); });
+
+$("drawModeBtn").onclick = () => {
+  drawScreenOpen = true;
+  drawScreen.hidden = false;
+  requestAnimationFrame(sizeDrawCanvas);
+  if (!refImgLoadedOnce) { refImgLoadedOnce = true; refImgCloudLoad(); } // mesma imagem de referência do admin
+};
+$("drawCloseBtn").onclick = () => { drawScreenOpen = false; drawScreen.hidden = true; };
+$("drawUndoBtn").onclick = () => $("undoBtn").click();
+$("drawRedoBtn").onclick = () => $("redoBtn").click();
+$("drawPhotoBtn").onclick = () => photoBtn.click();
+$("drawClearBtn").onclick = () => { send({ kind: "clear", scope: "draw" }); renderDrawBase(); };
+
+/* ---- eco local simplificado: mesma família de 8 pincéis, um segmento de
+   cada vez (sem o path contínuo/mandala do display — aproximado de propósito) ---- */
+function echoSegment(s, A, B) {
+  const { tool, color, size } = s.brush;
+  dctx.lineCap = "round"; dctx.lineJoin = "round"; dctx.shadowBlur = 0; dctx.globalAlpha = 1;
+  dctx.globalCompositeOperation = "source-over";
+  if (tool === "eraser") {
+    dctx.globalCompositeOperation = "destination-out";
+    dctx.lineWidth = size * 2;
+    dctx.beginPath(); dctx.moveTo(A.x, A.y); dctx.lineTo(B.x, B.y); dctx.stroke();
+    dctx.globalCompositeOperation = "source-over";
+    return;
+  }
+  if (tool === "spray") {
+    dctx.fillStyle = color;
+    for (let i = 0; i < 6; i++) {
+      const a = Math.random() * Math.PI * 2, r = Math.random() * size * 0.7;
+      dctx.beginPath(); dctx.arc(B.x + Math.cos(a) * r, B.y + Math.sin(a) * r, 1.2, 0, Math.PI * 2); dctx.fill();
+    }
+    return;
+  }
+  if (tool === "stamp") {
+    s.distSinceStamp += Math.hypot(B.x - A.x, B.y - A.y);
+    if (s.distSinceStamp < size * 1.8) return;
+    s.distSinceStamp = 0;
+    if (!s.emoji || Math.random() < 0.5) s.emoji = STAMP_EMOJIS_TABLET[Math.random() * STAMP_EMOJIS_TABLET.length | 0];
+    dctx.font = `${Math.round(size * 2)}px serif`; dctx.textAlign = "center"; dctx.textBaseline = "middle";
+    dctx.fillText(s.emoji, B.x, B.y);
+    return;
+  }
+  dctx.beginPath(); dctx.moveTo(A.x, A.y); dctx.lineTo(B.x, B.y);
+  if (tool === "rainbow") {
+    s.hue = (s.hue + Math.hypot(B.x - A.x, B.y - A.y) * 0.4) % 360;
+    dctx.strokeStyle = `hsl(${s.hue.toFixed(1)},100%,60%)`; dctx.lineWidth = size;
+    dctx.shadowColor = "#fff"; dctx.shadowBlur = 6;
+  } else if (tool === "neon") {
+    dctx.strokeStyle = color; dctx.lineWidth = Math.max(2, size * 0.6);
+    dctx.shadowColor = color; dctx.shadowBlur = size; dctx.globalAlpha = 0.95;
+  } else if (tool === "glitter") {
+    dctx.strokeStyle = color; dctx.lineWidth = Math.max(2, size * 0.35);
+    dctx.shadowColor = "#fff"; dctx.shadowBlur = 8;
+  } else if (tool === "marker") {
+    dctx.strokeStyle = color; dctx.lineWidth = size; dctx.globalAlpha = 0.5;
+  } else if (tool === "crayon") {
+    dctx.strokeStyle = color; dctx.lineWidth = Math.max(2, size * 0.7); dctx.globalAlpha = 0.85;
+  } else {
+    dctx.strokeStyle = color; dctx.lineWidth = size;
+  }
+  dctx.stroke();
+  dctx.shadowBlur = 0; dctx.globalAlpha = 1;
+}
+
+/* ---- toque/pointer: cada pointerId é um traço independente (multi-toque) —
+   coordenadas normalizadas 0-1 (o canvas 16:9 representa o ecrã do display) ---- */
+const TSTROKE_THROTTLE_MS = 40;
+const tabletStrokesLocal = new Map(); // pointerId -> { sid, brush, lastPt, hue, distSinceStamp, emoji, pending, timer }
+function drawCanvasPt(e) {
+  const rect = dCanvas.getBoundingClientRect();
+  const nx = clamp01((e.clientX - rect.left) / rect.width);
+  const ny = clamp01((e.clientY - rect.top) / rect.height);
+  return { nx, ny, px: nx * rect.width, py: ny * rect.height };
+}
+dCanvas.addEventListener("pointerdown", e => {
+  dCanvas.setPointerCapture(e.pointerId);
+  const { nx, ny, px, py } = drawCanvasPt(e);
+  const sid = Math.random().toString(36).slice(2, 10);
+  const brush = { tool: state.tool, color: state.color, size: state.size, mirror: state.mirror };
+  tabletStrokesLocal.set(e.pointerId, { sid, brush, lastPt: { x: px, y: py }, hue: Math.random() * 360, distSinceStamp: 0, emoji: null, pending: [], timer: null });
+  send({ kind: "tstroke", sid, phase: "start", pts: [[r4(nx), r4(ny)]], brush }); // brush SEMPRE no 'start' — o display congela-o por traço
+});
+dCanvas.addEventListener("pointermove", e => {
+  const s = tabletStrokesLocal.get(e.pointerId);
+  if (!s) return;
+  const { nx, ny, px, py } = drawCanvasPt(e);
+  echoSegment(s, s.lastPt, { x: px, y: py });
+  s.lastPt = { x: px, y: py };
+  s.pending.push([r4(nx), r4(ny)]);
+  if (!s.timer) {
+    s.timer = setTimeout(() => {
+      s.timer = null;
+      if (s.pending.length) { send({ kind: "tstroke", sid: s.sid, phase: "move", pts: s.pending }); s.pending = []; }
+    }, TSTROKE_THROTTLE_MS);
+  }
+});
+function endTabletStroke(e) {
+  const s = tabletStrokesLocal.get(e.pointerId);
+  if (!s) return;
+  clearTimeout(s.timer);
+  send({ kind: "tstroke", sid: s.sid, phase: "end", pts: s.pending });
+  tabletStrokesLocal.delete(e.pointerId);
+}
+dCanvas.addEventListener("pointerup", endTabletStroke);
+dCanvas.addEventListener("pointercancel", endTabletStroke);
+
 /* ================= arranque ================= */
 renderBrushes(); renderColors(); renderSizes(); renderMirrors(); renderPreview();
 sendState(); // estado inicial emitido no arranque
@@ -1053,6 +1458,18 @@ send({ kind: "hello" }); // pergunta ao display se há foto congelada (responde 
 /* ================= teclado ================= */
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") location.href = "index.html";
+  // atalhos de undo/redo das ZONAS: só reagem com o admin aberto (ignora fora dele)
+  if (!adminOpen) return;
+  const meta = e.ctrlKey || e.metaKey;
+  if (!meta) return;
+  const k = e.key.toLowerCase();
+  if (k === "z") {
+    e.preventDefault();
+    if (e.shiftKey) zoneRedo(); else zoneUndo(); // Ctrl/Cmd+Shift+Z = refazer
+  } else if (k === "y") {
+    e.preventDefault();
+    zoneRedo(); // Ctrl/Cmd+Y = refazer
+  }
 });
 </script>
 </body>

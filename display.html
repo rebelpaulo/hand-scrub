@@ -30,7 +30,7 @@
 <body>
   <iframe id="stage" allow="camera; microphone; fullscreen; autoplay" allowfullscreen></iframe>
   <canvas id="zoneCanvas"></canvas>
-  <div id="hint">Modo mapping — abre a home num tablet para controlar</div>
+  <div id="hint" hidden>⚠️ falha ao carregar a experiência — recarrega a página</div>
 
 <script type="module">
 const $ = id => document.getElementById(id);
@@ -277,7 +277,13 @@ bcZones.onmessage = e => onZonesMsg(e.data);
 })();
 send("hello");
 
-/* ================= estado do iframe (app atual) ================= */
+/* ================= estado do iframe (app atual) =================
+   UNIFICAÇÃO DOS DISPLAYS: "o display e o magicdraw-display são a mesma
+   coisa" — este shell arranca já com o Magic Draw carregado (não com o
+   ecrã preto/hint) e 'home' volta a ele, em vez de a um ecrã vazio. As
+   outras 4 experiências só entram por comando 'open' explícito do mapping
+   mode — continuam disponíveis, só deixam de ser o estado de repouso. */
+const HOME_APP = "magicdraw";
 let currentApp = null;
 let iframeReady = false;
 let pendingCampreview = null; // último {on} enviado antes do 'ready' (para re-enviar)
@@ -298,13 +304,7 @@ function openApp(app) {
   send("status", { app: currentApp });
 }
 function goHome() {
-  if (currentApp === null) return; // idempotente
-  currentApp = null;
-  iframeReady = false;
-  stage.removeAttribute("src");
-  stage.classList.remove("on");
-  hint.hidden = false;
-  send("status", { app: null });
+  openApp(HOME_APP); // por omissão volta ao Magic Draw, não a um ecrã vazio (idempotente se já lá está)
 }
 function toIframe(msg) {
   if (!currentApp || !stage.contentWindow) return;
@@ -371,6 +371,13 @@ async function loadZonesFromCloud() {
 resize();
 loadZonesFromCloud();
 keystoneCloudLoad();
+// UNIFICAÇÃO DOS DISPLAYS: arranca já com o Magic Draw (não com o ecrã
+// preto/hint) — o hint só volta a aparecer se o iframe falhar a carregar.
+stage.addEventListener("error", () => {
+  hint.textContent = "⚠️ falha ao carregar a experiência — recarrega a página";
+  hint.hidden = false;
+});
+openApp(HOME_APP);
 
 /* ================= teclas ================= */
 document.addEventListener("keydown", e => {
