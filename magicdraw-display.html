@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Magic Draw — ecrã de projeção</title>
+<style>
+  :root {
+    --panel: #0f1219cc;
+    --line: #2a3245;
+    --text: #eef2f8;
+    --muted: #98a2b6;
+    --hot: #fb7185;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: var(--text); }
+
+  /* ---------- camadas (baixo → cima) ---------- */
+  /* fundo preto = body background acima */
+  canvas#photoCanvas   { position: fixed; inset: 0; z-index: 1; display: block; }
+  canvas#drawCanvas    { position: fixed; inset: 0; z-index: 2; display: block; }
+  canvas#cursorCanvas  { position: fixed; inset: 0; z-index: 3; display: block; }
+  video#cam {
+    position: fixed; inset: 0; width: 100%; height: 100%; z-index: 4;
+    object-fit: cover; transform: scaleX(-1); /* mesma geometria "cover" do tracking */
+    opacity: 0; pointer-events: none; background: #000;
+  }
+  video#cam.show { opacity: 1; }
+
+  #photoOverlay { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+  #countdownNum {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: min(40vw, 40vh); font-weight: 800; color: #fff;
+    text-shadow: 0 0 60px rgba(255,255,255,.6);
+    z-index: 6; pointer-events: none;
+  }
+  #countdownNum[hidden] { display: none; }
+  #flash {
+    position: fixed; inset: 0; background: #fff; opacity: 0; z-index: 7;
+    pointer-events: none; transition: opacity .12s linear;
+  }
+
+  /* ---------- hint discreto (some ao primeiro 'state') ---------- */
+  #hint {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    color: var(--muted); font-size: 13px; letter-spacing: .01em;
+    z-index: 50; white-space: nowrap; pointer-events: none; opacity: .55;
+    transition: opacity .5s;
+  }
+  #hint[hidden] { display: none; }
+
+  /* ---------- camara-fail notice ---------- */
+  #notice {
+    position: fixed; left: 50%; top: 18px; transform: translateX(-50%);
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 99px;
+    padding: 9px 18px; font-size: 13px; color: var(--hot);
+    z-index: 96; max-width: calc(100vw - 32px);
+    white-space: normal; overflow-wrap: anywhere;
+  }
+  #notice[hidden] { display: none; }
+
+  /* ---------- start overlay (loader até o tracking arrancar) ---------- */
+  #startOverlay {
+    position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px;
+    background: #000;
+    transition: opacity .4s;
+  }
+  #startOverlay h1 { font-size: clamp(26px, 5vw, 44px); margin: 0; letter-spacing: -.02em; }
+  #startOverlay p { color: var(--muted); max-width: 560px; text-align: center; line-height: 1.6; margin: 0; padding: 0 20px; }
+  #startOverlay .loading { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+  #startOverlay .loading-dots { display: inline-flex; gap: 4px; }
+  #startOverlay .loading-dots span {
+    width: 4px; height: 4px; border-radius: 50%; background: var(--muted);
+    animation: startDot 1.4s infinite both;
+  }
+  #startOverlay .loading-dots span:nth-child(2) { animation-delay: .2s; }
+  #startOverlay .loading-dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes startDot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    #startOverlay .loading-dots span { animation: none; opacity: .6; }
+  }
+
+  #back {
+    position: fixed; top: 16px; left: 16px; z-index: 95; text-decoration: none;
+    color: #eef2f8; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 11px; padding: 8px 14px; font-size: 13px; font-weight: 600;
+    opacity: .35; transition: opacity .2s;
+  }
+  #back:hover { opacity: 1; }
+</style>
+</head>
+<body>
+  <a id="back" href="index.html">← voltar</a>
+
+  <canvas id="photoCanvas"></canvas>
+  <canvas id="drawCanvas"></canvas>
+  <canvas id="cursorCanvas"></canvas>
+  <video id="cam" playsinline muted></video>
+
+  <div id="photoOverlay">
+    <div id="countdownNum" hidden></div>
+    <div id="flash"></div>
+  </div>
+
+  <div id="hint">Abre magicdraw.html num tablet para controlar</div>
+  <div id="notice" hidden></div>
+
+  <div id="startOverlay">
+    <h1>🖌️ Magic Draw</h1>
+    <p>Ecrã de projeção — desenha no ar com o gesto de pinch (polegar + indicador).
+       O painel de controlo escolhe o pincel, a cor e o tamanho.</p>
+    <div class="loading" role="status" aria-live="polite" aria-atomic="true">
+      <span id="loadStatus">a preparar a câmara e o modelo</span>
+      <span class="loading-dots"><span></span><span></span><span></span></span>
+    </div>
+  </div>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+const photoCanvas = $("photoCanvas"), pctx = photoCanvas.getContext("2d");
+const drawCanvas = $("drawCanvas"), dctx = drawCanvas.getContext("2d");
+const cursorCanvas = $("cursorCanvas"), cctx = cursorCanvas.getContext("2d");
+const cam = $("cam");
+const notice = $("notice");
+const hint = $("hint");
+const countdownNum = $("countdownNum");
+const flash = $("flash");
+
+/* ================= tunables (mesmos mecanismos de draw.html/enxame.html) ================= */
+const PINCH_ENTER = 0.35, PINCH_EXIT = 0.5; // histerese: entra apertado, sai largo
+const PINCH_DEBOUNCE_MS = 120;              // filtra ruído do landmark antes de ativar o pinch
+const EMA_ALPHA = 0.4;                      // suavização do ponto (draw.html)
+const MIN_POINT_DIST = 3;                   // px, espaçamento mínimo entre pontos guardados
+const HAND_LABEL_MIRRORED = true;           // vista selfie espelhada — "Left" do modelo = mão direita do utilizador
+const STAMP_EMOJIS = ["⭐", "❤️", "🌸", "✨", "🦋", "😀"];
+
+const DEFAULT_STATE = { tool: "neon", color: "#00ffcc", size: 14, mirror: 0 };
+let currentState = { ...DEFAULT_STATE };
+
+function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
+function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+
+/* ================= canvas sizing (DPR-aware) ================= */
+// ponytail: o resize limpa o desenho e a foto (canvas perde o buffer ao
+// mudar de tamanho) — aceitável para este ecrã de projeção, que fica fixo
+// num ecrã/projetor durante o evento e não deve ser redimensionado a meio.
+let W = 0, H = 0;
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth; H = window.innerHeight;
+  for (const [cv, ctx] of [[photoCanvas, pctx], [drawCanvas, dctx], [cursorCanvas, cctx]]) {
+    cv.width = W * dpr; cv.height = H * dpr;
+    cv.style.width = W + "px"; cv.style.height = H + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* ================= protocolo de sync (BroadcastChannel + Supabase Realtime) ================= */
+const SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
+/* ?room=X emparelha esta projeção com o tablet que abrir o mesmo room —
+   sem isto, todas as instalações partilhariam um único stream de comandos. */
+const ROOM = (new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "") || "default";
+const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
+let seq = 0;
+
+const bc = new BroadcastChannel("magicdraw:" + ROOM);
+let sbChannel = null; // null se o CDN falhar — o BroadcastChannel local continua a funcionar
+let sbReady = false;
+
+function send(kind, extra = {}) {
+  const payload = { v: 1, src: CLIENT_ID, seq: ++seq, kind, ...extra };
+  try { bc.postMessage(payload); } catch (e) { /* canal indisponível — ignora */ }
+  if (sbReady) {
+    try { sbChannel.send({ type: "broadcast", event: "msg", payload }); } catch (e) { /* ignora */ }
+  }
+}
+
+// dedup: as mensagens chegam pelos DOIS canais — ignora repetições e as
+// próprias mensagens enviadas por este cliente.
+const lastSeqBySrc = new Map();
+function onMsg(payload) {
+  if (!payload || payload.v !== 1 || payload.src === CLIENT_ID) return;
+  const last = lastSeqBySrc.get(payload.src) ?? -1;
+  if (payload.seq <= last) return;
+  lastSeqBySrc.set(payload.src, payload.seq);
+  handleMsg(payload);
+}
+bc.onmessage = e => onMsg(e.data);
+// import dinâmico guardado (como magicdraw.html): uma falha do CDN não pode
+// matar a projeção — câmara, tracking e BroadcastChannel arrancam na mesma.
+(async () => {
+  try {
+    const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    sbChannel = sb.channel("magicdraw:" + ROOM);
+    sbChannel.on("broadcast", { event: "msg" }, ({ payload }) => onMsg(payload)).subscribe(status => {
+      if (status === "SUBSCRIBED") { sbReady = true; send("hello"); }
+    });
+  } catch (e) { /* offline/CDN em baixo: fica só o canal local */ }
+})();
+send("hello"); // já dispara via BroadcastChannel de imediato; o supabase repete quando subscrito
+
+let gotFirstState = false;
+function handleMsg(payload) {
+  switch (payload.kind) {
+    case "state":
+      currentState = { ...DEFAULT_STATE, ...payload.state };
+      if (!gotFirstState) { gotFirstState = true; hint.hidden = true; }
+      break;
+    case "clear":
+      dctx.clearRect(0, 0, W, H);
+      pctx.clearRect(0, 0, W, H);
+      break;
+    case "photo":
+      startPhotoSequence();
+      break;
+  }
+}
+
+/* ================= transformação cover (mesma matemática de enxame.html) ================= */
+function coverTransform(fw, fh) {
+  const s = Math.max(W / fw, H / fh);
+  return { s, offX: (W - fw * s) / 2, offY: (H - fh * s) / 2 };
+}
+function camToScreen(nx, ny) {
+  const vw = cam.videoWidth || 1280, vh = cam.videoHeight || 720;
+  const { s, offX, offY } = coverTransform(vw, vh);
+  return { x: W - (offX + nx * vw * s), y: offY + ny * vh * s }; // espelhado
+}
+function drawVideoCover(ctx, video) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return;
+  const { s, offX, offY } = coverTransform(vw, vh);
+  ctx.save();
+  ctx.translate(W, 0); ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0, vw, vh, offX, offY, vw * s, vh * s);
+  ctx.restore();
+}
+
+/* ================= sequência de foto ================= */
+const delay = ms => new Promise(r => setTimeout(r, ms));
+let photoBusy = false;
+async function startPhotoSequence() {
+  if (photoBusy) return; // ignora 'photo' se já houver uma sequência a decorrer
+  photoBusy = true;
+  cam.classList.add("show");
+  countdownNum.hidden = false;
+  for (const n of [3, 2, 1]) {
+    countdownNum.textContent = String(n);
+    await delay(1000);
+  }
+  countdownNum.hidden = true;
+  flash.style.opacity = "1";
+  await delay(150);
+  drawVideoCover(pctx, cam); // congela o frame atual, mesma geometria cover+espelho do tracking
+  flash.style.opacity = "0";
+  cam.classList.remove("show");
+  photoBusy = false;
+}
+
+/* ================= motor de desenho (8 pincéis) ================= */
+function resetCtx() { dctx.globalAlpha = 1; dctx.globalCompositeOperation = "source-over"; dctx.shadowBlur = 0; }
+function traceQuad(A, C, B) { dctx.beginPath(); dctx.moveTo(A.x, A.y); dctx.quadraticCurveTo(C.x, C.y, B.x, B.y); }
+
+function drawNeon(A, C, B, color, size) {
+  dctx.lineCap = "round"; dctx.lineJoin = "round";
+  dctx.globalCompositeOperation = "lighter";
+  dctx.strokeStyle = color; dctx.shadowColor = color; dctx.shadowBlur = size * 1.6;
+  dctx.lineWidth = size; dctx.globalAlpha = 0.9;
+  traceQuad(A, C, B); dctx.stroke();
+  dctx.globalCompositeOperation = "source-over";
+  dctx.shadowColor = "#fff"; dctx.shadowBlur = size * 0.5;
+  dctx.strokeStyle = "#fff"; dctx.lineWidth = Math.max(1, size * 0.28); dctx.globalAlpha = 0.95;
+  traceQuad(A, C, B); dctx.stroke();
+  resetCtx();
+}
+function drawStar(p, r, color, alpha) {
+  dctx.save(); dctx.translate(p.x, p.y); dctx.rotate(Math.random() * Math.PI);
+  dctx.globalAlpha = alpha; dctx.fillStyle = color;
+  dctx.beginPath();
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2;
+    dctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    dctx.lineTo(Math.cos(a + Math.PI / 4) * r * 0.35, Math.sin(a + Math.PI / 4) * r * 0.35);
+  }
+  dctx.closePath(); dctx.fill(); dctx.restore();
+}
+function drawGlitter(A, C, B, color, size) {
+  dctx.lineCap = "round"; dctx.shadowBlur = 0;
+  dctx.strokeStyle = color; dctx.lineWidth = Math.max(1, size * 0.25); dctx.globalAlpha = 0.8;
+  traceQuad(A, C, B); dctx.stroke();
+  if (Math.random() < 0.6) {
+    const t = Math.random();
+    const p = { x: A.x + (B.x - A.x) * t, y: A.y + (B.y - A.y) * t };
+    drawStar(p, 2 + Math.random() * size * 0.4, Math.random() < 0.5 ? "#fff" : color, 0.4 + Math.random() * 0.5);
+  }
+  resetCtx();
+}
+function drawStamp(pt, size, emoji) {
+  dctx.save(); dctx.globalAlpha = 1; dctx.font = `${Math.round(size * 2)}px serif`;
+  dctx.textAlign = "center"; dctx.textBaseline = "middle";
+  dctx.translate(pt.x, pt.y); dctx.rotate((Math.random() - 0.5) * 0.6);
+  dctx.fillText(emoji, 0, 0);
+  dctx.restore();
+}
+function drawSpray(pt, color, size) {
+  dctx.fillStyle = color; dctx.shadowBlur = 0;
+  const r = size * 1.5;
+  for (let i = 0; i < 30; i++) {
+    const ang = Math.random() * Math.PI * 2, rad = Math.random() * r;
+    dctx.globalAlpha = 0.08 + Math.random() * 0.12;
+    dctx.beginPath();
+    dctx.arc(pt.x + Math.cos(ang) * rad, pt.y + Math.sin(ang) * rad, 1 + Math.random() * 1.5, 0, Math.PI * 2);
+    dctx.fill();
+  }
+  resetCtx();
+}
+function drawMarker(A, C, B, color, size) {
+  dctx.lineCap = "round"; dctx.lineJoin = "round"; dctx.shadowBlur = 0;
+  dctx.strokeStyle = color; dctx.lineWidth = size; dctx.globalAlpha = 0.45;
+  traceQuad(A, C, B); dctx.stroke();
+  resetCtx();
+}
+function drawCrayon(A, C, B, color, size) {
+  dctx.lineCap = "round"; dctx.lineJoin = "round"; dctx.shadowBlur = 0;
+  dctx.strokeStyle = color; dctx.lineWidth = Math.max(1, size * 0.35); dctx.globalAlpha = 0.5;
+  for (let i = 0; i < 3; i++) {
+    const jx = (Math.random() - 0.5) * size * 0.3, jy = (Math.random() - 0.5) * size * 0.3;
+    traceQuad({ x: A.x + jx, y: A.y + jy }, { x: C.x + jx, y: C.y + jy }, { x: B.x + jx, y: B.y + jy });
+    dctx.stroke();
+  }
+  resetCtx();
+}
+function drawEraser(A, C, B, size) {
+  dctx.globalCompositeOperation = "destination-out";
+  dctx.lineCap = "round"; dctx.lineJoin = "round";
+  dctx.lineWidth = size * 2.5; dctx.globalAlpha = 1;
+  traceQuad(A, C, B); dctx.stroke();
+  resetCtx();
+}
+
+function rotatePt(p, cx, cy, ang) {
+  const dx = p.x - cx, dy = p.y - cy, cos = Math.cos(ang), sin = Math.sin(ang);
+  return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+}
+
+// desenha um segmento suavizado (A -> controlo C -> B), replicando-o em
+// mandala à volta do centro do ecrã quando mirror = 2/4/8 (mesma cor/pincel).
+function strokeSegment(strokeObj, A, C, B) {
+  const state = currentState;
+  const segLen = dist(A, B);
+  const n = (state.mirror && state.mirror > 0) ? state.mirror : 1;
+  const cx = W / 2, cy = H / 2;
+
+  let color = state.color;
+  if (state.tool === "rainbow") {
+    strokeObj.hue = (strokeObj.hue + segLen * 0.4) % 360;
+    color = `hsl(${strokeObj.hue.toFixed(1)},100%,60%)`;
+  }
+  let doStamp = false;
+  if (state.tool === "stamp") {
+    strokeObj.distSinceStamp = (strokeObj.distSinceStamp || 0) + segLen;
+    if (strokeObj.distSinceStamp >= state.size * 1.8) {
+      doStamp = true; strokeObj.distSinceStamp = 0;
+      if (!strokeObj.emoji || Math.random() < 0.5) strokeObj.emoji = STAMP_EMOJIS[Math.random() * STAMP_EMOJIS.length | 0];
+    }
+  }
+
+  for (let k = 0; k < n; k++) {
+    const ang = k * (2 * Math.PI / n);
+    const rA = n === 1 ? A : rotatePt(A, cx, cy, ang);
+    const rC = n === 1 ? C : rotatePt(C, cx, cy, ang);
+    const rB = n === 1 ? B : rotatePt(B, cx, cy, ang);
+    switch (state.tool) {
+      case "neon": case "rainbow": drawNeon(rA, rC, rB, color, state.size); break;
+      case "glitter": drawGlitter(rA, rC, rB, color, state.size); break;
+      case "stamp": if (doStamp) drawStamp(rB, state.size, strokeObj.emoji); break;
+      case "spray": drawSpray(rB, color, state.size); break;
+      case "marker": drawMarker(rA, rC, rB, color, state.size); break;
+      case "crayon": drawCrayon(rA, rC, rB, color, state.size); break;
+      case "eraser": drawEraser(rA, rC, rB, state.size); break;
+      default: drawNeon(rA, rC, rB, color, state.size);
+    }
+  }
+}
+
+/* ================= estado por mão (tracking + traço) ================= */
+const handState = {
+  Left: { visible: false, pinching: false, belowSince: undefined, sx: 0, sy: 0, x: 0, y: 0, stroke: null },
+  Right: { visible: false, pinching: false, belowSince: undefined, sx: 0, sy: 0, x: 0, y: 0, stroke: null },
+};
+
+// novo ponto de pinch: suaviza (EMA), respeita o espaçamento mínimo e
+// alimenta o buffer de suavização quadraticCurveTo (por ponto médio,
+// padrão de draw.html) que emite o segmento a desenhar.
+function onPinchPoint(hand, rawPt) {
+  const st = handState[hand];
+  if (st.sx === undefined || !st.stroke.buf.length) { st.sx = rawPt.x; st.sy = rawPt.y; }
+  else { st.sx += (rawPt.x - st.sx) * EMA_ALPHA; st.sy += (rawPt.y - st.sy) * EMA_ALPHA; }
+  st.x = st.sx; st.y = st.sy;
+
+  const buf = st.stroke.buf;
+  const lastPt = buf[buf.length - 1];
+  if (lastPt && Math.hypot(st.sx - lastPt.x, st.sy - lastPt.y) < MIN_POINT_DIST) return;
+  buf.push({ x: st.sx, y: st.sy });
+  if (buf.length > 3) buf.shift();
+  if (buf.length === 3) {
+    const [p0, p1, p2] = buf;
+    strokeSegment(st.stroke, mid(p0, p1), p1, mid(p1, p2));
+    buf.shift(); // mantém [p1, p2] para ligar ao próximo segmento sem juntas visíveis
+  }
+}
+
+function processHands(res, now) {
+  const hands = res.landmarks || [];
+  const seen = { Left: false, Right: false };
+  for (let i = 0; i < hands.length && i < 2; i++) {
+    const lm = hands[i];
+    const label = res.handednesses?.[i]?.[0]?.categoryName || "Right";
+    const userHand = HAND_LABEL_MIRRORED ? (label === "Left" ? "Right" : "Left") : label;
+    if (seen[userHand]) continue;
+    seen[userHand] = true;
+    const st = handState[userHand];
+    st.visible = true;
+
+    const handSize = dist(lm[0], lm[9]) || 0.0001;
+    const ratio = dist(lm[4], lm[8]) / handSize;
+    const was = st.pinching;
+    if (st.pinching) {
+      st.pinching = ratio < PINCH_EXIT; // sai sem debounce
+      if (!st.pinching) st.belowSince = undefined; // largou: o próximo pinch volta a dever o debounce
+    } else if (ratio < PINCH_ENTER) {
+      if (st.belowSince === undefined) st.belowSince = now;
+      st.pinching = (now - st.belowSince) >= PINCH_DEBOUNCE_MS;
+    } else {
+      st.belowSince = undefined;
+    }
+
+    const midXn = (lm[4].x + lm[8].x) / 2, midYn = (lm[4].y + lm[8].y) / 2;
+    const p = camToScreen(midXn, midYn);
+
+    if (st.pinching && !was) {
+      st.sx = undefined; // sem lag-in: primeiro ponto do traço é o ponto cru
+      st.stroke = { buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null };
+    }
+    if (st.pinching) {
+      onPinchPoint(userHand, p);
+    } else {
+      st.x = p.x; st.y = p.y;
+      if (was) st.stroke = null; // largou: fecha o traço, o próximo pinch começa outro
+    }
+  }
+  for (const hand of ["Left", "Right"]) {
+    if (!seen[hand]) {
+      const st = handState[hand];
+      st.visible = false; st.pinching = false; st.belowSince = undefined; st.stroke = null;
+    }
+  }
+}
+
+/* ================= cursor por mão (visível mesmo sem pinch) ================= */
+function drawCursors() {
+  cctx.clearRect(0, 0, W, H);
+  for (const hand of ["Left", "Right"]) {
+    const st = handState[hand];
+    if (!st.visible) continue;
+    const r = st.pinching ? 12 : 7;
+    cctx.beginPath();
+    cctx.arc(st.x, st.y, r, 0, Math.PI * 2);
+    cctx.fillStyle = st.pinching ? (currentState.color || "#fff") : "#ffffff";
+    cctx.shadowColor = cctx.fillStyle; cctx.shadowBlur = st.pinching ? 20 : 8;
+    cctx.globalAlpha = st.pinching ? 0.9 : 0.35;
+    cctx.fill();
+  }
+  cctx.globalAlpha = 1; cctx.shadowBlur = 0;
+}
+
+/* ================= mediapipe + câmara (padrão de draw.html) ================= */
+let landmarker = null, running = false, lastVideoTime = -1;
+function showNotice(msg) { notice.textContent = msg; notice.hidden = false; }
+function setLoadStatus(msg) { const s = $("loadStatus"); if (s) s.textContent = msg; }
+
+let overlayDismissed = false;
+function dismissOverlay() {
+  if (overlayDismissed) return;
+  overlayDismissed = true;
+  const ov = $("startOverlay");
+  if (!ov) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { ov.remove(); return; }
+  ov.style.opacity = "0";
+  setTimeout(() => ov.remove(), 400);
+}
+
+async function initModel() {
+  const { FilesetResolver, HandLandmarker } =
+    await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
+  const fileset = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  landmarker = await HandLandmarker.createFromOptions(fileset, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO", numHands: 2
+  });
+}
+
+function loop() {
+  if (!running) return;
+  const now = performance.now();
+  if (cam.currentTime !== lastVideoTime) {
+    lastVideoTime = cam.currentTime;
+    const res = landmarker.detectForVideo(cam, now);
+    processHands(res, now);
+    dismissOverlay();
+  }
+  drawCursors();
+  requestAnimationFrame(loop);
+}
+
+async function start() {
+  setLoadStatus("a carregar o modelo de mãos");
+  try {
+    await initModel();
+  } catch (e) {
+    showNotice("⚠️ não foi possível carregar o modelo de mãos — verifica a ligação e recarrega");
+    setLoadStatus("falhou — recarrega a página para tentar de novo");
+    return;
+  }
+  try {
+    setLoadStatus("a ligar câmara");
+    // 16:9 (não 4:3): em ecrãs/projeções paisagem o recorte do cover é menor (padrão de enxame.html)
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: "user" } });
+    cam.srcObject = stream; await cam.play();
+    running = true;
+    setLoadStatus("a preparar a primeira deteção");
+    stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+      running = false;
+      for (const hand of ["Left", "Right"]) {
+        const st = handState[hand];
+        st.visible = false; st.pinching = false; st.stroke = null;
+      }
+      showNotice("📷 câmara indisponível — câmara desligada");
+    });
+    loop();
+  } catch (e) {
+    showNotice("📷 câmara indisponível — verifica as permissões");
+    setLoadStatus("falhou — recarrega a página para tentar de novo");
+  }
+}
+start();
+
+/* ================= teclas ================= */
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") location.href = "index.html";
+  if (e.key === "f" || e.key === "F") {
+    document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  }
+});
+</script>
+</body>
+</html>

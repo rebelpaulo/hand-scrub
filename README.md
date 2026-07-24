@@ -72,9 +72,9 @@ npx serve -l 8777
 
 ## Ficheiros
 - `index.html` — a **home** da instalação: ecrã de atração (attract) com o
-  nome da experiência a rodar + mão fantasma, seguido do seletor de 4
+  nome da experiência a rodar + mão fantasma, seguido do seletor de 5
   cartões (🦋 Butterfly Effect · 🌑 Sala de Sombras · ✍️ Pinch Draw ·
-  🌬️ Enxame). Toca, clica, tecla ou aproxima a mão para passar do attract
+  🌬️ Enxame · 🪄 Magic Draw). Toca, clica, tecla ou aproxima a mão para passar do attract
   ao seletor; os cartões respondem a clique, hover-dwell do rato e dwell
   por gesto (👍 700ms).
 - `scrub.html` — 🦋 Butterfly Effect, a app original (self-contained, sem
@@ -153,5 +153,28 @@ npx serve -l 8777
   parada; um pequeno atraso (120ms) a ativar o pinch e a exigência dos 200ms
   filtram falsos pinches causados por ruído da câmara durante um movimento
   rápido da mão.
+- `magicdraw-display.html` + `magicdraw.html` — 🪄 **Magic Draw**, experiência
+  de dois ecrãs pensada para projection mapping num edifício:
+  - **`magicdraw-display.html`** (o ecrã projetado): fundo **preto** por
+    omissão; a webcam serve APENAS para hand tracking (o vídeo nunca fica
+    visível). Qualquer pessoa desenha no ar com o **pinch** de qualquer das
+    mãos (mesmo motor do Pinch Draw: histerese 0.35/0.5 + debounce 120ms,
+    transformação cover espelhada), com traços **persistentes** até "Limpar".
+    8 pincéis: ✨ néon, 🌈 arco-íris (o tom roda com a distância), ⭐ brilhos,
+    🦋 carimbos de emoji, 🎨 spray, 🖊️ marcador, 🖍️ lápis de cera e 🧽
+    borracha — mais simetria mandala 2×/4×/8×. **📸 Foto**: o vídeo aparece,
+    contagem 3‑2‑1, flash branco, e o frame fica **congelado** por baixo do
+    desenho para as pessoas rabiscarem por cima (o vídeo esconde-se logo).
+  - **`magicdraw.html`** (o painel de controlo, num tablet): touch-only, sem
+    câmara — botões grandes (≥90px, para crianças), 14 cores estilo caixa de
+    lápis + swatch 🌈, 4 bolas de tamanho, simetria, pré-visualização do
+    traço, 📸 Foto e 🗑 Limpar com confirmação.
+  - **Sync em tempo real** pelos dois canais em simultâneo:
+    `BroadcastChannel` (mesma máquina, <5ms) + **Supabase Realtime
+    Broadcast** (entre dispositivos), com dedup por `src`/`seq` — o controlo
+    emite sempre o estado COMPLETO (nunca deltas) em cada mudança e a cada
+    3s como keepalive. Acrescenta `?room=<nome>` ao URL das DUAS páginas
+    para emparelhar um tablet com a sua projeção (sem isto ambas usam o
+    room `default` — instalações separadas devem usar rooms separados).
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).

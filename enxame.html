@@ -657,6 +657,7 @@ function processHands(res, now) {
     const was = st.pinching;
     if (st.pinching) {
       st.pinching = ratio < PINCH_EXIT; // hysteresis EXIT unchanged, no debounce
+      if (!st.pinching) st.belowSince = undefined; // released: next pinch owes the debounce again
     } else if (ratio < PINCH_ENTER) {
       // ENTRY DEBOUNCE: only activate once the ratio has stayed below ENTER
       // continuously for PINCH_DEBOUNCE_MS -- filters transient landmark noise
