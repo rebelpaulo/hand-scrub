@@ -937,8 +937,10 @@ function stepParticles(dt, now) {
         const ambientTanSpeed = p.angularSpeed * vortexFactor(r, rRef) * r;
         const blended = blendVelocity(p.vx, p.vy, tx * ambientTanSpeed, ty * ambientTanSpeed, dt, p.vBlendTau);
         p.vx = blended.vx; p.vy = blended.vy;
-        if (now >= p.vBlendUntil) { delete p.vBlendStart; delete p.vBlendDurMs; delete p.vBlendUntil; delete p.vBlendTau; }
       } else {
+        // primeiro frame após o fim do blend: limpar o estado (dentro do
+        // ramo `blending` era inalcançável — achado do CodeRabbit, PR #33)
+        if (p.vBlendUntil !== undefined) { delete p.vBlendStart; delete p.vBlendDurMs; delete p.vBlendUntil; delete p.vBlendTau; }
         const { fx, fy } = springForce(p.x, p.y, a.x, a.y, springK);
         p.vx += (fx + (Math.random() - 0.5) * AMBIENT_JITTER) * dt;
         p.vy += (fy + (Math.random() - 0.5) * AMBIENT_JITTER) * dt;
