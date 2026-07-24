@@ -749,6 +749,9 @@ let pipClosed = false;
     pip.hidden = pipClosed; reopen.hidden = !pipClosed;
     if (!pipClosed) { const r = pip.getBoundingClientRect(); placePip(r.left, r.top); }
   };
+  // liga/desliga o preview via comando externo (shell de projeção) — não mexe
+  // em pipClosed/localStorage, é só visibilidade momentânea
+  pip.setCamPreview = on => { pip.hidden = !on; reopen.hidden = on; };
 
   // arrastar (ignora cliques nos controlos e na pega de resize)
   let sx, sy, ox, oy, dragging = false;
@@ -1153,6 +1156,14 @@ renderChips();
 selectScene(pendingScene);
 cloudLoad();
 startExperience();
+
+/* ================= ponte postMessage (shell de projeção) ================= */
+if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
+window.addEventListener("message", e => {
+  if (e.origin !== location.origin || e.data?.mapping !== 1) return;
+  if (e.data.cmd === "campreview") pip.setCamPreview(!!e.data.on);
+  else if (e.data.cmd === "scene" && Number.isInteger(e.data.i) && SCENES[e.data.i]) selectScene(e.data.i);
+});
 </script>
 </body>
 </html>

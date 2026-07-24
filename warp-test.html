@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>warp.js — harness de teste</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #0b0d10;
+    color: #e6e8eb;
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 16px;
+  }
+  h1 { font-size: 15px; margin: 0 0 4px; color: #9be7db; }
+  p.sub { margin: 0 0 16px; color: #8a8f98; }
+  .layout {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .panel {
+    background: #14171b;
+    border: 1px solid #262b31;
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .canvases { display: flex; gap: 12px; flex-wrap: wrap; }
+  canvas { display: block; background: #000; border-radius: 4px; }
+  #srcCanvas { width: 320px; height: 180px; border: 1px solid #262b31; }
+  #outCanvas { width: 640px; height: 360px; border: 1px solid #262b31; cursor: crosshair; touch-action: none; }
+  .controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 220px;
+  }
+  label { display: flex; flex-direction: column; gap: 4px; color: #b8bcc4; }
+  select, button {
+    background: #1c2127;
+    color: #e6e8eb;
+    border: 1px solid #333a42;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: inherit;
+    cursor: pointer;
+  }
+  button:hover, select:hover { border-color: #9be7db; }
+  .row { display: flex; gap: 8px; }
+  .checkrow { flex-direction: row; align-items: center; }
+  #fps { font-variant-numeric: tabular-nums; color: #9be7db; font-weight: 600; }
+  #status { white-space: pre-wrap; font-size: 11px; color: #8a8f98; max-width: 220px; }
+  .hint { font-size: 11px; color: #6b7078; }
+</style>
+</head>
+<body>
+<h1>warp.js — harness de validação</h1>
+<p class="sub">Fonte (esquerda) → warp N×N (direita, WebGL). Arraste os pontos sobre o canvas de saída.</p>
+
+<div class="layout">
+  <div class="panel canvases">
+    <div>
+      <div class="hint">fonte (canvas 2D animado)</div>
+      <canvas id="srcCanvas" width="640" height="360"></canvas>
+    </div>
+    <div>
+      <div class="hint">saída (WebGL, warped)</div>
+      <canvas id="outCanvas" width="1920" height="1080"></canvas>
+    </div>
+  </div>
+
+  <div class="panel controls">
+    <label>
+      N (pontos por lado)
+      <select id="nSelect">
+        <option value="2">2 (keystone 4 cantos)</option>
+        <option value="3">3</option>
+        <option value="5" selected>5</option>
+        <option value="9">9</option>
+        <option value="17">17</option>
+      </select>
+    </label>
+
+    <label class="row checkrow">
+      <input type="checkbox" id="testPatternToggle" />
+      mostrar grelha de teste
+    </label>
+
+    <div class="row">
+      <button id="identityBtn">identity</button>
+      <button id="randomBtn">aleatório suave</button>
+    </div>
+
+    <div>FPS: <span id="fps">–</span></div>
+    <div id="status"></div>
+  </div>
+</div>
+
+<script type="module">
+import { createWarp } from './warp.js';
+
+const srcCanvas = document.getElementById('srcCanvas');
+const outCanvas = document.getElementById('outCanvas');
+const srcCtx = srcCanvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const fpsEl = document.getElementById('fps');
+
+// Resolução real do canvas de saída (1080p para o teste de FPS).
+outCanvas.width = 1920;
+outCanvas.height = 1080;
+
+const warp = createWarp(outCanvas, { n: 5 });
+warp.resize();
+window.__warp = warp; // exposto para verificação via consola do browser
+
+let n = 5;
+
+// ---- Fonte animada: gradiente a mexer + "relógio" (ponteiro giratório) ----
+function drawSource(t) {
+  const w = srcCanvas.width, h = srcCanvas.height;
+  const grad = srcCtx.createLinearGradient(0, 0, w, h);
+  const hue = (t * 30) % 360;
+  grad.addColorStop(0, `hsl(${hue}, 70%, 45%)`);
+  grad.addColorStop(1, `hsl(${(hue + 120) % 360}, 70%, 30%)`);
+  srcCtx.fillStyle = grad;
+  srcCtx.fillRect(0, 0, w, h);
+
+  // grelha de referência fina para se perceber a deformação com a fonte real
+  srcCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+  srcCtx.lineWidth = 1;
+  for (let x = 0; x <= w; x += w / 8) {
+    srcCtx.beginPath(); srcCtx.moveTo(x, 0); srcCtx.lineTo(x, h); srcCtx.stroke();
+  }
+  for (let y = 0; y <= h; y += h / 8) {
+    srcCtx.beginPath(); srcCtx.moveTo(0, y); srcCtx.lineTo(w, y); srcCtx.stroke();
+  }
+
+  // "relógio": ponteiro giratório no centro, prova que a fonte está animada
+  const cx = w / 2, cy = h / 2, r = Math.min(w, h) * 0.35;
+  srcCtx.strokeStyle = '#fff';
+  srcCtx.fillStyle = 'rgba(0,0,0,0.35)';
+  srcCtx.beginPath(); srcCtx.arc(cx, cy, r, 0, Math.PI * 2); srcCtx.fill();
+  srcCtx.beginPath(); srcCtx.arc(cx, cy, r, 0, Math.PI * 2); srcCtx.stroke();
+  const angle = t * 2;
+  srcCtx.lineWidth = 4;
+  srcCtx.beginPath();
+  srcCtx.moveTo(cx, cy);
+  srcCtx.lineTo(cx + Math.cos(angle) * r * 0.85, cy + Math.sin(angle) * r * 0.85);
+  srcCtx.stroke();
+
+  // marcador nos 4 cantos + centro (ajuda a validar identidade/cantos a olho)
+  srcCtx.fillStyle = '#ff5566';
+  [[8,8],[w-8,8],[8,h-8],[w-8,h-8],[w/2,h/2]].forEach(([x,y]) => {
+    srcCtx.beginPath(); srcCtx.arc(x, y, 6, 0, Math.PI * 2); srcCtx.fill();
+  });
+}
+
+// ---- Pontos arrastáveis sobre o canvas de saída ----
+let dragIdx = -1;
+const HIT_RADIUS_CSS = 14; // px CSS, hit generoso
+
+function pointsToCssPositions() {
+  const pts = warp.getPoints();
+  const rect = outCanvas.getBoundingClientRect();
+  const res = [];
+  for (let i = 0; i < pts.length / 2; i++) {
+    res.push({
+      x: pts[i * 2] * rect.width,
+      y: pts[i * 2 + 1] * rect.height,
+    });
+  }
+  return res;
+}
+
+function cssToLocal(evt) {
+  const rect = outCanvas.getBoundingClientRect();
+  const cx = (evt.touches ? evt.touches[0].clientX : evt.clientX) - rect.left;
+  const cy = (evt.touches ? evt.touches[0].clientY : evt.clientY) - rect.top;
+  return { x: cx, y: cy, w: rect.width, h: rect.height };
+}
+
+function pickPoint(evt) {
+  const { x, y } = cssToLocal(evt);
+  const positions = pointsToCssPositions();
+  let best = -1, bestDist = HIT_RADIUS_CSS;
+  positions.forEach((p, i) => {
+    const d = Math.hypot(p.x - x, p.y - y);
+    if (d < bestDist) { bestDist = d; best = i; }
+  });
+  return best;
+}
+
+outCanvas.addEventListener('pointerdown', (e) => {
+  const idx = pickPoint(e);
+  if (idx >= 0) {
+    dragIdx = idx;
+    outCanvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+});
+outCanvas.addEventListener('pointermove', (e) => {
+  if (dragIdx < 0) return;
+  const { x, y, w, h } = cssToLocal(e);
+  const pts = warp.getPoints();
+  pts[dragIdx * 2] = Math.min(1.5, Math.max(-0.5, x / w));
+  pts[dragIdx * 2 + 1] = Math.min(1.5, Math.max(-0.5, y / h));
+  warp.setPoints(pts);
+  e.preventDefault();
+});
+function endDrag(e) { dragIdx = -1; }
+outCanvas.addEventListener('pointerup', endDrag);
+outCanvas.addEventListener('pointercancel', endDrag);
+
+function drawHandles(overlayCtx, rect) {
+  const positions = pointsToCssPositions();
+  overlayCtx.clearRect(0, 0, rect.width, rect.height);
+  overlayCtx.save();
+  positions.forEach((p, i) => {
+    overlayCtx.beginPath();
+    overlayCtx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+    overlayCtx.fillStyle = i === dragIdx ? '#ff5566' : 'rgba(155,231,219,0.9)';
+    overlayCtx.fill();
+    overlayCtx.lineWidth = 1.5;
+    overlayCtx.strokeStyle = '#0b0d10';
+    overlayCtx.stroke();
+  });
+  overlayCtx.restore();
+}
+
+// overlay HTML5 canvas 2D por cima do WebGL, só para desenhar as alças
+const overlay = document.createElement('canvas');
+overlay.style.position = 'absolute';
+overlay.style.pointerEvents = 'none';
+const overlayWrap = document.createElement('div');
+overlayWrap.style.position = 'relative';
+outCanvas.parentNode.insertBefore(overlayWrap, outCanvas);
+overlayWrap.appendChild(outCanvas);
+overlayWrap.appendChild(overlay);
+function syncOverlay() {
+  const rect = outCanvas.getBoundingClientRect();
+  overlay.style.left = outCanvas.offsetLeft + 'px';
+  overlay.style.top = outCanvas.offsetTop + 'px';
+  overlay.width = rect.width;
+  overlay.height = rect.height;
+  overlay.style.width = rect.width + 'px';
+  overlay.style.height = rect.height + 'px';
+}
+const overlayCtx = overlay.getContext('2d');
+syncOverlay();
+window.addEventListener('resize', syncOverlay);
+
+// ---- Controlos ----
+document.getElementById('nSelect').addEventListener('change', (e) => {
+  n = parseInt(e.target.value, 10);
+  warp.setGrid(n);
+});
+document.getElementById('testPatternToggle').addEventListener('change', (e) => {
+  warp.showTestPattern(e.target.checked);
+});
+document.getElementById('identityBtn').addEventListener('click', () => {
+  warp.identity();
+});
+document.getElementById('randomBtn').addEventListener('click', () => {
+  const pts = warp.getPoints();
+  for (let i = 0; i < pts.length; i += 2) {
+    pts[i] += (Math.random() - 0.5) * 0.08;
+    pts[i + 1] += (Math.random() - 0.5) * 0.08;
+  }
+  warp.setPoints(pts);
+});
+
+// ---- Loop de render + FPS ----
+let frames = 0, lastFpsT = performance.now(), fps = 0;
+function frame(tMs) {
+  const t = tMs / 1000;
+  drawSource(t);
+  warp.render(srcCanvas);
+  syncOverlay();
+  drawHandles(overlayCtx, outCanvas.getBoundingClientRect());
+
+  frames++;
+  if (tMs - lastFpsT >= 500) {
+    fps = (frames * 1000) / (tMs - lastFpsT);
+    fpsEl.textContent = fps.toFixed(1);
+    frames = 0;
+    lastFpsT = tMs;
+    statusEl.textContent =
+      `N=${n} identity=${warp.isIdentity()} out=${outCanvas.width}x${outCanvas.height}`;
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -272,6 +272,9 @@ let pipClosed = false;
     pip.hidden = pipClosed; reopen.hidden = !pipClosed;
     if (!pipClosed) { const r = pip.getBoundingClientRect(); placePip(r.left, r.top); }
   };
+  // liga/desliga o preview via comando externo (shell de projeção) — não mexe
+  // em pipClosed/localStorage, é só visibilidade momentânea
+  pip.setCamPreview = on => { pip.hidden = !on; reopen.hidden = on; };
 
   let sx, sy, ox, oy, dragging = false;
   pip.addEventListener("pointerdown", e => {
@@ -842,6 +845,14 @@ function renderLoop() {
   renderer.render(scene, camera3);
   requestAnimationFrame(renderLoop);
 }
+
+/* ================= ponte postMessage (shell de projeção) ================= */
+if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
+window.addEventListener("message", e => {
+  if (e.origin !== location.origin || e.data?.mapping !== 1) return;
+  // se o preview ainda não estiver pronto (câmara não arrancou), ignora em silêncio
+  if (e.data.cmd === "campreview") pip.setCamPreview?.(!!e.data.on);
+});
 </script>
 </body>
 </html>
