@@ -382,6 +382,16 @@ function handleMsg(payload) {
       dctx.clearRect(0, 0, W, H);
       sctx.clearRect(0, 0, W, H); // traço em curso (FIX B) também some
       if (scope === "all") { pctx.clearRect(0, 0, W, H); photoOnDisplay = false; }
+      // cancela traços ATIVOS: senão o rAF seguinte redesenha-os e a largada
+      // assava-os — o limpar "ressuscitava" parte do desenho (review PR #35)
+      for (const hand of ["Left", "Right"]) {
+        const st = handState[hand];
+        if (st.stroke) {
+          st.stroke = st.pinching
+            ? { pts: [], buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null, preSnap: snapshotDrawCanvas(), brush: { ...currentState } }
+            : null; // pinch já largado: nada a continuar
+        }
+      }
       break;
     }
     case "photo":
@@ -409,7 +419,8 @@ function handleMsg(payload) {
    guardadas pelo controlo (a preto, modo não-edição) — sobrevive a reload. */
 async function loadZonesFromCloud() {
   try {
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.magicdraw-zones&select=data`, {
+    const zonesId = ROOM === "default" ? "magicdraw-zones" : "magicdraw-zones:" + ROOM; // row por instalação
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.${encodeURIComponent(zonesId)}&select=data`, {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
     });
     if (!r.ok) return;
@@ -747,11 +758,22 @@ function renderActiveStrokes() {
 function bakeStroke(st) {
   const strokeObj = st.stroke;
   if (!strokeObj) return;
-  pushUndo(strokeObj.preSnap);
   const b = strokeObj.brush || currentState; // pincel do arranque do traço
-  if (PATH_TOOLS.has(b.tool) && strokeObj.pts.length >= 2) {
-    renderStrokePath(dctx, b.tool, strokeObj.pts, b.color, b.size, b.mirror);
-    resetCtx();
+  if (PATH_TOOLS.has(b.tool)) {
+    // path: nada foi para o drawCanvas até agora — o snapshot NO MOMENTO DO
+    // BAKE já inclui o traço da outra mão assado entretanto (review PR #35:
+    // o preSnap do arranque apagava o 1º traço ao desfazer o 2º)
+    if (strokeObj.pts.length >= 2) {
+      pushUndo(snapshotDrawCanvas());
+      renderStrokePath(dctx, b.tool, strokeObj.pts, b.color, b.size, b.mirror);
+      resetCtx();
+    }
+  } else {
+    // incrementais (spray/carimbos/brilhos/borracha): os píxeis já estão no
+    // drawCanvas — o preSnap do arranque é o único "antes" possível.
+    // ponytail: 2 mãos incrementais SIMULTÂNEAS entrelaçam píxeis; o undo do
+    // 2º traço leva o troço do 1º pintado depois do seu arranque — aceite.
+    pushUndo(strokeObj.preSnap);
   }
 }
 

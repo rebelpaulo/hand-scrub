@@ -678,7 +678,9 @@ function zoneMidpointsPx(z, w, h) {
 const clamp01 = v => Math.min(1, Math.max(0, v));
 
 /* ---- persistência cloud (Supabase · hand_config, id "magicdraw-zones") ---- */
-const ZONES_ID = "magicdraw-zones";
+// room 'default' mantém a row histórica; outros rooms têm a sua própria —
+// instalações separadas deixam de esmagar a máscara umas das outras.
+const ZONES_ID = ROOM === "default" ? "magicdraw-zones" : "magicdraw-zones:" + ROOM;
 let zonesCloudSaveT = 0;
 // true assim que o utilizador mexe nas zonas nesta sessão — o fetch de arranque
 // pode resolver DEPOIS disso (rede lenta) e não pode esmagar o que já foi criado
