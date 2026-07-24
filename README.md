@@ -153,22 +153,40 @@ npx serve -l 8777
   parada; um pequeno atraso (120ms) a ativar o pinch e a exigência dos 200ms
   filtram falsos pinches causados por ruído da câmara durante um movimento
   rápido da mão.
-- `magicdraw-display.html` + `magicdraw.html` — 🪄 **Magic Draw**, experiência
-  de dois ecrãs pensada para projection mapping num edifício:
-  - **`magicdraw-display.html`** (o ecrã projetado): fundo **preto** por
-    omissão; a webcam serve APENAS para hand tracking (o vídeo nunca fica
-    visível). Qualquer pessoa desenha no ar com o **pinch** de qualquer das
-    mãos (mesmo motor do Pinch Draw: histerese 0.35/0.5 + debounce 120ms,
-    transformação cover espelhada), com traços **persistentes** até "Limpar".
-    8 pincéis: ✨ néon, 🌈 arco-íris (o tom roda com a distância), ⭐ brilhos,
-    🦋 carimbos de emoji, 🎨 spray, 🖊️ marcador, 🖍️ lápis de cera e 🧽
-    borracha — mais simetria mandala 2×/4×/8×. **📸 Foto**: o vídeo aparece,
-    contagem 3‑2‑1, flash branco, e o frame fica **congelado** por baixo do
-    desenho para as pessoas rabiscarem por cima (o vídeo esconde-se logo).
+- `display.html` + `magicdraw-display.html` + `magicdraw.html` — 🪄 **Magic
+  Draw**, experiência de dois ecrãs pensada para projection mapping num
+  edifício:
+  - **`display.html`** é O ECRÃ DE PROJEÇÃO real (o shell de mapping: iframe +
+    máscara de zonas + keystone) — arranca já com o Magic Draw carregado por
+    omissão (`magicdraw-display.html` dentro do iframe) e `home` volta a ele;
+    as outras 4 experiências (🦋🌑✍️🌬️) só entram por comando `open` explícito
+    do mapping mode. É o URL a apontar ao projetor/LED.
+  - **`magicdraw-display.html`** é o MOTOR interno do Magic Draw — corre
+    dentro do iframe do `display.html` (produção) OU sozinho (standalone, só
+    para testar): fundo **preto** por omissão; a webcam serve APENAS para hand
+    tracking (o vídeo nunca fica visível). Qualquer pessoa desenha no ar com o
+    **pinch** de qualquer das mãos (mesmo motor do Pinch Draw: histerese
+    0.35/0.5 + debounce 120ms, transformação cover espelhada), com traços
+    **persistentes** até "Limpar". 8 pincéis: ✨ néon, 🌈 arco-íris (o tom roda
+    com a distância), ⭐ brilhos, 🦋 carimbos de emoji, 🎨 spray, 🖊️ marcador,
+    🖍️ lápis de cera e 🧽 borracha — mais simetria mandala 2×/4×/8×. **📸
+    Foto**: o vídeo aparece, contagem 3‑2‑1, flash branco, e o frame fica
+    **congelado** por baixo do desenho para as pessoas rabiscarem por cima (o
+    vídeo esconde-se logo). Dentro do iframe do `display.html` não desenha a
+    própria máscara de zonas (o shell já mascara por cima) — só o faz quando
+    aberto standalone.
   - **`magicdraw.html`** (o painel de controlo, num tablet): touch-only, sem
     câmara — botões grandes (≥90px, para crianças), 14 cores estilo caixa de
     lápis + swatch 🌈, 4 bolas de tamanho, simetria, pré-visualização do
     traço, 📸 Foto e 🗑 Limpar com confirmação.
+  - **✏️ Desenhar** (no painel do tablet): troca para um ecrã de desenho a
+    ecrã inteiro — ferramentas encolhidas numa moldura nas bordas (pincéis no
+    topo, cores + tamanhos na lateral, ↩️↪️/📸/🗑/fechar no rodapé), canvas
+    central 16:9 com a imagem de referência da fachada por baixo e eco local
+    aproximado dos traços. Cada dedo (multi-toque) é um traço independente,
+    transmitido ao vivo ao display como `tstroke` (`start`/`move`/`end`,
+    pontos normalizados) pelo MESMO pipeline de render do pinch — desenhar no
+    tablet e apertar com a mão funcionam ao mesmo tempo.
   - **Sync em tempo real** pelos dois canais em simultâneo:
     `BroadcastChannel` (mesma máquina, <5ms) + **Supabase Realtime
     Broadcast** (entre dispositivos), com dedup por `src`/`seq` — o controlo
