@@ -318,10 +318,12 @@
   }
 
   /* ============================================================ MAPPING MODE — hotspot secreto */
-  /* hotspot invisível no canto inferior direito — sem qualquer traço visual,
+  /* hotspot invisível no canto inferior esquerdo — sem qualquer traço visual,
      só existe para ser mantido premido 10s (ver script). */
   #mapHotspot {
-    position: fixed; right: 0; bottom: 0; width: 72px; height: 72px;
+    /* canto inferior ESQUERDO — o direito tem o camPip (preview da câmara)
+       a disputar os toques; 96px porque um hold de 10s precisa de área */
+    position: fixed; left: 0; bottom: 0; width: 96px; height: 96px;
     z-index: 500; background: transparent; touch-action: none;
   }
   /* hotspot invisível no canto SUPERIOR direito — máquina do projetor: 3s
@@ -1138,19 +1140,32 @@ function showMapConfirm(text, okLabel, cancelLabel, onOk) {
    cancela se largar ou mover demais. Dois hotspots usam isto (cantos
    diferentes, timers independentes — nunca conflituam). ---------- */
 function wireHoldHotspot(el, ms, onFire) {
-  const TOL = 16; // px — mover mais do que isto cancela o hold
-  let timer = 0, sx = 0, sy = 0;
-  function onMove(e) { if (Math.hypot(e.clientX - sx, e.clientY - sy) > TOL) cancel(); }
-  function cancel() { clearTimeout(timer); timer = 0; document.removeEventListener("pointermove", onMove); }
+  // 48px: num hold de 10s o dedo derrapa sempre; 16px cancelava holds reais.
+  const TOL = 48;
+  let timer = 0, sx = 0, sy = 0, pid = null; // pid: só UM dedo comanda o hold
+  function onMove(e) { if (e.pointerId === pid && Math.hypot(e.clientX - sx, e.clientY - sy) > TOL) cancel(); }
+  function onUp(e) { if (e.pointerId === pid) cancel(); }
+  function cancel() {
+    clearTimeout(timer); timer = 0; pid = null;
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    document.removeEventListener("pointercancel", onUp);
+  }
   el.addEventListener("pointerdown", e => {
-    sx = e.clientX; sy = e.clientY;
+    if (pid !== null) return; // 2º dedo durante um hold: ignora, não reinicia
+    pid = e.pointerId; sx = e.clientX; sy = e.clientY;
+    // captura o ponteiro: sair da área do elemento deixa de matar o hold —
+    // só o levantar do dedo (pointerup/cancel) ou derrapar além de TOL.
+    try { el.setPointerCapture(e.pointerId); } catch { /* indisponível: segue sem captura */ }
+    // up/cancel no DOCUMENT: mesmo sem captura, largar fora do hotspot cancela
     document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
     timer = setTimeout(() => { cancel(); onFire(); }, ms);
   });
-  ["pointerup", "pointercancel", "pointerleave"].forEach(ev => el.addEventListener(ev, cancel));
 }
 
-/* canto inferior direito, 10s: liga/desliga o mapping mode */
+/* canto inferior esquerdo, 10s: liga/desliga o mapping mode */
 const HOTSPOT_HOLD_MS = 10000;
 wireHoldHotspot(mapHotspot, HOTSPOT_HOLD_MS, () => {
   if (mappingMode) {
