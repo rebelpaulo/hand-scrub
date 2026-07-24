@@ -290,7 +290,7 @@ function onMsg(msg) {
   const prev = lastSeq.get(msg.src) ?? -1;
   if (msg.seq <= prev) return;
   lastSeq.set(msg.src, msg.seq);
-  if (msg.kind === "hello") { sendState(); sendZones(false); } // display recarregado a meio: reenvia estado + zonas, sem entrar em edição
+  if (msg.kind === "hello") { sendState(); sendZones(adminOpen); } // display recarregado a meio: reenvia estado + zonas (em modo edição se o admin estiver aberto)
   if (msg.kind === "state") lastSeenRev = Math.max(lastSeenRev, msg.rev || 0); // outro controlo: só acerta o relógio lógico, NUNCA adota a UI daqui
   if (msg.kind === "photo") hasPhoto = true;
   if (msg.kind === "clear" && (!msg.scope || msg.scope === "all")) hasPhoto = false;
