@@ -926,6 +926,28 @@ document.addEventListener("keydown", e => {
     document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
   }
 });
+
+/* ================= hotspot fullscreen (mesmo padrão do display.html) =================
+   5 toques seguidos no canto inferior direito (≤1.2s entre cada) alternam o
+   fullscreen — 'click' e não pointerdown: em touch a ativação de utilizador
+   só é concedida no fim do toque. Também útil quando esta página corre
+   standalone (sem o shell display.html por cima). */
+const fsHotspot = document.createElement("div");
+fsHotspot.style.cssText = "position:fixed;right:0;bottom:0;width:72px;height:72px;z-index:120;";
+fsHotspot.setAttribute("aria-hidden", "true");
+document.body.appendChild(fsHotspot);
+let fsClicks = 0, fsClickTimer = 0;
+fsHotspot.addEventListener("click", () => {
+  clearTimeout(fsClickTimer);
+  fsClicks++;
+  if (fsClicks >= 5) {
+    fsClicks = 0;
+    const p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    p?.catch?.(() => { /* recusado (política do browser): fica como está */ });
+    return;
+  }
+  fsClickTimer = setTimeout(() => { fsClicks = 0; }, 1200);
+});
 </script>
 </body>
 </html>
