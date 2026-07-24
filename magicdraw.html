@@ -164,6 +164,7 @@
   #zoneTypeBtn.mode-include { border-color: #00dc7855; }
   #zoneTypeBtn.mode-occlude { border-color: #ff4d5555; }
   #zoneDoneBtn { border-color: #00ffcc; background: #0f2b26; flex-basis: 100%; }
+  #refImgBtn.confirm { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
 
   /* ---------- seletor: áreas de desenho (verde) vs zonas de oclusão (vermelho) ---------- */
   #zoneModeSelect { display: flex; gap: 8px; }
@@ -219,10 +220,13 @@
       <div id="adminActions">
         <button id="zoneAddBtn">➕<br>Criar zona</button>
         <button id="zoneCircleBtn">⭕<br>Criar círculo</button>
+        <button id="refImgBtn">🖼<br>Imagem</button>
         <button id="zoneCurveBtn" disabled>◠<br>Curvas</button>
         <button id="zoneTypeBtn" disabled>🔁<br>Tipo</button>
         <button id="zonePointDelBtn" disabled>−<br>Ponto</button>
         <button id="zoneDelBtn" disabled>🗑<br>Apagar</button>
+        <button id="zoneUndoBtn" disabled>↩️<br>Desfazer</button>
+        <button id="zoneRedoBtn" disabled>↪️<br>Refazer</button>
         <button id="zoneDoneBtn">✔<br>Concluir</button>
       </div>
     </div>
@@ -616,6 +620,44 @@ let selectedZoneId = null;
 let selectedVertexIdx = null; // vértice tocado (só poly) — para "− Ponto"
 let adminOpen = false;
 
+/* ---- undo/redo da edição de zonas (snapshots do array `zones`, profundidade máx. 50) ----
+   NÃO é o undo/redo do desenho (kinds 'undo'/'redo' enviados ao display, botões
+   #undoBtn/#redoBtn lá em cima) — são pilhas e protocolos totalmente separados. */
+const ZONE_HISTORY_MAX = 50;
+let zoneUndoStack = [], zoneRedoStack = [];
+const deepCopyZones = z => JSON.parse(JSON.stringify(z));
+// chamar ANTES de qualquer operação que mute `zones` — guarda o estado pré-operação
+// e limpa a pilha de redo (nova operação invalida os "refazer" pendentes)
+function pushZoneHistory() {
+  zoneUndoStack.push(deepCopyZones(zones));
+  if (zoneUndoStack.length > ZONE_HISTORY_MAX) zoneUndoStack.shift();
+  zoneRedoStack = [];
+}
+function applyZonesSnapshot(snap) {
+  zones = deepCopyZones(snap);
+  selectedZoneId = null; selectedVertexIdx = null;
+  renderAdminCanvas(); updateZoneButtons();
+  sendZones(true); zonesCloudSave();
+}
+function zoneUndo() {
+  if (!zoneUndoStack.length) return;
+  const snap = zoneUndoStack.pop();
+  zoneRedoStack.push(deepCopyZones(zones));
+  if (zoneRedoStack.length > ZONE_HISTORY_MAX) zoneRedoStack.shift();
+  applyZonesSnapshot(snap);
+}
+function zoneRedo() {
+  if (!zoneRedoStack.length) return;
+  const snap = zoneRedoStack.pop();
+  zoneUndoStack.push(deepCopyZones(zones));
+  if (zoneUndoStack.length > ZONE_HISTORY_MAX) zoneUndoStack.shift();
+  applyZonesSnapshot(snap);
+}
+$("zoneUndoBtn").onclick = zoneUndo;
+$("zoneRedoBtn").onclick = zoneRedo;
+// exposto só para inspeção/depuração (mesmo padrão do window.__mdDebug acima)
+window.__zonesDebug = { get undoLen() { return zoneUndoStack.length; }, get redoLen() { return zoneRedoStack.length; }, get zones() { return JSON.parse(JSON.stringify(zones)); } };
+
 // zonas antigas (antes do type/smooth/mode existirem) contam como poly reto,
 // mode 'occlude' (retro-compat: era o único comportamento antes do FIX G2)
 function normalizeZone(z) {
@@ -707,6 +749,96 @@ function zonesCloudSave() {
   }, 1000);
 }
 
+/* ---- imagem de referência (contorno da casa, só editor/tablet) ----
+   NUNCA é enviada por BroadcastChannel/Supabase Realtime nem aparece no display —
+   só serve de guia visual no admin. Persiste à parte das zonas (row própria) e
+   fica FORA do undo/redo da Parte 1 (não entra nos snapshots de `zones`). */
+const REFIMG_ID = ROOM === "default" ? "magicdraw-refimg" : "magicdraw-refimg:" + ROOM;
+let refImg = null; // Image() decodificada, pronta a desenhar
+let refImgDataUrl = null;
+let refImgLoadedOnce = false; // carrega da cloud só na 1ª vez que o admin abre
+let refImgCloudSaveT = 0;
+function refImgCloudSave() {
+  clearTimeout(refImgCloudSaveT);
+  refImgCloudSaveT = setTimeout(async () => {
+    try {
+      await fetch(`${SB_URL}/rest/v1/hand_config`, {
+        method: "POST",
+        headers: { ...SB_HDRS, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify([{ id: REFIMG_ID, data: refImgDataUrl ? { img: refImgDataUrl } : {}, updated_at: new Date().toISOString() }]),
+      });
+    } catch { /* offline: tenta gravar na próxima mudança */ }
+  }, 1500);
+}
+async function refImgCloudLoad() {
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/hand_config?id=eq.${REFIMG_ID}&select=data`, { headers: SB_HDRS });
+    if (!r.ok) return;
+    const cfg = (await r.json())[0]?.data;
+    if (cfg?.img) setRefImg(cfg.img, false); // já vem gravado: não regravar
+  } catch { /* offline: fica sem imagem de fundo até à próxima abertura */ }
+}
+function setRefImg(dataUrl, save) {
+  refImgDataUrl = dataUrl;
+  refImg = null;
+  if (dataUrl) {
+    const im = new Image();
+    im.onload = () => { refImg = im; renderAdminCanvas(); };
+    im.src = dataUrl;
+  }
+  renderAdminCanvas();
+  updateRefImgButton();
+  if (save) refImgCloudSave();
+}
+// reduz para lado maior <=maxSide e converte para JPEG na qualidade q (canvas offscreen)
+function downscaleToDataUrl(img, maxSide, q) {
+  const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+  const oc = document.createElement("canvas");
+  oc.width = w; oc.height = h;
+  oc.getContext("2d").drawImage(img, 0, 0, w, h);
+  return oc.toDataURL("image/jpeg", q);
+}
+const refImgInput = document.createElement("input");
+refImgInput.type = "file"; refImgInput.accept = "image/*"; refImgInput.hidden = true;
+document.body.appendChild(refImgInput);
+refImgInput.onchange = () => {
+  const file = refImgInput.files[0];
+  refImgInput.value = ""; // permite escolher o mesmo ficheiro outra vez
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      let dataUrl = downscaleToDataUrl(img, 1600, 0.8);
+      // row é jsonb, não abusar: se ainda pesar muito depois da 1ª compressão, aperta mais
+      if (dataUrl.length > 900 * 1024) dataUrl = downscaleToDataUrl(img, 1200, 0.7);
+      setRefImg(dataUrl, true);
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+};
+const refImgBtn = $("refImgBtn");
+let refImgConfirmTimer = null;
+function updateRefImgButton() {
+  clearTimeout(refImgConfirmTimer);
+  refImgBtn.classList.remove("confirm");
+  refImgBtn.innerHTML = refImgDataUrl ? "🗑<br>Imagem" : "🖼<br>Imagem";
+}
+refImgBtn.onclick = () => {
+  if (!refImgDataUrl) { refImgInput.click(); return; } // sem imagem: abre o seletor de ficheiro
+  // com imagem carregada: apagar exige confirmação de 2 toques (mesmo padrão do Limpar antigo)
+  if (refImgBtn.classList.contains("confirm")) {
+    clearTimeout(refImgConfirmTimer);
+    setRefImg(null, true);
+    return;
+  }
+  refImgBtn.classList.add("confirm");
+  refImgBtn.textContent = "confirmar?";
+  refImgConfirmTimer = setTimeout(updateRefImgButton, 3000);
+};
+
 /* ---- emissão em tempo real (protocolo kind:'zones', mesmos dois canais) ---- */
 const r4 = n => +n.toFixed(4);
 function sendZones(editing) {
@@ -749,6 +881,14 @@ function renderAdminCanvas() {
   const w = adminCanvas.clientWidth, h = adminCanvas.clientHeight;
   actx.clearRect(0, 0, w, h);
   actx.fillStyle = "#000"; actx.fillRect(0, 0, w, h);
+  // imagem de referência (contorno da casa): camada de fundo, esticada ao canvas 16:9 —
+  // o operador deve carregar já uma foto/desenho enquadrado 16:9. Alpha reduzido para
+  // as zonas verdes/vermelhas continuarem legíveis por cima.
+  if (refImg) {
+    actx.globalAlpha = 0.55;
+    actx.drawImage(refImg, 0, 0, w, h);
+    actx.globalAlpha = 1;
+  }
   for (const z of zones) {
     const selected = z.id === selectedZoneId;
     // FIX G2: verde = área de desenho (include), vermelho = oclusão (occlude, omissão)
@@ -796,6 +936,8 @@ function updateZoneButtons() {
   $("zoneCurveBtn").disabled = !z || z.type !== "poly";
   $("zoneCurveBtn").classList.toggle("on", !!(z && z.type === "poly" && z.smooth));
   $("zonePointDelBtn").disabled = !(z && z.type === "poly" && selectedVertexIdx != null && z.pts.length > 3);
+  $("zoneUndoBtn").disabled = !zoneUndoStack.length;
+  $("zoneRedoBtn").disabled = !zoneRedoStack.length;
 }
 
 function pointInPoly(px, py, pts) {
@@ -852,6 +994,7 @@ adminCanvas.addEventListener("pointerdown", e => {
     }
   }
   if (best) {
+    pushZoneHistory(); // início de um drag = 1 passo de histórico (não por tick do throttle)
     selectedZoneId = best.zone.id;
     selectedVertexIdx = best.handle.kind === "vertex" ? best.handle.idx : null;
     dragging = { zoneId: best.zone.id, kind: best.handle.kind, idx: best.handle.idx };
@@ -864,6 +1007,7 @@ adminCanvas.addEventListener("pointerdown", e => {
   if (selZone && selZone.type === "poly") {
     for (const mp of zoneMidpointsPx(selZone, w, h)) {
       if (Math.hypot(mp.x - x, mp.y - y) < VERTEX_HIT_R) {
+        pushZoneHistory();
         selZone.pts.splice(mp.edgeAfter + 1, 0, [clamp01(nx), clamp01(ny)]);
         selectedVertexIdx = mp.edgeAfter + 1;
         renderAdminCanvas(); updateZoneButtons();
@@ -878,6 +1022,7 @@ adminCanvas.addEventListener("pointerdown", e => {
   selectedZoneId = hitZone ? hitZone.id : null;
   selectedVertexIdx = null;
   if (hitZone) {
+    pushZoneHistory(); // início de um drag = 1 passo de histórico
     dragging = {
       zoneId: hitZone.id, kind: "body", startNX: nx, startNY: ny,
       startPts: hitZone.type === "ellipse" ? [[hitZone.cx, hitZone.cy]] : hitZone.pts.map(p => [p[0], p[1]]),
@@ -948,6 +1093,7 @@ function nextSpawnOffset() {
   return [off, off];
 }
 $("zoneAddBtn").onclick = () => {
+  pushZoneHistory();
   const id = "z" + Math.random().toString(36).slice(2, 8);
   const [ox, oy] = nextSpawnOffset();
   // quadrilátero, ~25% do ecrã de lado, centrado no ecrã + deslocamento de cascata
@@ -963,6 +1109,7 @@ $("zoneAddBtn").onclick = () => {
   sendZones(true); zonesCloudSave();
 };
 $("zoneCircleBtn").onclick = () => {
+  pushZoneHistory();
   const id = "z" + Math.random().toString(36).slice(2, 8);
   const [ox, oy] = nextSpawnOffset();
   // elipse, raio ~12.5% do ecrã (diâmetro ~25%, mesma escala da zona quadrada) + cascata
@@ -974,6 +1121,7 @@ $("zoneCircleBtn").onclick = () => {
 $("zoneCurveBtn").onclick = () => {
   const z = zones.find(zz => zz.id === selectedZoneId);
   if (!z || z.type !== "poly") return;
+  pushZoneHistory();
   z.smooth = !z.smooth;
   renderAdminCanvas(); updateZoneButtons();
   sendZones(true); zonesCloudSave();
@@ -983,6 +1131,7 @@ $("zoneCurveBtn").onclick = () => {
 $("zoneTypeBtn").onclick = () => {
   const z = zones.find(zz => zz.id === selectedZoneId);
   if (!z) return;
+  pushZoneHistory();
   z.mode = (z.mode || "occlude") === "include" ? "occlude" : "include";
   renderAdminCanvas(); updateZoneButtons();
   sendZones(true); zonesCloudSave();
@@ -990,6 +1139,7 @@ $("zoneTypeBtn").onclick = () => {
 $("zonePointDelBtn").onclick = () => {
   const z = zones.find(zz => zz.id === selectedZoneId);
   if (!z || z.type !== "poly" || selectedVertexIdx == null || z.pts.length <= 3) return;
+  pushZoneHistory();
   z.pts.splice(selectedVertexIdx, 1);
   selectedVertexIdx = null;
   renderAdminCanvas(); updateZoneButtons();
@@ -997,6 +1147,7 @@ $("zonePointDelBtn").onclick = () => {
 };
 $("zoneDelBtn").onclick = () => {
   if (!selectedZoneId) return;
+  pushZoneHistory();
   zones = zones.filter(z => z.id !== selectedZoneId);
   selectedZoneId = null; selectedVertexIdx = null;
   renderAdminCanvas(); updateZoneButtons();
@@ -1012,6 +1163,7 @@ function openAdmin() {
   requestAnimationFrame(sizeAdminCanvas); // overlay precisa de estar visível para medir o canvas
   updateZoneButtons();
   sendZones(true); // entra no modo admin
+  if (!refImgLoadedOnce) { refImgLoadedOnce = true; refImgCloudLoad(); } // imagem de referência: só carrega da cloud na 1ª abertura
 }
 function closeAdmin() {
   adminOpen = false;
@@ -1053,6 +1205,18 @@ send({ kind: "hello" }); // pergunta ao display se há foto congelada (responde 
 /* ================= teclado ================= */
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") location.href = "index.html";
+  // atalhos de undo/redo das ZONAS: só reagem com o admin aberto (ignora fora dele)
+  if (!adminOpen) return;
+  const meta = e.ctrlKey || e.metaKey;
+  if (!meta) return;
+  const k = e.key.toLowerCase();
+  if (k === "z") {
+    e.preventDefault();
+    if (e.shiftKey) zoneRedo(); else zoneUndo(); // Ctrl/Cmd+Shift+Z = refazer
+  } else if (k === "y") {
+    e.preventDefault();
+    zoneRedo(); // Ctrl/Cmd+Y = refazer
+  }
 });
 </script>
 </body>
