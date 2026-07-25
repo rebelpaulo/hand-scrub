@@ -510,23 +510,26 @@ void main() {
     Right: { visible: false, thumb: { x: 0, y: 0 }, index: { x: 0, y: 0 } },
   };
 
+  // Os dois slots são atribuídos por POSIÇÃO NO ECRÃ, não pela etiqueta do
+  // classificador (review PR #46). O MediaPipe repete com frequência o mesmo
+  // categoryName para as duas mãos em poses ambíguas ou rodadas; com a etiqueta
+  // a servir de chave, a segunda mão era descartada, o slot ficava
+  // visible:false e o updateBox lia isso como "mão perdida" — a caixa
+  // congelava com as duas mãos no ar, que é precisamente o que acontece a
+  // alguém a mexer as mãos num evento. A etiqueta nunca fez falta: o updateBox
+  // já deriva a aresta esquerda/direita do x de ecrã.
   function processHands(res) {
-    const hands = res.landmarks || [];
-    const seen = { Left: false, Right: false };
-    for (let i = 0; i < hands.length && i < 2; i++) {
-      const lm = hands[i];
-      const label = res.handednesses?.[i]?.[0]?.categoryName || "Right";
-      const userHand = label === "Left" ? "Right" : "Left"; // vista selfie espelhada
-      if (seen[userHand]) continue;
-      seen[userHand] = true;
-      const st = handState[userHand];
-      st.visible = true;
-      st.thumb = camToScreen(lm[4].x, lm[4].y);
-      st.index = camToScreen(lm[8].x, lm[8].y);
-    }
-    for (const hand of ["Left", "Right"]) {
-      if (!seen[hand]) handState[hand].visible = false;
-    }
+    const hands = (res.landmarks || []).slice(0, 2);
+    const maos = hands.map(lm => ({
+      thumb: camToScreen(lm[4].x, lm[4].y),
+      index: camToScreen(lm[8].x, lm[8].y),
+    }));
+    maos.sort((a, b) => (a.thumb.x + a.index.x) - (b.thumb.x + b.index.x));
+    for (const hand of ["Left", "Right"]) handState[hand].visible = false;
+    maos.forEach((m, i) => {
+      const st = handState[i === 0 ? "Left" : "Right"];
+      st.visible = true; st.thumb = m.thumb; st.index = m.index;
+    });
   }
 
   /* ==========================================================================
@@ -556,11 +559,32 @@ void main() {
   // quad TL->TR->BR->BL->TL é válido sse for simples (as duas arestas opostas
   // não se cruzam — despista o caso "em gravata" de mãos cruzadas/rodadas) e
   // tiver área não-degenerada (despista cantos colineares/coincidentes).
+  // CONVEXIDADE (review PR #46): não chega despistar o "em gravata". Uma mão
+  // bastante inclinada pode pôr a ponta de baixo para dentro dos outros três
+  // cantos — o quad fica CÔNCAVO sem que arestas opostas se cruzem, e a
+  // verificação de cruzamento aceitava-o. A homografia não mapeia o quadrado
+  // unitário num quad côncavo de forma contínua: o denominador passa por zero
+  // lá dentro e o teste inverso no shader escolhe regiões do ecrã sem relação
+  // nenhuma com a caixa — ou seja, o efeito escapava. Num quad convexo os
+  // quatro produtos externos consecutivos têm todos o mesmo sinal.
+  function isConvexQuad(pts) {
+    let sign = 0;
+    for (let i = 0; i < 4; i++) {
+      const a = pts[i], b = pts[(i + 1) % 4], c = pts[(i + 2) % 4];
+      const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+      if (Math.abs(cross) < 1e-9) continue; // canto colinear: não decide, deixa os outros decidir
+      const s = cross > 0 ? 1 : -1;
+      if (sign === 0) sign = s;
+      else if (s !== sign) return false;
+    }
+    return sign !== 0; // os 4 colineares = degenerado
+  }
   function isValidQuad(q) {
     const pts = [q.TL, q.TR, q.BR, q.BL];
     if (!pts.every(p => Number.isFinite(p.x) && Number.isFinite(p.y))) return false;
     if (segmentsCross(q.TL, q.TR, q.BR, q.BL)) return false;
     if (segmentsCross(q.TR, q.BR, q.BL, q.TL)) return false;
+    if (!isConvexQuad(pts)) return false;
     let area2 = 0;
     for (let i = 0; i < 4; i++) {
       const p = pts[i], n = pts[(i + 1) % 4];
@@ -682,8 +706,13 @@ void main() {
     showNotice("⚠️ WebGL indisponível neste browser");
     console.error(e);
   }
-  if (gl) requestAnimationFrame(frame);
-  startCamera();
+  // Sem WebGL não arranca o loop, logo nada do que a câmara captar chega a ser
+  // mostrado — pedir a permissão e manter um stream vivo seria recolher imagem
+  // da pessoa sem qualquer contrapartida (review PR #46).
+  if (gl) {
+    requestAnimationFrame(frame);
+    startCamera();
+  }
 
   // window.__lab: getters sempre disponíveis (inofensivos, só leitura). Os
   // mutadores (trocar fonte de vídeo, forçar caixa/landmarks sem mãos reais,
