@@ -4,6 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 <title>Magic Draw — painel de controlo</title>
+<!-- REDESIGN: Baloo 2 (display face lúdica) só para títulos/rótulos de ação
+     grandes (ver --font-display) — o texto denso dos botões de ferramenta
+     fica no sans do sistema para não perder legibilidade a tamanhos pequenos.
+     Se offline (evento sem rede), --font-display cai no fallback do sistema. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&display=swap" rel="stylesheet" />
 <style>
   :root {
     --bg: #07080d;
@@ -12,7 +19,9 @@
     --text: #eef2f8;
     --muted: #98a2b6;
     --neon: #00ffcc;
+    --hands: #2f8fff; /* azul "mãos" — cor do indicador de modo hand-tracking */
     --tabbar-h: clamp(64px, 11vh, 88px); /* zona do polegar, telemóvel */
+    --font-display: "Baloo 2", system-ui, sans-serif; /* títulos + rótulos de ação */
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
@@ -38,6 +47,12 @@
     100% { background-position: 25% 35%, 65% 20%; }
   }
   @media (prefers-reduced-motion: reduce) { body { animation: none; } }
+  /* REDESIGN: prefers-reduced-motion cobre TODAS as micro-interações (mola de
+     seleção, glow pulsante da foto, deriva do fundo) de uma vez só — mais
+     seguro que apanhar cada @keyframes/animation/transition à mão. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  }
 
   a#back {
     position: fixed; top: 10px; left: 10px; z-index: 95; text-decoration: none;
@@ -60,14 +75,35 @@
   }
   .chipdot { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1px #ffffff33; flex: 0 0 auto; }
 
+  /* base partilhada com o admin (zonas/warp/edifícios também usam h2.section) —
+     fica como estava, propositadamente neutra */
   h2.section {
     margin: 0 2px; font-size: clamp(11px, 2.6vmin, 13px); font-weight: 800; letter-spacing: .04em;
     text-transform: uppercase; color: var(--muted);
   }
+  /* REDESIGN: título com display face + pontinho de acento (cor do grupo) —
+     reforça a hierarquia "blocos" sem depender só de texto pequeno maiúsculo.
+     ESCOPADO a #panelRoot (só as 6 secções do painel principal) para NÃO
+     alterar o estilo dos títulos do admin (zonas/warp/edifícios ficam com o
+     h2.section base acima — MUST NOT, ver ticket). */
+  #panelRoot h2.section {
+    font-family: var(--font-display); font-size: clamp(12px, 2.8vmin, 15px);
+    font-weight: 700; letter-spacing: .02em; display: flex; align-items: center; gap: 7px;
+  }
+  #panelRoot h2.section::before {
+    content: ""; width: 8px; height: 8px; border-radius: 3px; background: var(--muted); flex: 0 0 auto;
+  }
+  #grpBrushes h2.section::before { background: var(--neon); box-shadow: 0 0 8px -1px var(--neon); }
+  #grpColors  h2.section::before { background: #ff2d95; box-shadow: 0 0 8px -1px #ff2d95; }
+  #grpSizes   h2.section::before, #grpMirrors h2.section::before { background: #00c8ff; box-shadow: 0 0 8px -1px #00c8ff; }
+  #grpPreview h2.section::before, #grpActions h2.section::before { background: #ffd23f; box-shadow: 0 0 8px -1px #ffd23f; }
 
+  /* ---------- cartão: bloco com profundidade real (sombra em camadas +
+     filete claro no topo), não um retângulo chapado ---------- */
   .card {
     background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
     padding: 10px; backdrop-filter: blur(10px);
+    box-shadow: 0 10px 26px -12px #000000a0, inset 0 1px 0 #ffffff12;
   }
 
   /* ---------- botão base: toque grande, feedback tátil + mola na seleção ---------- */
@@ -78,8 +114,26 @@
     gap: 4px; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease;
   }
   button:active { transform: scale(.92); }
+  /* REDESIGN: "bloco" empurrável — sombra inferior chunky que encolhe ao
+     premir, simula profundidade física (estilo "vibrant & block-based").
+     filter:drop-shadow (não box-shadow) para NUNCA colidir com os box-shadow
+     de glow/seleção que cada estado .on já define nas secções abaixo — os
+     dois compõem-se em camadas independentes. ESCOPADO de propósito ao
+     painel principal + tab bar + ecrã de desenho — MUST NOT: os botões do
+     admin/warp/edifícios ficam com a transição/toque originais (button{}
+     acima, intocado). */
+  #brushes button, #sizes button, #mirrors button, #grpActions button,
+  .tabBtn, #drawBottom button, #drawTop button {
+    filter: drop-shadow(0 3px 0 #00000055);
+    transition: transform .16s cubic-bezier(.34,1.56,.64,1), filter .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;
+  }
+  #brushes button:active, #sizes button:active, #mirrors button:active, #grpActions button:active,
+  .tabBtn:active, #drawBottom button:active, #drawTop button:active {
+    filter: drop-shadow(0 1px 0 #00000055); transform: translateY(2px) scale(.95);
+  }
   /* bounce de mola: só dispara quando .on passa de ausente->presente (classList.toggle
-     não reinicia a animação se o valor não mudou), nunca em loop */
+     não reinicia a animação se o valor não mudou), nunca em loop.
+     REDESIGN: 400ms -> 280ms para caber na janela de 200-300ms pedida. */
   @keyframes btnPop { 0% { transform: scale(1); } 45% { transform: scale(1.14); } 100% { transform: scale(1); } }
   @keyframes swatchPop { 0% { transform: scale(1); } 45% { transform: scale(1.28); } 100% { transform: scale(1.08); } }
 
@@ -133,8 +187,13 @@
     background: var(--panel); border: 1px solid var(--line); border-radius: 20px;
     padding: 6px; backdrop-filter: blur(10px);
   }
+  /* REDESIGN: rótulos das ações (tab bar + coluna de ações) na display face —
+     diferencia tipograficamente "ações" de "ferramentas/cores" (que ficam no
+     sans do sistema, ver .grp:not(#grpActions) button abaixo), reforçando a
+     hierarquia pedida sem mexer no tamanho/legibilidade dos alvos grandes. */
+  .tabBtn, #grpActions button { font-family: var(--font-display); }
   .tabBtn { flex: 1; min-height: 60px; font-size: 12px; font-weight: 800; }
-  .tabBtn.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; animation: btnPop .4s cubic-bezier(.34,1.56,.64,1); }
+  .tabBtn.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; animation: btnPop .28s cubic-bezier(.34,1.56,.64,1); }
 
   /* ---------- pinceis: grelha responsiva, alvo >=90/72px ---------- */
   #brushes { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
@@ -143,7 +202,7 @@
   #brushes button.on {
     border-color: var(--neon); background: #0f2b26;
     box-shadow: 0 0 0 3px #00ffcc33, 0 0 22px -2px var(--neon);
-    animation: btnPop .4s cubic-bezier(.34,1.56,.64,1);
+    animation: btnPop .28s cubic-bezier(.34,1.56,.64,1);
   }
 
   /* ---------- cores: swatches redondos, caixa de lápis ---------- */
@@ -153,29 +212,45 @@
     border: 3px solid #0000; box-shadow: inset 0 0 0 1px #ffffff22;
     padding: 0;
   }
-  .swatch.on { border-color: #fff; box-shadow: 0 0 0 3px #ffffff55, 0 0 18px -2px currentColor; transform: scale(1.08); animation: swatchPop .4s cubic-bezier(.34,1.56,.64,1); }
+  .swatch.on { border-color: #fff; box-shadow: 0 0 0 3px #ffffff55, 0 0 18px -2px currentColor; transform: scale(1.08); animation: swatchPop .28s cubic-bezier(.34,1.56,.64,1); }
   .swatch.rainbow { background: conic-gradient(red, orange, yellow, lime, cyan, blue, magenta, red); }
 
   /* ---------- tamanhos: bolas crescentes ---------- */
   #sizes { display: flex; gap: 10px; justify-content: center; }
   #sizes button { flex: 1; min-height: 90px; }
   #sizes button .dot { border-radius: 50%; background: var(--neon); }
-  #sizes button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; animation: btnPop .4s cubic-bezier(.34,1.56,.64,1); }
+  #sizes button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; animation: btnPop .28s cubic-bezier(.34,1.56,.64,1); }
   #sizes button .lbl { font-size: 11px; color: var(--muted); font-weight: 700; }
 
   /* ---------- simetria: segmentado ---------- */
   #mirrors { display: flex; gap: 10px; }
   #mirrors button { flex: 1; min-height: 90px; font-size: 15px; font-weight: 800; }
   #mirrors button .ic { font-size: 26px; }
-  #mirrors button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; animation: btnPop .4s cubic-bezier(.34,1.56,.64,1); }
+  #mirrors button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; animation: btnPop .28s cubic-bezier(.34,1.56,.64,1); }
 
   /* ---------- pré-visualização ---------- */
   #previewWrap { display: flex; align-items: center; gap: 10px; }
   canvas#preview { width: 100%; height: 90px; border-radius: 12px; background: #000; display: block; }
 
-  /* ---------- ações: desenhar / foto / desfazer-refazer / limpar (nesta ordem) ---------- */
-  #drawModeBtn { width: 100%; min-height: 76px; font-size: 15px; font-weight: 800; background: linear-gradient(160deg, #0f2a1f, #1a1e2ac0); border-color: #00ffcc55; }
-  #drawModeBtn .ic { font-size: 30px; }
+  /* ---------- ações: desenhar / foto / desfazer-refazer / limpar (nesta ordem) ----------
+     #drawModeBtn é agora um INDICADOR DE MODO com 2 estados (MELHORIA 3, pedido do
+     utilizador: "era bom que esse botão mostrasse [que sem estar em desenho estamos
+     em modo hand tracking]") — cor+ícone+rótulo grande dizem qual modo está ATIVO,
+     o texto pequeno diz a ação (o que acontece ao tocar). Mesma lógica de sempre
+     (abre/fecha #drawScreen, ver JS) — só comunicação. */
+  #drawModeBtn { width: 100%; min-height: 88px; font-size: 15px; font-weight: 800; gap: 2px; }
+  #drawModeBtn .ic { font-size: 28px; }
+  #drawModeBtn .modeLabel { font-family: var(--font-display); font-size: 17px; font-weight: 700; letter-spacing: .01em; }
+  /* hint pequeno fica no sans do sistema (não Baloo 2) — a 11px a display
+     face perde nitidez; #grpActions button já herdaria --font-display */
+  #drawModeBtn .modeHint { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; font-size: 11px; font-weight: 600; color: var(--muted); }
+  /* modo ATIVO = hand tracking (omissão): azul "mãos", ação oferecida = desenhar */
+  #drawModeBtn.mode-hands { background: linear-gradient(160deg, #0f1f36, #1a1e2ac0); border-color: var(--hands); box-shadow: 0 0 0 3px #2f8fff2e, 0 0 20px -4px var(--hands); }
+  #drawModeBtn.mode-hands .modeHint { color: #bcdcff; }
+  /* modo ATIVO = desenho no tablet: verde-néon (mesma cor "on" do resto do painel),
+     ação oferecida = voltar às mãos */
+  #drawModeBtn.mode-draw { background: linear-gradient(160deg, #0f2a1f, #1a1e2ac0); border-color: var(--neon); box-shadow: 0 0 0 3px #00ffcc33, 0 0 20px -4px var(--neon); }
+  #drawModeBtn.mode-draw .modeHint { color: #a8f5e4; }
   #actions { display: flex; gap: 10px; }
   #photoBtn { flex: 1; min-height: 100px; font-size: 16px; font-weight: 800; background: linear-gradient(160deg, #2a1f00, #1a1e2ac0); border-color: #ffd23f55; }
   #photoBtn .ic { font-size: 34px; }
@@ -184,7 +259,12 @@
   #photoBtn { animation: photoGlow 2.6s ease-in-out infinite; }
   #photoBtn.busy { animation: none; border-color: #ffd23f; box-shadow: 0 0 22px -2px #ffd23f; }
   #historyActions { display: flex; gap: 10px; }
-  #historyActions button { flex: 1; min-height: 90px; font-size: 14px; font-weight: 800; }
+  /* REDESIGN: desfazer/refazer eram cinzentos-simples (só o botão base) —
+     dá-lhes o mesmo tratamento de "bloco com cor" do resto das ações
+     (tom neutro slate/azul, para não competir com o verde=desenhar,
+     dourado=foto, vermelho=limpar já em uso) — grupo de ações lê-se como
+     grupo mesmo à distância. */
+  #historyActions button { flex: 1; min-height: 90px; font-size: 14px; font-weight: 800; background: linear-gradient(160deg, #101a2ac0, #1a1e2ac0); border-color: #3d4a6655; }
   #historyActions button .ic { font-size: 30px; }
   #clearRow { display: flex; gap: 10px; }
   #clearRow button { flex: 1; min-height: 100px; font-size: 16px; font-weight: 800; }
@@ -262,13 +342,26 @@
     #brushes button { min-height: 0; height: 100%; }
     #brushes button .ic { font-size: clamp(22px, 3.4vmin, 38px); }
 
-    #colors { display: grid; grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(3, 1fr); width: 100%; height: 100%; }
+    #colors { display: grid; grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(3, 1fr); width: 100%; height: 100%; place-items: center; }
     /* min-height:0 é o essencial aqui: um item de grid com aspect-ratio tem
        min-height:auto por omissão (= o tamanho mínimo do conteúdo, que para um
        aspect-ratio depende da LARGURA da coluna) — sem isto as 3 sub-linhas de
        1fr recusam-se a encolher abaixo da largura da coluna e transbordam por
        cima de #sizes/#mirrors (bug apanhado no teste em 1440×900). */
-    .swatch { width: 100%; height: 100%; min-width: 0; min-height: 0; aspect-ratio: 1 / 1; align-self: center; justify-self: center; }
+    /* FIX (CORES vazias/ovais): a regra antiga tinha width:100% E height:100%
+       AO MESMO TEMPO com aspect-ratio:1/1 — por spec, aspect-ratio só
+       resolve uma dimensão que esteja auto; com as DUAS já definidas fica
+       simplesmente ignorado (medido: 0.swatch saía 135×125px em 1440×900,
+       93×108px em 1024×768, 387×356px em 3840×2160 — nunca quadrado). Tentei
+       depois "width:100%; height:auto; max-height:100%" à espera de um
+       comportamento tipo object-fit:contain, mas <button> não é um elemento
+       substituído — o spec só resolve aspect-ratio numa direção (a largura
+       fica presa aos 100% da coluna e só a altura encolhe), continuava oval
+       (135×123px). Fix definitivo: --swatch-d é um diâmetro em PX medido em
+       JS (sizeColorSwatches, min(largura da coluna, altura da linha) menos o
+       gap) e aplicado a width E height — garante 1:1 em qualquer motor, sem
+       depender de nenhuma resolução implícita de aspect-ratio. */
+    .swatch { width: var(--swatch-d, 100%); height: var(--swatch-d, 100%); min-width: 0; min-height: 0; }
 
     #sizes, #mirrors { height: 100%; }
     #sizes button, #mirrors button { min-height: 0; height: 100%; }
@@ -390,9 +483,9 @@
   #zoneModeSelect button[data-mode="include"].on { border-color: #00dc78; background: #0a2b1c; box-shadow: 0 0 0 3px #00dc7833; }
   #zoneModeSelect button[data-mode="occlude"].on { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
 
-  /* ---------- botão que entra no ecrã de desenho ---------- */
-  #drawModeBtn { width: 100%; min-height: 76px; font-size: 15px; font-weight: 800; background: linear-gradient(160deg, #0f2a1f, #1a1e2ac0); border-color: #00ffcc55; }
-  #drawModeBtn .ic { font-size: 30px; }
+  /* botão que entra no ecrã de desenho: estilo definido acima, junto do
+     indicador de modo (regra duplicada removida — cascata só tinha de
+     existir uma vez; a segunda cópia sobrepunha-se à primeira por ordem). */
 
   /* ==================================================================
      Ecrã de desenho (✏️ Desenhar): ferramentas encolhidas numa MOLDURA
@@ -403,7 +496,7 @@
      ================================================================== */
   #drawScreen {
     position: fixed; inset: 0; z-index: 150; background: #000;
-    display: grid; grid-template-columns: 78px 1fr; grid-template-rows: 60px 1fr 72px;
+    display: grid; grid-template-columns: 78px 1fr; grid-template-rows: 60px 1fr 88px;
   }
   #drawScreen[hidden] { display: none; }
   #drawTop {
@@ -417,7 +510,15 @@
     padding: 8px 6px; overflow: hidden; background: #0c0e14cc; border-right: 1px solid var(--line);
   }
   #drawColors { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; overflow-y: auto; }
-  #drawColors .swatch.mini { width: 40px; height: 40px; min-width: 40px; }
+  /* FIX (óvalos no rail de Desenhar): #drawColors é flex-column SEM flex:0 0 auto
+     nos filhos — com 15 swatches (14 cores + arco-íris) a competirem pela
+     altura do rail, o flex-shrink:1 por omissão (nenhum flex declarado aqui)
+     encolhia só a ALTURA de cada .swatch.mini (min-width:40px trava a
+     largura, não há min-height a travar a altura) => elipses achatadas,
+     visíveis no ecrã do utilizador. flex:0 0 auto tira os swatches do
+     cálculo de encolhimento (o scroll do rail, já com overflow-y:auto,
+     passa a absorver o excesso em vez de espremer os círculos). */
+  #drawColors .swatch.mini { width: 40px; height: 40px; min-width: 40px; min-height: 40px; flex: 0 0 auto; }
   #drawSizes { display: flex; flex-direction: column; gap: 6px; }
   #drawSizes button { min-height: 44px; font-size: 9px; padding: 2px; }
   #drawSizes button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
@@ -427,8 +528,10 @@
     grid-column: 1 / 3; grid-row: 3; display: flex; gap: 8px; padding: 8px;
     background: #0c0e14cc; border-top: 1px solid var(--line);
   }
-  #drawBottom button { flex: 1; min-height: 56px; font-size: 12px; font-weight: 800; }
-  #drawCloseBtn { border-color: #ff4d5555; }
+  /* barra de ações primária (desfazer/refazer/foto/limpar/fechar) do ecrã de
+     desenho — alvo ≥72px como o resto do painel (linha subiu para 88px acima) */
+  #drawBottom button { flex: 1; min-height: 72px; font-size: 12px; font-weight: 800; }
+  #drawCloseBtn { border-color: var(--hands); }
 </style>
 </head>
 <body>
@@ -471,7 +574,14 @@
         <div class="card" id="previewWrap"><canvas id="preview"></canvas></div>
       </section>
       <section class="grp" id="grpActions">
-        <button id="drawModeBtn"><span class="ic">✏️</span><span>Desenhar</span></button>
+        <!-- indicador de MODO (MELHORIA 3): ícone/rótulo/cor mudam consoante o modo
+             ATIVO (renderModeBtn, no JS) — conteúdo inicial aqui é só o estado por
+             omissão (hand tracking), evita FOUC antes do 1º render -->
+        <button id="drawModeBtn" class="mode-hands">
+          <span class="ic">✋</span>
+          <span class="modeLabel">Mãos</span>
+          <span class="modeHint">toca para desenhar no tablet</span>
+        </button>
         <div id="actions">
           <button id="photoBtn"><span class="ic">📸</span><span>Foto</span></button>
         </div>
@@ -595,7 +705,10 @@
       <button id="drawRedoBtn">↪️</button>
       <button id="drawPhotoBtn">📸</button>
       <button id="drawClearBtn">🗑</button>
-      <button id="drawCloseBtn">✖ Fechar</button>
+      <!-- eco do indicador de modo (dentro do ecrã de desenho, que tapa o painel
+           principal): deixa claro que tocar aqui devolve o controlo às mãos —
+           mesmo onclick/comportamento de sempre, só o rótulo mudou -->
+      <button id="drawCloseBtn"><span class="ic">✋</span><span>Mãos</span></button>
     </div>
   </div>
 
@@ -879,6 +992,26 @@ function renderColors() {
     btn.classList.toggle("on", state.tool !== "rainbow" && btn.dataset.color === state.color);
   });
 }
+// FIX (BUG 1, painel landscape): grelha 5×3 de #colors — ver comentário na
+// regra CSS ".swatch" dentro da media query de landscape (~L335) para o
+// porquê de width/height%+aspect-ratio não darem um círculo perfeito num
+// <button> (elemento não-substituído). --swatch-d mede o LADO do maior
+// quadrado que cabe numa célula (min entre largura da coluna e altura da
+// linha, descontado o gap) e aplica-o a width E height de uma vez — só
+// corre em landscape (mesmo breakpoint da media query CSS); em retrato o
+// .swatch base (90×90px fixo) já não tem este problema.
+const colorsLandscapeMQ = matchMedia("(min-width: 700px) and (orientation: landscape)");
+function sizeColorSwatches() {
+  if (!colorsLandscapeMQ.matches) { colorsEl.style.removeProperty("--swatch-d"); return; }
+  const w = colorsEl.clientWidth, h = colorsEl.clientHeight;
+  if (!w || !h) return; // ainda sem layout (ex.: página de cores escondida no retrato) — nada a medir
+  const gap = parseFloat(getComputedStyle(colorsEl).columnGap) || 0;
+  const cellW = (w - gap * 4) / 5, cellH = (h - gap * 2) / 3;
+  colorsEl.style.setProperty("--swatch-d", Math.max(0, Math.min(cellW, cellH)) + "px");
+}
+window.addEventListener("resize", sizeColorSwatches);
+colorsLandscapeMQ.addEventListener("change", sizeColorSwatches);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(sizeColorSwatches); // Baloo 2 a carregar pode mudar a altura do cabeçalho h2
 
 /* ================= tamanhos: bolas crescentes ================= */
 const SIZES = [6, 14, 26, 44];
@@ -2648,13 +2781,30 @@ function sizeDrawCanvas() {
 }
 window.addEventListener("resize", () => { if (drawScreenOpen) sizeDrawCanvas(); });
 
+// MELHORIA 3: #drawModeBtn é um indicador de MODO (não só um botão de ação) —
+// por omissão a projeção segue as MÃOS (hand tracking); ao abrir o ecrã de
+// desenho o modo ativo passa a ser "desenho no tablet". renderModeBtn() só
+// troca ícone/rótulo/classe CSS consoante drawScreenOpen — nenhuma lógica de
+// sync nova, é comunicação em cima do fluxo abre/fecha que já existia.
+const drawModeBtnEl = $("drawModeBtn");
+function renderModeBtn() {
+  drawModeBtnEl.classList.toggle("mode-draw", drawScreenOpen);
+  drawModeBtnEl.classList.toggle("mode-hands", !drawScreenOpen);
+  drawModeBtnEl.querySelector(".ic").textContent = drawScreenOpen ? "🖊️" : "✋";
+  drawModeBtnEl.querySelector(".modeLabel").textContent = drawScreenOpen ? "Desenho" : "Mãos";
+  drawModeBtnEl.querySelector(".modeHint").textContent = drawScreenOpen
+    ? "toca para voltar às mãos"
+    : "toca para desenhar no tablet";
+}
 $("drawModeBtn").onclick = () => {
   drawScreenOpen = true;
   drawScreen.hidden = false;
+  renderModeBtn();
   requestAnimationFrame(sizeDrawCanvas);
   if (!refImgLoadedOnce) { refImgLoadedOnce = true; refImgCloudLoad(); } // mesma imagem de referência do admin
 };
-$("drawCloseBtn").onclick = () => { drawScreenOpen = false; drawScreen.hidden = true; };
+$("drawCloseBtn").onclick = () => { drawScreenOpen = false; drawScreen.hidden = true; renderModeBtn(); };
+renderModeBtn(); // estado inicial: hand tracking (drawScreenOpen começa false)
 // undo/redo em LOCKSTEP com o display: só mexe no display quando também há um
 // passo local a desfazer (senão, após um resize que limpa o histórico local, o
 // display mudava sem o tablet — review PR #43)
@@ -2808,6 +2958,7 @@ panelRootEl.addEventListener("pointerup", e => {
 /* ================= arranque ================= */
 setActivePage("brushes"); // página inicial (telemóvel); sem efeito em landscape
 renderBrushes(); renderColors(); renderSizes(); renderMirrors(); renderPreview();
+sizeColorSwatches(); // 1ª medição dos swatches de cor (BUG 1, landscape) — ver definição acima
 sendState(); // estado inicial emitido no arranque
 send({ kind: "hello" }); // pergunta ao display se há foto congelada (responde 'dstate')
 
