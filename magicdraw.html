@@ -358,7 +358,14 @@
     .grp .card { flex: 1; min-height: 0; display: flex; }
     .grp .card > * { flex: 1; min-height: 0; }
 
-    #brushes { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr); width: 100%; height: 100%; }
+    /* 9 pincéis (8 + balde) em 2 colunas => 5 linhas (a última fica com 1 só
+       célula ocupada, a outra vazia) — repeat(4,...) datava de quando eram 8 */
+    #brushes { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(5, 1fr); width: 100%; height: 100%; }
+    /* 9 pincéis em 2 colunas deixavam o último órfão numa linha a meio. Com 3
+       colunas a coluna (estreita e alta) dava mosaicos 98×258 — o ícone perdia-se.
+       O balde ocupa a linha inteira: fecha a grelha e assinala o que ele é, a
+       única ferramenta que preenche em vez de riscar. */
+    #brushes button:last-child { grid-column: 1 / -1; }
     #brushes button { min-height: 0; height: 100%; }
     #brushes button .ic { width: clamp(22px, 3.4vmin, 38px); height: clamp(22px, 3.4vmin, 38px); }
 
@@ -561,6 +568,8 @@
   #drawBottom button { flex: 1; min-height: 72px; font-size: 12px; font-weight: 800; }
   #drawBottom button .ic { width: 26px; height: 26px; }
   #drawCloseBtn { border-color: var(--hands); color: var(--hands); }
+  /* balde/limpar do modo desenhar: mesmo vermelho de confirmação do resto do painel (ver #clearBtn.confirm) */
+  #drawClearBtn.confirm { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
 </style>
 </head>
 <body>
@@ -617,6 +626,17 @@
         <path d="M8 21 3 16l9-9 8 8-6 6H8z"/>
         <path d="M13 8l6 6"/>
         <path d="M5 18h8"/>
+      </symbol>
+      <!-- balde de tinta: corpo tombado (verte) + pinga a cair da boca — silhueta
+           deitada de propósito, nunca confundível com um pincel/marcador vertical -->
+      <!-- balde: corpo em trapézio DE PÉ + arco da asa + pinga. O desenho
+           anterior era um quadrilátero inclinado, silhueta praticamente igual à
+           da borracha (ic-eraser) a 24px — a asa é o que separa os dois de
+           imediato, por isso é a linha que nunca pode sair daqui. -->
+      <symbol id="ic-bucket" viewBox="0 0 24 24">
+        <path d="M4 8h13l-1.7 11.4a2 2 0 0 1-2 1.6H7.7a2 2 0 0 1-2-1.6L4 8z"/>
+        <path d="M7 8a3.5 3.5 0 0 1 7 0"/>
+        <path d="M20.4 12.6c1.1 1.5 1.6 2.5 1.6 3.2a1.6 1.6 0 0 1-3.2 0c0-.7.5-1.7 1.6-3.2z"/>
       </symbol>
       <!-- ações -->
       <symbol id="ic-hand" viewBox="0 0 24 24">
@@ -916,7 +936,7 @@
       <button id="drawUndoBtn"><svg class="ic"><use href="#ic-undo"></use></svg></button>
       <button id="drawRedoBtn"><svg class="ic"><use href="#ic-redo"></use></svg></button>
       <button id="drawPhotoBtn"><svg class="ic"><use href="#ic-camera"></use></svg></button>
-      <button id="drawClearBtn"><svg class="ic"><use href="#ic-trash"></use></svg></button>
+      <button id="drawClearBtn"><svg class="ic"><use href="#ic-trash"></use></svg><span>Limpar</span></button>
       <!-- eco do indicador de modo (dentro do ecrã de desenho, que tapa o painel
            principal): deixa claro que tocar aqui devolve o controlo às mãos —
            mesmo onclick/comportamento de sempre, só o rótulo mudou -->
@@ -1092,8 +1112,24 @@ function onMsg(msg) {
   // FIX V-foto: 'photo' NÃO marca hasPhoto aqui — ver comentário na declaração
   // de hasPhoto acima. Só o 'clear all' (otimista, sem ambiguidade possível) e
   // o 'dstate' do display decidem o estado da foto.
-  if (msg.kind === "clear" && (!msg.scope || msg.scope === "all")) hasPhoto = false;
+  if (msg.kind === "clear" && (!msg.scope || msg.scope === "all")) {
+    hasPhoto = false;
+    // FEATURE B2: 'clear' scope 'all' apaga a foto dos dois lados — sem isto o
+    // eco continuava a mostrar uma foto que já não existe no display
+    photoImg = null;
+    if (drawScreenOpen) compositeEcho();
+  }
   if (msg.kind === "dstate") hasPhoto = !!msg.hasPhoto; // resposta do display ao 'hello' OU ao 'photo' (aceite/recusado) — única fonte de verdade
+  // FEATURE B2: o display envia a foto tirada (dataURL JPEG reduzido) para o
+  // eco do modo Desenhar deixar de ser "às cegas" — validação de forma antes
+  // de decodificar (canal público, mesmo padrão do resto deste handler)
+  if (msg.kind === "photodata") {
+    if (typeof msg.img === "string" && msg.img.startsWith("data:image/")) {
+      const im = new Image();
+      im.onload = () => { photoImg = im; if (drawScreenOpen) compositeEcho(); };
+      im.src = msg.img;
+    }
+  }
   // FIX 1 (review): outro controlo (ou o canal global mapping-zones, partilhado
   // com o mapping mode) mudou as zonas — segue-as localmente para o recorte do
   // modo Desenhar (área desenhável) bater sempre com o que está atualmente em
@@ -1161,6 +1197,9 @@ const BRUSHES = [
   { tool: "marker",  ic: "marker",  label: "Marcador" },
   { tool: "crayon",  ic: "crayon",  label: "Lápis de cera" },
   { tool: "eraser",  ic: "eraser",  label: "Borracha" },
+  // balde: NÃO é um pincel de arrastar — um toque preenche a zona fechada tocada
+  // (ver o tratamento especial em dCanvas pointerdown/move/up mais abaixo)
+  { tool: "bucket",  ic: "bucket",  label: "Balde" },
 ];
 // selectTool/selectColor/selectRainbow/selectSize: partilhados entre os
 // botões normais (grelhas grandes) e os mini-botões do ecrã de desenho —
@@ -1338,6 +1377,15 @@ function renderPreview() {
         pctx.fill();
       }
     }
+    return;
+  }
+
+  if (state.tool === "bucket") {
+    // balde: não é um traço — mostra uma área preenchida (poça), não uma linha
+    pctx.fillStyle = state.color;
+    pctx.beginPath();
+    pctx.ellipse(w / 2, h / 2, w * 0.32, h * 0.34, 0, 0, Math.PI * 2);
+    pctx.fill();
     return;
   }
 
@@ -2883,6 +2931,34 @@ function rebuildDrawMask() {
   for (const z of occludeZones) { traceZonePath(dmctx, z, w, h); dmctx.fill(); } // subtrai oclusão, mesmo dentro de um include
   dmctx.globalCompositeOperation = "source-over";
 }
+// FEATURE "a foto preenche a área desenhável" (B2): bounding box (em pixels
+// w×h) da UNIÃO das zonas 'include' — null se não houver nenhuma (então quem
+// chama usa o retângulo inteiro). TEM de ser a MESMA conta em
+// magicdraw-display.html (ver comentário lá) para o eco bater com a projeção;
+// aproxima curvas (poly smooth) pelos pontos de controlo — sobra ligeira é
+// aceitável para um enquadramento de foto, ao contrário da máscara de tinta
+// (essa sim precisa do contorno exato, por isso usa traceZonePath a sério).
+function includeZonesBBox(zoneList, w, h) {
+  const includeZones = zoneList.filter(isUsableZone).filter(z => (z.mode || "occlude") === "include");
+  if (!includeZones.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const z of includeZones) {
+    if (z.type === "ellipse") {
+      const cx = z.cx * w, cy = z.cy * h, rx = z.rx * w, ry = z.ry * h, rot = z.rot || 0;
+      const hw = Math.hypot(rx * Math.cos(rot), ry * Math.sin(rot));
+      const hh = Math.hypot(rx * Math.sin(rot), ry * Math.cos(rot));
+      minX = Math.min(minX, cx - hw); maxX = Math.max(maxX, cx + hw);
+      minY = Math.min(minY, cy - hh); maxY = Math.max(maxY, cy + hh);
+    } else {
+      for (const [x, y] of z.pts) {
+        const px = x * w, py = y * h;
+        minX = Math.min(minX, px); maxX = Math.max(maxX, px);
+        minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+      }
+    }
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
 // chamado sempre que `zones` for substituído/editado (admin, carregar
 // edifício, mensagem 'zones' recebida, load da cloud — ver sendZones/
 // zonesCloudLoad/onMsg) — só recalcula/recompõe se o ecrã de desenho estiver aberto
@@ -2935,12 +3011,23 @@ for (const s of SIZES) {
   drawSizesEl.appendChild(btn);
 }
 
-// fundo preto + imagem de referência (alpha ~0.5, se existir) — eco local,
-// os traços entram por cima; qualidade aproximada, o render fiel é no display
+// FEATURE "a foto preenche a área desenhável" (B2): foto que o display tira,
+// recebida via kind 'photodata' (ver onMsg) — Image() já decodificada, pronta
+// a desenhar. NUNCA enviada por este painel (só o display fotografa); um
+// 'clear' scope 'all' apaga-a nos dois lados (ver onMsg).
+let photoImg = null;
+
+// fundo preto + foto (se existir, enquadrada na área desenhável) + imagem de
+// referência (alpha ~0.5, se existir) por cima — eco local, os traços entram
+// por cima de tudo; qualidade aproximada, o render fiel é no display
 function renderDrawBase() {
   const w = dCanvas.clientWidth, h = dCanvas.clientHeight;
   dctx.clearRect(0, 0, w, h);
   dctx.fillStyle = "#000"; dctx.fillRect(0, 0, w, h);
+  if (photoImg) {
+    const r = includeZonesBBox(zones, w, h) || { x: 0, y: 0, w, h };
+    dctx.drawImage(photoImg, r.x, r.y, r.w, r.h);
+  }
   if (refImg) { dctx.globalAlpha = 0.5; dctx.drawImage(refImg, 0, 0, w, h); dctx.globalAlpha = 1; }
 }
 // compõe o visível = base (preto + imagem, SEMPRE inteira — referência do
@@ -3047,11 +3134,33 @@ $("drawRedoBtn").onclick = () => {
   $("redoBtn").click();
 };
 $("drawPhotoBtn").onclick = () => photoBtn.click();
-$("drawClearBtn").onclick = () => {
-  pushEchoHistory(); // o limpar do eco também é desfazível
-  sectx.save(); sectx.setTransform(1, 0, 0, 1, 0, 0); sectx.clearRect(0, 0, strokeEcho.width, strokeEcho.height); sectx.restore();
-  compositeEcho();
-  send({ kind: "clear", scope: "draw" });
+/* limpar (modo desenhar) exige 2 toques — MESMO padrão de dupla confirmação do
+   #clearBtn do painel principal (classe .confirm, rótulo "Confirmar?", 3s a
+   repor): critério C do ticket, apagar tudo de repente ao 1º toque confundia
+   o operador a meio de uma sessão de desenho. */
+const drawClearBtnEl = $("drawClearBtn");
+const drawClearLabelEl = drawClearBtnEl.querySelector("span:last-child");
+const drawClearOriginalLabel = drawClearLabelEl.textContent;
+let drawClearArmed = false, drawClearTimer = null;
+function resetDrawClearConfirm() {
+  drawClearArmed = false;
+  clearTimeout(drawClearTimer);
+  drawClearBtnEl.classList.remove("confirm");
+  drawClearLabelEl.textContent = drawClearOriginalLabel;
+}
+drawClearBtnEl.onclick = () => {
+  if (drawClearArmed) { // 2º toque: confirma e limpa de facto
+    resetDrawClearConfirm();
+    pushEchoHistory(); // o limpar do eco também é desfazível
+    sectx.save(); sectx.setTransform(1, 0, 0, 1, 0, 0); sectx.clearRect(0, 0, strokeEcho.width, strokeEcho.height); sectx.restore();
+    compositeEcho();
+    send({ kind: "clear", scope: "draw" });
+    return;
+  }
+  drawClearArmed = true;
+  drawClearTimer = setTimeout(resetDrawClearConfirm, 3000);
+  drawClearBtnEl.classList.add("confirm");
+  drawClearLabelEl.textContent = "Confirmar?";
 };
 
 /* ---- eco local simplificado: mesma família de 8 pincéis, um segmento de
@@ -3108,19 +3217,94 @@ function echoSegment(s, A, B) {
   sectx.shadowBlur = 0; sectx.globalAlpha = 1;
 }
 
+/* ================= balde de tinta (FEATURE A) =================
+   Scanline flood-fill NÃO-RECURSIVO (uma recursão por pixel rebentava a stack
+   a 1080p) — preenche a partir de (x0,y0) enquanto o pixel de destino estiver
+   "vazio" (alpha < threshold no PRÓPRIO ctx, que serve de "visitado": depois
+   de pintado deixa de ser "vazio", sem precisar de um array à parte) E dentro
+   da máscara (alpha > 128 no maskCtx). Trabalha em píxeis de DISPOSITIVO
+   (getImageData/putImageData ignoram sempre o transform de DPR do ctx) —
+   quem chama tem de converter as coordenadas para esse espaço.
+   Mesma função, byte-a-byte, em magicdraw-display.html (ver nota lá) — o
+   preenchimento tem de ter EXATAMENTE a mesma forma nos dois lados. */
+function floodFillCanvas(ctx, maskCtx, x0, y0, color, threshold = 20) {
+  const w = ctx.canvas.width, h = ctx.canvas.height;
+  if (x0 < 0 || y0 < 0 || x0 >= w || y0 >= h) return 0;
+  const img = ctx.getImageData(0, 0, w, h);
+  const data = img.data;
+  const mask = maskCtx.getImageData(0, 0, w, h).data;
+  const inside = (x, y) => {
+    if (x < 0 || x >= w || y < 0 || y >= h) return false;
+    const i = (y * w + x) * 4;
+    return mask[i + 3] > 128 && data[i + 3] < threshold;
+  };
+  if (!inside(x0, y0)) return 0; // fora da máscara OU já tem tinta (critério 3) — nada a fazer
+  const r = parseInt(color.slice(1, 3), 16) || 0;
+  const g = parseInt(color.slice(3, 5), 16) || 0;
+  const b = parseInt(color.slice(5, 7), 16) || 0;
+  let count = 0;
+  const set = (x, y) => {
+    const i = (y * w + x) * 4;
+    data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = 255;
+    count++;
+  };
+  // pilha de segmentos [x1,x2] por linha (span filling clássico) — cada item
+  // por explorar; dy indica de que lado (cima/baixo) o segmento foi descoberto
+  const stack = [[x0, x0, y0, 1], [x0, x0, y0 - 1, -1]];
+  while (stack.length) {
+    let [x1, x2, y, dy] = stack.pop();
+    let x = x1;
+    if (inside(x, y)) {
+      while (inside(x - 1, y)) { set(x - 1, y); x--; }
+    }
+    if (x < x1) stack.push([x, x1 - 1, y - dy, -dy]);
+    while (x1 <= x2) {
+      while (inside(x1, y)) { set(x1, y); x1++; }
+      if (x1 > x) stack.push([x, x1 - 1, y + dy, dy]);
+      if (x1 - 1 > x2) stack.push([x2 + 1, x1 - 1, y - dy, -dy]);
+      x1++;
+      while (x1 < x2 && !inside(x1, y)) x1++;
+      x = x1;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return count;
+}
+const FILL_ALPHA_THRESHOLD = 20; // mesmo limiar do lado do display
+
 /* ---- toque/pointer: cada pointerId é um traço independente (multi-toque) —
    coordenadas normalizadas 0-1 (o canvas 16:9 representa o ecrã do display) ---- */
 const TSTROKE_THROTTLE_MS = 40;
+const BUCKET_TAP_SLOP = 10; // px CSS: acima disto já não conta como "toque" (é arrasto) — balde só enche num toque
 const tabletStrokesLocal = new Map(); // pointerId -> { sid, brush, lastPt, hue, distSinceStamp, emoji, pending, timer }
+const bucketPointers = new Map(); // pointerId -> { nx, ny, px, py, moved } — ver tratamento especial do balde abaixo
 function drawCanvasPt(e) {
   const rect = dCanvas.getBoundingClientRect();
   const nx = clamp01((e.clientX - rect.left) / rect.width);
   const ny = clamp01((e.clientY - rect.top) / rect.height);
   return { nx, ny, px: nx * rect.width, py: ny * rect.height };
 }
+// preenche localmente (eco) e envia 'fill' — só chamado no 'up' de um TOQUE
+// (sem arrasto) do balde; nx/ny já normalizados 0-1 como o 'tstroke'
+function applyBucketFill(nx, ny) {
+  const w = strokeEcho.width, h = strokeEcho.height;
+  if (!w || !h) return;
+  const x = Math.round(nx * w), y = Math.round(ny * h);
+  pushEchoHistory(); // balde desfazível como qualquer outra operação (critério 4)
+  const count = floodFillCanvas(sectx, dmctx, x, y, state.color, FILL_ALPHA_THRESHOLD);
+  if (!count) { echoUndo.pop(); return; } // nada preenchido: não empilha um passo de undo vazio nem envia mensagem
+  compositeEcho();
+  send({ kind: "fill", x: r4(nx), y: r4(ny), color: state.color });
+}
 dCanvas.addEventListener("pointerdown", e => {
   dCanvas.setPointerCapture(e.pointerId);
   const { nx, ny, px, py } = drawCanvasPt(e);
+  if (state.tool === "bucket") {
+    // balde: NÃO abre um 'tstroke' — só regista o ponto de partida, o
+    // preenchimento decide-se no 'up' (toque vs. arrasto, ver pointermove/endTabletStroke)
+    bucketPointers.set(e.pointerId, { nx, ny, px, py, moved: false });
+    return;
+  }
   const sid = Math.random().toString(36).slice(2, 10);
   const brush = { tool: state.tool, color: state.color, size: state.size, mirror: state.mirror };
   pushEchoHistory(); // 1 passo de undo POR traço (cada dedo) — alinha com o display, que assa/empilha por tstroke
@@ -3128,6 +3312,12 @@ dCanvas.addEventListener("pointerdown", e => {
   send({ kind: "tstroke", sid, phase: "start", pts: [[r4(nx), r4(ny)]], brush }); // brush SEMPRE no 'start' — o display congela-o por traço
 });
 dCanvas.addEventListener("pointermove", e => {
+  const bp = bucketPointers.get(e.pointerId);
+  if (bp) {
+    const { px, py } = drawCanvasPt(e);
+    if (Math.hypot(px - bp.px, py - bp.py) > BUCKET_TAP_SLOP) bp.moved = true; // virou arrasto: não enche no 'up'
+    return;
+  }
   const s = tabletStrokesLocal.get(e.pointerId);
   if (!s) return;
   const { nx, ny, px, py } = drawCanvasPt(e);
@@ -3142,15 +3332,21 @@ dCanvas.addEventListener("pointermove", e => {
     }, TSTROKE_THROTTLE_MS);
   }
 });
-function endTabletStroke(e) {
+function endTabletStroke(e, canceled) {
+  const bp = bucketPointers.get(e.pointerId);
+  if (bp) {
+    bucketPointers.delete(e.pointerId);
+    if (!canceled && !bp.moved) applyBucketFill(bp.nx, bp.ny); // só enche se foi mesmo um toque parado
+    return;
+  }
   const s = tabletStrokesLocal.get(e.pointerId);
   if (!s) return;
   clearTimeout(s.timer);
   send({ kind: "tstroke", sid: s.sid, phase: "end", pts: s.pending });
   tabletStrokesLocal.delete(e.pointerId);
 }
-dCanvas.addEventListener("pointerup", endTabletStroke);
-dCanvas.addEventListener("pointercancel", endTabletStroke);
+dCanvas.addEventListener("pointerup", e => endTabletStroke(e, false));
+dCanvas.addEventListener("pointercancel", e => endTabletStroke(e, true));
 
 /* ================= tab bar (telemóvel): 3 páginas deslizantes ================= */
 // só layout/wiring — não mexe em nenhum estado de sync; "página ativa" é puramente

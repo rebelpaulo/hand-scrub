@@ -221,6 +221,35 @@ function traceZonePath(ctx, z, w, h) {
   }
   tracePolyPath(ctx, z.pts, w, h, !!z.smooth);
 }
+// FEATURE "a foto preenche a área desenhável" (B1/B2): bounding box (em pixels
+// w×h) da UNIÃO das zonas 'include' — null se não houver nenhuma (quem chama
+// usa o retângulo inteiro nesse caso). MESMA CONTA, byte-a-byte, em
+// magicdraw.html (função includeZonesBBox lá) — o eco do tablet tem de bater
+// com o que é projetado aqui. Aproxima poly 'smooth' pelos pontos de
+// controlo (a curva Catmull-Rom fica perto o suficiente para enquadrar uma
+// foto — ao contrário da máscara de tinta, que precisa do contorno exato).
+function includeZonesBBox(zoneList, w, h) {
+  const usable = zoneList.filter(z => !(z.type === "poly" && (!Array.isArray(z.pts) || z.pts.length < 3)));
+  const includeZones = usable.filter(z => (z.mode || "occlude") === "include");
+  if (!includeZones.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const z of includeZones) {
+    if (z.type === "ellipse") {
+      const cx = z.cx * w, cy = z.cy * h, rx = z.rx * w, ry = z.ry * h, rot = z.rot || 0;
+      const hw = Math.hypot(rx * Math.cos(rot), ry * Math.sin(rot));
+      const hh = Math.hypot(rx * Math.sin(rot), ry * Math.cos(rot));
+      minX = Math.min(minX, cx - hw); maxX = Math.max(maxX, cx + hw);
+      minY = Math.min(minY, cy - hh); maxY = Math.max(maxY, cy + hh);
+    } else {
+      for (const [x, y] of z.pts) {
+        const px = x * w, py = y * h;
+        minX = Math.min(minX, px); maxX = Math.max(maxX, px);
+        minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+      }
+    }
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
 // pegas em pixels: vértices reais (poly) ou centro+eixo-rx+eixo-ry (ellipse)
 function zoneHandlesPx(z, w, h) {
   if (z.type === "ellipse") {
@@ -354,7 +383,10 @@ function composeAndWarp() {
   warpOffCtx.drawImage(drawCanvas, 0, 0, W, H);
   warpOffCtx.drawImage(strokeCanvas, 0, 0, W, H);
   warpOffCtx.drawImage(cursorCanvas, 0, 0, W, H);
-  if (cam.classList.contains("show")) drawVideoCover(warpOffCtx, cam); // vídeo da sequência de foto, mesma geometria cover+espelho
+  // vídeo da sequência de foto (contagem/flash), mesma geometria cover+espelho
+  // E mesma bbox (B1) da foto que vai ser capturada — sem isto a pré-visualização
+  // aparecia ecrã inteiro e só cortava para a zona pequena no instante da captura
+  if (cam.classList.contains("show")) drawVideoCover(warpOffCtx, cam, includeZonesBBox(zones, W, H));
   warp.render(warpOffscreen);
 }
 
@@ -564,6 +596,20 @@ function handleMsg(payload) {
     case "undo": undo(); break; // FIX E — aditivo ao protocolo, sem payload
     case "redo": redo(); break;
     case "tstroke": handleTstroke(payload); break; // FEATURE "✏️ Desenhar": traço do tablet (aditivo)
+    case "fill": { // FEATURE "🪣 Balde": preenchimento do tablet (aditivo, kind novo)
+      // validação de forma — mesmo padrão do 'warp' logo abaixo: canal público,
+      // uma mensagem malformada é ignorada em silêncio, nunca parte o handler
+      const { x, y, color } = payload;
+      const xyOk = Number.isFinite(x) && Number.isFinite(y) && x >= 0 && x <= 1 && y >= 0 && y <= 1;
+      const colorOk = typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color);
+      if (!xyOk || !colorOk) break;
+      const px = Math.min(drawCanvas.width - 1, Math.round(x * drawCanvas.width));
+      const py = Math.min(drawCanvas.height - 1, Math.round(y * drawCanvas.height));
+      const before = snapshotDrawCanvas();
+      const count = floodFillCanvas(dctx, usableMaskCtx(drawCanvas.width, drawCanvas.height), px, py, color);
+      if (count > 0) pushUndo(before); // participa do MESMO undo/redo (FIX E) dos traços/clear — critério 4
+      break;
+    }
     case "warp": { // FEATURE "📐 Warp": deformar a projeção (aditivo, kind novo)
       // FIX 4 (review): warp.setPoints() LANÇA se points.length !== n*n*2 (ver
       // warp.js) — ao contrário dos outros caminhos vindos da rede neste
@@ -634,13 +680,25 @@ function camToScreen(nx, ny) {
   const { s, offX, offY } = coverTransform(vw, vh);
   return { x: W - (offX + nx * vw * s), y: offY + ny * vh * s }; // espelhado
 }
-function drawVideoCover(ctx, video) {
+// FIX B1: 'rect' opcional (px, espaço W×H) — sem ele cobre o ecrã inteiro
+// (comportamento antigo, camToScreen continua a usar coverTransform/W/H
+// diretamente para o cursor da mão, isso NÃO muda). Com 'rect' (bbox da área
+// desenhável, ver includeZonesBBox), cobre e centra DENTRO desse retângulo —
+// antes cobria sempre o ecrã inteiro e a máscara de zonas (renderZones)
+// cortava a foto, sobrando só a fatia que calhava dentro da zona pequena.
+// O espelho continua a refletir em torno do EIXO DO PRÓPRIO RETÂNGULO (tx+tw),
+// não do ecrã, para a imagem ficar centrada e espelhada dentro do rect.
+function drawVideoCover(ctx, video, rect) {
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !vh) return;
-  const { s, offX, offY } = coverTransform(vw, vh);
+  const tx = rect ? rect.x : 0, ty = rect ? rect.y : 0;
+  const tw = rect ? rect.w : W, th = rect ? rect.h : H;
+  const s = Math.max(tw / vw, th / vh);
+  const drawW = vw * s, drawH = vh * s;
+  const offX = (tw - drawW) / 2, offY = ty + (th - drawH) / 2;
   ctx.save();
-  ctx.translate(W, 0); ctx.scale(-1, 1);
-  ctx.drawImage(video, 0, 0, vw, vh, offX, offY, vw * s, vh * s);
+  ctx.translate(tx + tw, 0); ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0, vw, vh, offX, offY, drawW, drawH);
   ctx.restore();
 }
 
@@ -669,10 +727,42 @@ async function startPhotoSequence() {
   countdownNum.hidden = true;
   flash.style.opacity = "1";
   await delay(150);
-  if (mySeq === photoSeqId) drawVideoCover(pctx, cam); // só desenha se ainda for a sequência corrente — senão a foto "ressuscitava" depois de um clear a meio
+  if (mySeq === photoSeqId) {
+    const rect = includeZonesBBox(zones, W, H); // B1: null = sem 'include', mantém ecrã inteiro
+    drawVideoCover(pctx, cam, rect); // só desenha se ainda for a sequência corrente — senão a foto "ressuscitava" depois de um clear a meio
+    sendPhotoData(rect); // B2: o eco do tablet deixa de ser "às cegas"
+  }
   flash.style.opacity = "0";
   cam.classList.remove("show");
   photoBusy = false;
+}
+// FEATURE B2: manda ao tablet uma versão MUITO reduzida da foto tirada — o eco
+// do modo Desenhar nunca a mostrava, o operador desenhava às cegas. Recorta só
+// o retângulo 'rect' (mesma bbox usada em drawVideoCover, para o eco bater com
+// a projeção) e reduz até caber bem abaixo do limite de payload do Realtime
+// Broadcast (~60KB, ver ticket) — se não couber de forma nenhuma, desiste em
+// vez de arriscar um payload que o Broadcast rejeita.
+const PHOTODATA_MAX_SIDE = 640, PHOTODATA_MAX_BYTES = 60 * 1024;
+function sendPhotoData(rect) {
+  try {
+    const dpr = window.devicePixelRatio || 1;
+    const r = rect || { x: 0, y: 0, w: W, h: H };
+    const sx = Math.max(0, Math.round(r.x * dpr)), sy = Math.max(0, Math.round(r.y * dpr));
+    const sw = Math.max(1, Math.min(Math.round(r.w * dpr), photoCanvas.width - sx));
+    const sh = Math.max(1, Math.min(Math.round(r.h * dpr), photoCanvas.height - sy));
+    const scale = Math.min(1, PHOTODATA_MAX_SIDE / Math.max(sw, sh));
+    const ow = Math.max(1, Math.round(sw * scale)), oh = Math.max(1, Math.round(sh * scale));
+    const oc = document.createElement("canvas");
+    oc.width = ow; oc.height = oh;
+    oc.getContext("2d").drawImage(photoCanvas, sx, sy, sw, sh, 0, 0, ow, oh);
+    let q = 0.6, dataUrl = oc.toDataURL("image/jpeg", q);
+    while (dataUrl.length > PHOTODATA_MAX_BYTES && q > 0.25) {
+      q -= 0.15;
+      dataUrl = oc.toDataURL("image/jpeg", q);
+    }
+    if (dataUrl.length > PHOTODATA_MAX_BYTES) return; // não coube de forma nenhuma: não envia, eco do tablet fica sem foto
+    send("photodata", { img: dataUrl });
+  } catch { /* toDataURL pode falhar (ex.: canvas tainted por CORS) — sequência de foto continua normalmente, só o eco do tablet fica sem foto */ }
 }
 function abortPhotoSequence() {
   countdownNum.hidden = true;
@@ -906,6 +996,74 @@ function redo() {
   undoStack.push(snapshotDrawCanvas());
   if (undoStack.length > MAX_HISTORY) undoStack.shift();
   restoreSnapshot(redoStack.pop());
+}
+
+/* ================= balde de tinta (FEATURE A, kind 'fill') =================
+   Máscara "área desenhável" (alpha 255 = pode pintar) em pixels de
+   DISPOSITIVO (drawCanvas.width×height) — MESMA conta do rebuildDrawMask() de
+   magicdraw.html (união das 'include', menos as 'occlude'), reconstruída aqui
+   sob pedido (o balde é um evento raro, não vale a pena cachear/invalidar). */
+function usableMaskCtx(w, h) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const mctx = c.getContext("2d");
+  const usable = zones.filter(z => !(z.type === "poly" && (!Array.isArray(z.pts) || z.pts.length < 3)));
+  const includeZones = usable.filter(z => (z.mode || "occlude") === "include");
+  const occludeZones = usable.filter(z => (z.mode || "occlude") !== "include");
+  mctx.fillStyle = "#000";
+  if (includeZones.length) {
+    for (const z of includeZones) { traceZonePath(mctx, z, w, h); mctx.fill(); }
+  } else {
+    mctx.fillRect(0, 0, w, h); // sem 'include': o canvas inteiro é desenhável
+  }
+  mctx.globalCompositeOperation = "destination-out";
+  for (const z of occludeZones) { traceZonePath(mctx, z, w, h); mctx.fill(); }
+  mctx.globalCompositeOperation = "source-over";
+  return mctx;
+}
+// Scanline flood-fill NÃO-RECURSIVO — MESMA função, byte-a-byte, em
+// magicdraw.html (ver o comentário lá para a explicação do algoritmo: o alpha
+// do próprio ctx serve de "visitado", sem array à parte).
+function floodFillCanvas(ctx, maskCtx, x0, y0, color, threshold = 20) {
+  const w = ctx.canvas.width, h = ctx.canvas.height;
+  if (x0 < 0 || y0 < 0 || x0 >= w || y0 >= h) return 0;
+  const img = ctx.getImageData(0, 0, w, h);
+  const data = img.data;
+  const mask = maskCtx.getImageData(0, 0, w, h).data;
+  const inside = (x, y) => {
+    if (x < 0 || x >= w || y < 0 || y >= h) return false;
+    const i = (y * w + x) * 4;
+    return mask[i + 3] > 128 && data[i + 3] < threshold;
+  };
+  if (!inside(x0, y0)) return 0;
+  const r = parseInt(color.slice(1, 3), 16) || 0;
+  const g = parseInt(color.slice(3, 5), 16) || 0;
+  const b = parseInt(color.slice(5, 7), 16) || 0;
+  let count = 0;
+  const set = (x, y) => {
+    const i = (y * w + x) * 4;
+    data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = 255;
+    count++;
+  };
+  const stack = [[x0, x0, y0, 1], [x0, x0, y0 - 1, -1]];
+  while (stack.length) {
+    let [x1, x2, y, dy] = stack.pop();
+    let x = x1;
+    if (inside(x, y)) {
+      while (inside(x - 1, y)) { set(x - 1, y); x--; }
+    }
+    if (x < x1) stack.push([x, x1 - 1, y - dy, -dy]);
+    while (x1 <= x2) {
+      while (inside(x1, y)) { set(x1, y); x1++; }
+      if (x1 > x) stack.push([x, x1 - 1, y + dy, dy]);
+      if (x1 - 1 > x2) stack.push([x2 + 1, x1 - 1, y - dy, -dy]);
+      x1++;
+      while (x1 < x2 && !inside(x1, y)) x1++;
+      x = x1;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return count;
 }
 
 /* ================= estado por mão (tracking + traço) ================= */
