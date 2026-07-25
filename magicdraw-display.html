@@ -536,8 +536,14 @@ function handleMsg(payload) {
       // marcava photoOnDisplay=true na mesma (drawVideoCover sai cedo sem
       // desenhar nada), oferecendo "Limpar desenho/Limpar tudo" no tablet
       // para uma foto que nunca existiu. Avisa e não mexe em mais nada.
-      if (!running) { showNotice("📷 sem câmara — não é possível tirar foto (modo mural)"); break; }
+      // FIX V-foto (review): anuncia aceite/recusa ao tablet com o MESMO kind
+      // 'dstate' já usado na resposta ao 'hello' — sem isto o tablet marcava
+      // hasPhoto=true otimisticamente no toque e, se recusado aqui (sem
+      // câmara), ficava a oferecer "Limpar desenho/Limpar tudo" para uma foto
+      // que nunca existiu. Aditivo: nenhum kind novo no protocolo.
+      if (!running) { showNotice("📷 sem câmara — não é possível tirar foto (modo mural)"); send("dstate", { hasPhoto: photoOnDisplay }); break; }
       photoOnDisplay = true; // otimista: a sequência congela ~4s depois
+      send("dstate", { hasPhoto: photoOnDisplay });
       startPhotoSequence();
       break;
     case "hello":
@@ -565,7 +571,11 @@ function handleMsg(payload) {
       const nOk = n === undefined || (Number.isInteger(n) && n >= 2 && n <= 17); // 17 = clampN() máx. em warp.js
       const effN = nOk && Number.isInteger(n) ? n : warpN;
       const points = payload.points;
-      const pointsOk = points == null || (Array.isArray(points) && points.length === effN * effN * 2);
+      // FIX V1 (review): antes só validava o COMPRIMENTO — um NaN/Infinity
+      // dentro do array passava e ia parar às matrizes do WebGL (warp.js),
+      // partindo a projeção sem lançar exceção nenhuma para o try/catch abaixo
+      // apanhar. Number.isFinite rejeita NaN/±Infinity/strings.
+      const pointsOk = points == null || (Array.isArray(points) && points.length === effN * effN * 2 && points.every(Number.isFinite));
       if (!nOk || !pointsOk) break; // forma inválida: ignora em silêncio (canal público)
       try {
         warpLive = true;
