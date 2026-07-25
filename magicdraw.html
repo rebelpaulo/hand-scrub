@@ -707,6 +707,14 @@
       <symbol id="ic-zone" viewBox="0 0 24 24">
         <path d="M6 4h9l6 6v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" stroke-dasharray="2.5 2.5"/>
       </symbol>
+      <!-- detetar contorno: silhueta (traço CONTÍNUO, ao contrário do ic-zone
+           tracejado — não pode confundir-se) + varinha/faísca (ic-magic) por
+           cima, a sugerir "a varinha desenha este contorno sozinha" -->
+      <symbol id="ic-outline" viewBox="0 0 24 24">
+        <path d="M3 20c-1-7 2-13 7-13s5 4 8 4 4 4 4 9H3z"/>
+        <path d="M13.2 5.2l1.8 1.8"/>
+        <path d="M19.5 2.2l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6.6-1.7z"/>
+      </symbol>
       <!-- grelha de teste do warp: grelha reta (contraste com ic-warp, que é a mesma grelha deformada) -->
       <symbol id="ic-grid" viewBox="0 0 24 24">
         <path d="M3 3h18v18H3z"/>
@@ -858,6 +866,7 @@
         <button id="zoneAddBtn"><svg class="ic"><use href="#ic-plus"></use></svg><br>Criar zona</button>
         <button id="zoneCircleBtn"><svg class="ic"><use href="#ic-circle"></use></svg><br>Criar círculo</button>
         <button id="refImgBtn"><svg class="ic"><use href="#ic-image"></use></svg><br>Imagem</button>
+        <button id="outlineDetectBtn" disabled><svg class="ic"><use href="#ic-outline"></use></svg><br>Detetar contorno</button>
         <button id="zoneCurveBtn" disabled><svg class="ic"><use href="#ic-curve"></use></svg><br>Curvas</button>
         <button id="zoneTypeBtn" disabled><svg class="ic"><use href="#ic-toggle"></use></svg><br>Tipo</button>
         <button id="zonePointDelBtn" disabled><svg class="ic"><use href="#ic-minus"></use></svg><br>Ponto</button>
@@ -1753,6 +1762,8 @@ function updateRefImgButton() {
   clearTimeout(refImgConfirmTimer);
   refImgBtn.classList.remove("confirm");
   refImgBtn.innerHTML = refImgDataUrl ? `${icSvg("trash")}<br>Imagem` : `${icSvg("image")}<br>Imagem`;
+  // "Detetar contorno" só faz sentido com imagem carregada (é dela que lê a silhueta)
+  $("outlineDetectBtn").disabled = !refImgDataUrl;
 }
 refImgBtn.onclick = () => {
   if (!refImgDataUrl) { refImgInput.click(); return; } // sem imagem: abre o seletor de ficheiro
@@ -1765,6 +1776,306 @@ refImgBtn.onclick = () => {
   refImgBtn.classList.add("confirm");
   refImgBtn.textContent = "confirmar?";
   refImgConfirmTimer = setTimeout(updateRefImgButton, 3000);
+};
+
+/* ---- "Detetar contorno": gera um polígono 'include' a partir da silhueta de
+   refImg, para poupar ~60 pontos à mão (ticket O1). 100% canvas/JS puro, sem
+   dependências novas — Otsu (limiar automático) -> flood fill a partir da
+   margem sobre o FUNDO (o que não é alcançado conta como "dentro do
+   edifício" — é isto que evita que janelas/linhas interiores virem buracos)
+   -> traçado de Moore (border following) da maior componente -> Ramer–
+   Douglas–Peucker fechado, com o épsilon procurado por bisseção para cair
+   tipicamente entre 60–100 pontos (teto absoluto OUTLINE_RDP_CAP). ---- */
+const OUTLINE_MAX_SIDE = 512;    // lado maior do canvas de trabalho — só a silhueta interessa, não o pixel
+const OUTLINE_RDP_TARGET = [60, 100]; // banda de pontos que a busca do épsilon tenta acertar
+const OUTLINE_RDP_CAP = 160;     // teto absoluto, seja qual for o épsilon encontrado
+const OUTLINE_MIN_PTS = 3;       // abaixo disto é zona degenerada — não se cria
+// ponytail: RDP é O(n²) no pior caso (traço em "pente", com muitos picos finos
+// seguidos — desenhos ornamentados dão-no facilmente). A busca do épsilon faz
+// dezenas de passagens; sem isto, um contorno bruto de dezenas de milhares de
+// píxeis (ex. cheio de filigranas) pode pendurar o separador vários segundos.
+// Decima uniformemente ANTES do RDP para um teto seguro — sobe este valor se
+// algum desenho precisar de mais fidelidade antes do RDP entrar em ação.
+const OUTLINE_PRE_RDP_CAP = 1500;
+function outlineDecimate(pts, cap) {
+  if (pts.length <= cap) return pts;
+  const step = pts.length / cap;
+  const out = [];
+  for (let i = 0; i < cap; i++) out.push(pts[(i * step) | 0]);
+  return out;
+}
+
+function outlineOtsuThreshold(hist, total) {
+  let sum = 0;
+  for (let t = 0; t < 256; t++) sum += t * hist[t];
+  let sumB = 0, wB = 0, varMax = -1, threshold = 127;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (!wB) continue;
+    const wF = total - wB;
+    if (!wF) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const v = wB * wF * (mB - mF) * (mB - mF);
+    if (v > varMax) { varMax = v; threshold = t; }
+  }
+  return threshold;
+}
+// máscara 1 = píxel de "estrutura" (traço/silhueta), 0 = fundo. Alpha só conta
+// se houver transparência REAL (uma imagem toda opaca — todo o JPEG gravado
+// pelo próprio refImgInput cai aqui — trataria erradamente "tudo" como
+// estrutura, por isso o teste de "canal útil" vem primeiro).
+function outlineForegroundMask(imgData) {
+  const { data, width: w, height: h } = imgData;
+  const n = w * h;
+  let hasAlpha = false;
+  for (let i = 3; i < data.length; i += 4) { if (data[i] < 250) { hasAlpha = true; break; } }
+  const mask = new Uint8Array(n);
+  if (hasAlpha) {
+    for (let i = 0; i < n; i++) mask[i] = data[i * 4 + 3] > 127 ? 1 : 0;
+    return mask;
+  }
+  // luminância + Otsu: sem limiar fixo à mão, o contraste/exposição varia de desenho para desenho
+  const lum = new Uint8Array(n);
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    const l = (0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2]) | 0;
+    lum[i] = l; hist[l]++;
+  }
+  const t = outlineOtsuThreshold(hist, n);
+  // Otsu só separa em 2 classes — qual delas é "fundo" depende do desenho
+  // (traço escuro em fundo claro, ou o inverso). Decide-se pela classe
+  // MAIORITÁRIA na margem do canvas (um desenho bem enquadrado raramente tem
+  // o edifício encostado ao limite do enquadramento), nunca à mão.
+  let darkOnBorder = 0, borderN = 0;
+  const bumpBorder = (x, y) => { borderN++; if (lum[y * w + x] <= t) darkOnBorder++; };
+  for (let x = 0; x < w; x++) { bumpBorder(x, 0); bumpBorder(x, h - 1); }
+  for (let y = 0; y < h; y++) { bumpBorder(0, y); bumpBorder(w - 1, y); }
+  const bgIsDark = darkOnBorder > borderN / 2;
+  for (let i = 0; i < n; i++) mask[i] = ((lum[i] <= t) === bgIsDark) ? 0 : 1;
+  return mask;
+}
+// flood fill (BFS, fila explícita — não recursão) a partir da margem, só por
+// píxeis de FUNDO (mask===0). O que ficar por alcançar (paredes + bolsas
+// fechadas, ex. o interior de uma janela cercada pelo traço do caixilho)
+// conta como "dentro do edifício" — é este o passo que evita buracos.
+function outlineFloodOutside(mask, w, h) {
+  const visited = new Uint8Array(w * h);
+  const qx = new Int32Array(w * h), qy = new Int32Array(w * h);
+  let qt = 0;
+  const tryPush = (x, y) => {
+    const i = y * w + x;
+    if (mask[i] === 0 && !visited[i]) { visited[i] = 1; qx[qt] = x; qy[qt] = y; qt++; }
+  };
+  for (let x = 0; x < w; x++) { tryPush(x, 0); tryPush(x, h - 1); }
+  for (let y = 0; y < h; y++) { tryPush(0, y); tryPush(w - 1, y); }
+  for (let qh = 0; qh < qt; qh++) {
+    const x = qx[qh], y = qy[qh];
+    if (x > 0) tryPush(x - 1, y);
+    if (x < w - 1) tryPush(x + 1, y);
+    if (y > 0) tryPush(x, y - 1);
+    if (y < h - 1) tryPush(x, y + 1);
+  }
+  return visited;
+}
+// maior componente ligada (4-conectividade) de `inside` — várias componentes
+// possíveis (ruído do Otsu, ornamentos destacados); fica-se com a maior área.
+function outlineLargestComponent(inside, w, h) {
+  const n = w * h;
+  const label = new Int32Array(n).fill(-1);
+  const stack = new Int32Array(n);
+  let bestLabel = -1, bestArea = 0, nextLabel = 0;
+  for (let i = 0; i < n; i++) {
+    if (!inside[i] || label[i] !== -1) continue;
+    let sp = 0, area = 0;
+    stack[sp++] = i; label[i] = nextLabel;
+    while (sp > 0) {
+      const p = stack[--sp]; area++;
+      const px = p % w, py = (p / w) | 0;
+      if (px > 0 && inside[p - 1] && label[p - 1] === -1) { label[p - 1] = nextLabel; stack[sp++] = p - 1; }
+      if (px < w - 1 && inside[p + 1] && label[p + 1] === -1) { label[p + 1] = nextLabel; stack[sp++] = p + 1; }
+      if (py > 0 && inside[p - w] && label[p - w] === -1) { label[p - w] = nextLabel; stack[sp++] = p - w; }
+      if (py < h - 1 && inside[p + w] && label[p + w] === -1) { label[p + w] = nextLabel; stack[sp++] = p + w; }
+    }
+    if (area > bestArea) { bestArea = area; bestLabel = nextLabel; }
+    nextLabel++;
+  }
+  return { label, bestLabel, bestArea };
+}
+// traçado de Moore (border following), 8-vizinhos em sentido horário. Critério
+// de paragem: para quando volta a um estado (píxel + direção de entrada) JÁ
+// VISITADO — não só ao estado inicial. Desenhos ricos em traço duplo paralelo
+// (perfis/molduras a 1-2px) criam "beliscões" (a mesma componente a tocar-se a
+// si própria na diagonal) onde o Moore clássico (só compara ao estado inicial)
+// pode ficar preso a circular um laço interior que nunca volta ao arranque —
+// comparar a QUALQUER estado repetido garante fecho (o nº de estados possíveis
+// é finito) e devolve sempre um laço simples válido (cada passo é 1 vizinho).
+const OUTLINE_MOORE_DX = [1, 1, 0, -1, -1, -1, 0, 1];
+const OUTLINE_MOORE_DY = [0, 1, 1, 1, 0, -1, -1, -1];
+function traceMooreBoundary(isFg, w, h, sx, sy) {
+  const boundary = [[sx, sy]];
+  let cx = sx, cy = sy;
+  // pixel de arranque = topmost depois leftmost da componente: o vizinho a
+  // OESTE nunca é dela (ou está fora da imagem, ou seria mais à esquerda na
+  // mesma linha, contradizendo a escolha) — a procura entra "vinda de oeste".
+  let enterDir = 4;
+  const seenAt = new Int32Array(w * h * 8).fill(-1);
+  seenAt[(sy * w + sx) * 8 + enterDir] = 0;
+  const maxSteps = 8 * (w * h + 1);
+  for (let steps = 0; steps < maxSteps; steps++) {
+    let found = -1, nx = cx, ny = cy;
+    for (let k = 1; k <= 8; k++) {
+      const d = (enterDir + k) % 8;
+      const tx = cx + OUTLINE_MOORE_DX[d], ty = cy + OUTLINE_MOORE_DY[d];
+      if (tx >= 0 && ty >= 0 && tx < w && ty < h && isFg(tx, ty)) { found = d; nx = tx; ny = ty; break; }
+    }
+    if (found === -1) break; // píxel isolado, sem vizinhos "dentro" — para (componente de 1 píxel)
+    cx = nx; cy = ny;
+    enterDir = (found + 4) % 8;
+    const key = (cy * w + cx) * 8 + enterDir;
+    const prevIdx = seenAt[key];
+    if (prevIdx !== -1) return boundary.slice(prevIdx); // laço fechado — fica-se com o troço [1ª ocorrência .. agora]
+    seenAt[key] = boundary.length;
+    boundary.push([cx, cy]);
+  }
+  return boundary;
+}
+// RDP clássico (polilinha aberta, extremos fixos) — iterativo, sem recursão.
+function outlineRDP(pts, eps) {
+  const n = pts.length;
+  if (n < 3) return pts.slice();
+  const keep = new Uint8Array(n);
+  keep[0] = 1; keep[n - 1] = 1;
+  const stack = [[0, n - 1]];
+  while (stack.length) {
+    const [i0, i1] = stack.pop();
+    if (i1 <= i0 + 1) continue;
+    const [x0, y0] = pts[i0], [x1, y1] = pts[i1];
+    const dx = x1 - x0, dy = y1 - y0;
+    const segLen2 = dx * dx + dy * dy;
+    let maxD = -1, maxI = -1;
+    for (let i = i0 + 1; i < i1; i++) {
+      const [px, py] = pts[i];
+      let d;
+      if (segLen2 === 0) d = Math.hypot(px - x0, py - y0);
+      else {
+        const t = Math.max(0, Math.min(1, ((px - x0) * dx + (py - y0) * dy) / segLen2));
+        d = Math.hypot(px - (x0 + t * dx), py - (y0 + t * dy));
+      }
+      if (d > maxD) { maxD = d; maxI = i; }
+    }
+    if (maxD > eps) { keep[maxI] = 1; stack.push([i0, maxI], [maxI, i1]); }
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(pts[i]);
+  return out;
+}
+// o traço de Moore devolve um contorno FECHADO (o último volta ao 1º) — RDP é
+// para polilinhas ABERTAS, por isso divide-se em 2 arcos por 2 pontos opostos
+// (o mais a norte e o mais a sul do contorno), simplifica-se cada um e junta-se
+// sem duplicar os pontos de junção (o fecho fica implícito, como em tracePolyPath).
+function outlineSimplifyClosed(pts, eps) {
+  const n = pts.length;
+  if (n < 3) return pts.slice();
+  let iTop = 0, iBot = 0;
+  for (let i = 1; i < n; i++) {
+    if (pts[i][1] < pts[iTop][1]) iTop = i;
+    if (pts[i][1] > pts[iBot][1]) iBot = i;
+  }
+  if (iTop === iBot) return outlineRDP(pts, eps);
+  const [a, b] = iTop < iBot ? [iTop, iBot] : [iBot, iTop];
+  const s1 = outlineRDP(pts.slice(a, b + 1), eps);
+  const s2 = outlineRDP(pts.slice(b).concat(pts.slice(0, a + 1)), eps);
+  return s1.slice(0, -1).concat(s2.slice(0, -1));
+}
+// épsilon por bisseção (nunca à mão): a relação é monótona (mais épsilon nunca
+// dá mais pontos), por isso primeiro garante-se um "hi" já <= teto absoluto e
+// depois bisseta-se até cair na banda 60–100 (ou fica-se pelo melhor achado).
+function outlineChooseEpsilon(rawPts) {
+  let perim = 0;
+  for (let i = 0; i < rawPts.length; i++) {
+    const [x0, y0] = rawPts[i], [x1, y1] = rawPts[(i + 1) % rawPts.length];
+    perim += Math.hypot(x1 - x0, y1 - y0);
+  }
+  let hi = Math.max(1, perim / 8), lo = 0;
+  for (let g = 0; g < 30 && outlineSimplifyClosed(rawPts, hi).length > OUTLINE_RDP_CAP; g++) hi *= 1.7;
+  let result = outlineSimplifyClosed(rawPts, hi); // <= teto por construção — ponto de partida seguro
+  for (let iter = 0; iter < 25; iter++) {
+    const mid = (lo + hi) / 2;
+    const cand = outlineSimplifyClosed(rawPts, mid);
+    if (cand.length > OUTLINE_RDP_CAP) { lo = mid; continue; }
+    result = cand;
+    if (cand.length >= OUTLINE_RDP_TARGET[0] && cand.length <= OUTLINE_RDP_TARGET[1]) return cand;
+    if (cand.length > OUTLINE_RDP_TARGET[1]) lo = mid; else hi = mid;
+  }
+  return result;
+}
+function outlinePolygonArea(pts) {
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x0, y0] = pts[i], [x1, y1] = pts[(i + 1) % pts.length];
+    a += x0 * y1 - x1 * y0;
+  }
+  return Math.abs(a) / 2;
+}
+// pipeline completo: refImg -> {ok:true, pts, stats} | {ok:false, reason, stats?}
+function outlineDetectZone() {
+  if (!refImg) return { ok: false, reason: "Sem imagem de referência carregada." };
+  const natW = refImg.naturalWidth || refImg.width, natH = refImg.naturalHeight || refImg.height;
+  const scale = Math.min(1, OUTLINE_MAX_SIDE / Math.max(natW, natH));
+  const w = Math.max(1, Math.round(natW * scale)), h = Math.max(1, Math.round(natH * scale));
+  const oc = document.createElement("canvas");
+  oc.width = w; oc.height = h;
+  const octx = oc.getContext("2d", { willReadFrequently: true });
+  octx.drawImage(refImg, 0, 0, w, h);
+  const mask = outlineForegroundMask(octx.getImageData(0, 0, w, h));
+  let fgCount = 0;
+  for (let i = 0; i < mask.length; i++) fgCount += mask[i];
+  if (fgCount === 0 || fgCount === mask.length) {
+    return { ok: false, reason: "Imagem em branco ou sem contraste: nenhum traço detetado.", stats: { w, h, fgCount } };
+  }
+  const visited = outlineFloodOutside(mask, w, h);
+  const inside = new Uint8Array(w * h);
+  let insideCount = 0;
+  for (let i = 0; i < w * h; i++) { inside[i] = visited[i] ? 0 : 1; insideCount += inside[i]; }
+  if (insideCount === 0 || insideCount > 0.98 * w * h) {
+    return { ok: false, reason: "Não foi possível isolar uma silhueta fechada nesta imagem.", stats: { w, h, fgCount, insideCount } };
+  }
+  const { label, bestLabel, bestArea } = outlineLargestComponent(inside, w, h);
+  const isFg = (x, y) => { const i = y * w + x; return inside[i] === 1 && label[i] === bestLabel; };
+  let sx = -1, sy = -1;
+  scan: for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) { if (isFg(x, y)) { sx = x; sy = y; break scan; } }
+  }
+  if (sx === -1) return { ok: false, reason: "Não foi possível isolar uma silhueta fechada nesta imagem.", stats: { w, h, fgCount, insideCount } };
+  const rawBoundary = traceMooreBoundary(isFg, w, h, sx, sy);
+  if (rawBoundary.length < OUTLINE_MIN_PTS) {
+    return { ok: false, reason: "Contorno detetado é degenerado (poucos pontos).", stats: { w, h, fgCount, insideCount, rawPts: rawBoundary.length } };
+  }
+  const decimated = outlineDecimate(rawBoundary, OUTLINE_PRE_RDP_CAP);
+  const simplified = outlineChooseEpsilon(decimated);
+  if (simplified.length < OUTLINE_MIN_PTS) {
+    return { ok: false, reason: "Contorno simplificado ficou degenerado.", stats: { w, h, fgCount, insideCount, rawPts: rawBoundary.length, decimatedPts: decimated.length, rdpPts: simplified.length } };
+  }
+  const pts = simplified.map(([x, y]) => [clamp01(x / w), clamp01(y / h)]);
+  return {
+    ok: true, pts,
+    stats: { w, h, fgCount, insideCount, bestArea, rawPts: rawBoundary.length, decimatedPts: decimated.length, rdpPts: pts.length, areaFrac: outlinePolygonArea(pts) },
+  };
+}
+// exposto só para inspeção/depuração (mesmo padrão de window.__zonesDebug acima)
+window.__outlineDebug = outlineDetectZone;
+const outlineDetectBtn = $("outlineDetectBtn");
+outlineDetectBtn.onclick = () => {
+  const res = outlineDetectZone();
+  if (!res.ok) { alert(res.reason); return; } // imagem inutilizável: mensagem legível, NENHUMA zona criada
+  pushZoneHistory(); // mesmo caminho de undo das outras operações de zona (zoneUndoStack)
+  const id = "z" + Math.random().toString(36).slice(2, 8);
+  zones.push({ id, type: "poly", pts: res.pts, smooth: false, mode: "include" }); // acrescenta, nunca substitui
+  selectedZoneId = id; selectedVertexIdx = null; // fica selecionada, pronta a afinar
+  renderAdminCanvas(); updateZoneButtons();
+  sendZones(true); zonesCloudSave(); // sendZones() já chama syncDrawableRegion()
 };
 
 /* ---- emissão em tempo real (protocolo kind:'zones', mesmos dois canais) ---- */
@@ -2307,6 +2618,27 @@ $("zonePointDelBtn").onclick = () => {
   renderAdminCanvas(); updateZoneButtons();
   sendZones(true); zonesCloudSave();
 };
+// Backspace/Delete apaga o vértice selecionado. Afinar um contorno é sobretudo
+// tocar num ponto e corrigi-lo; ter de ir ao botão "Ponto" a cada remoção parte
+// esse ritmo. Encaminha para o onclick acima em vez de duplicar a operação, para
+// herdar de graça as MESMAS guardas (poly, vértice selecionado, mínimo de 3
+// pontos), o histórico de undo e a emissão/gravação.
+// preventDefault é obrigatório: Backspace fora de um campo de texto ainda
+// dispara "voltar atrás" em alguns browsers, e perder o admin a meio da
+// calibração seria pior do que não ter atalho nenhum.
+window.addEventListener("keydown", e => {
+  if (e.key !== "Backspace" && e.key !== "Delete") return;
+  if (!adminOpen || adminOverlay.hidden) return;
+  // olha para o ALVO do evento e para o elemento focado: a escrever, o keydown
+  // nasce no próprio campo, e depender só do foco deixava passar o atalho se o
+  // activeElement estivesse dessincronizado — apagava um vértice a meio de
+  // escrever o nome de um edifício, sem relação nenhuma com o que se fez
+  const escreve = n => n && (/^(input|textarea)$/i.test(n.tagName) || n.isContentEditable);
+  if (escreve(e.target) || escreve(document.activeElement)) return;
+  if ($("zonePointDelBtn").disabled) return; // sem vértice apagável: deixa o browser em paz
+  e.preventDefault();
+  $("zonePointDelBtn").click();
+});
 $("zoneDelBtn").onclick = () => {
   if (!selectedZoneId) return;
   pushZoneHistory();
@@ -2503,6 +2835,19 @@ function renderWarpCanvas() {
   wctx.clearRect(0, 0, w, h);
   wctx.fillStyle = "#000"; wctx.fillRect(0, 0, w, h);
   if (refImg) { wctx.globalAlpha = 0.55; wctx.drawImage(refImg, 0, 0, w, h); wctx.globalAlpha = 1; }
+  // contorno das zonas por cima da imagem, por baixo da grelha — só visão (não
+  // seleciona/arrasta nada aqui, ver getWarpPt/pointerdown: só testam pts da
+  // grelha). A máscara de zonas vive em espaço-projetor e é DELIBERADAMENTE
+  // não deformada pelo warp (ver zoneCanvas em magicdraw-display.html) — este
+  // traço fino translúcido é a comparação direta imagem-deformada vs.
+  // máscara-não-deformada que o operador precisa de ver para alinhar o warp.
+  for (const z of zones) {
+    if (!isUsableZone(z)) continue;
+    traceZonePath(wctx, z, w, h);
+    wctx.strokeStyle = (z.mode || "occlude") === "include" ? "rgba(61,220,151,0.9)" : "rgba(255,77,85,0.9)";
+    wctx.lineWidth = 1.5 / s;
+    wctx.stroke();
+  }
   if (!warpToolAvailable) return;
   const pts = warpTool.getPoints(); // flat, row-major, linha 0 = topo (mesma convenção do warp.js)
   const n = warpN;
