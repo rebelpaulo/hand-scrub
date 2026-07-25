@@ -356,9 +356,9 @@ void main() {
     const corners = getCorners();
     const next = new Float32Array(newN * newN * 2);
     for (let row = 0; row < newN; row++) {
-      const v = newN === 1 ? 0 : row / (newN - 1);
+      const v = row / (newN - 1); // clampN() garante newN>=2 — nunca divide por zero
       for (let col = 0; col < newN; col++) {
-        const u = newN === 1 ? 0 : col / (newN - 1);
+        const u = col / (newN - 1);
         const p = bilinearCorner(corners, u, v);
         const idx = (row * newN + col) * 2;
         next[idx] = p[0];
@@ -491,9 +491,9 @@ function clamp01(v) {
 function identityPoints(n) {
   const arr = new Float32Array(n * n * 2);
   for (let row = 0; row < n; row++) {
-    const y = n === 1 ? 0 : row / (n - 1);
+    const y = row / (n - 1); // clampN() garante n>=2 — nunca divide por zero
     for (let col = 0; col < n; col++) {
-      const x = n === 1 ? 0 : col / (n - 1);
+      const x = col / (n - 1);
       const idx = (row * n + col) * 2;
       arr[idx] = x;
       arr[idx + 1] = y;

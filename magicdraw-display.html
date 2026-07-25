@@ -188,7 +188,9 @@ function normalizeZone(z) {
   if (!z) return z;
   const mode = z.mode === "include" ? "include" : "occlude";
   if (z.type === "ellipse") return { ...z, mode };
-  return { id: z.id, type: "poly", pts: z.pts, smooth: !!z.smooth, mode };
+  // FIX 6: pts sempre um array de verdade a partir daqui — um pts malformado
+  // (ex.: só com .length numérico) não passa a diante para rebentar o render
+  return { id: z.id, type: "poly", pts: Array.isArray(z.pts) ? z.pts : [], smooth: !!z.smooth, mode };
 }
 
 // traça o contorno da zona no ctx dado (poly reto/curvo ou elipse), em pixels (w×h)
@@ -248,7 +250,10 @@ const INSIDE_IFRAME = window.parent !== window;
 function renderZones() {
   zctx.clearRect(0, 0, W, H);
   if (INSIDE_IFRAME) return; // shell (display.html) já mascara por cima — ver nota acima
-  const usable = zones.filter(z => !(z.type === "poly" && (!z.pts || z.pts.length < 3)));
+  // FIX 6: valida Array.isArray ANTES de .length — um pts malformado com
+  // .length numérico (mas não-array) passava no guard antigo e rebentava a
+  // meio do loop de render (TypeError em pts.map), deixando zonas por desenhar
+  const usable = zones.filter(z => !(z.type === "poly" && (!Array.isArray(z.pts) || z.pts.length < 3)));
 
   if (zoneEditing) {
     for (const z of usable) {
@@ -395,7 +400,10 @@ const SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
 /* ?room=X emparelha esta projeção com o tablet que abrir o mesmo room —
    sem isto, todas as instalações partilhariam um único stream de comandos. */
-const ROOM = (new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "") || "default";
+// cap de 40 — ver nota em magicdraw.html: o ROOM entra nos ids do hand_config
+// (check <=64) e o cap TEM de ser idêntico nos 4 ficheiros, senão os ecrãs
+// derivam nomes de canal diferentes e deixam de se ver.
+const ROOM = ((new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "").slice(0, 40)) || "default";
 const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let seq = 0;
 
@@ -420,6 +428,11 @@ function send(kind, extra = {}) {
 const lastSeqBySrc = new Map();
 function onMsg(payload) {
   if (!payload || payload.v !== 1 || payload.src === CLIENT_ID) return;
+  // FIX 3 (review): valida a FORMA antes do dedup — com `seq` undefined,
+  // `payload.seq <= last` nunca é true (comparação com undefined é sempre
+  // false) e lastSeqBySrc.set(src, undefined) deixava esse src sem dedup
+  // pelo resto da sessão. Canal público: mensagem estranha, descarta em silêncio.
+  if (typeof payload.src !== "string" || !payload.src || !Number.isFinite(payload.seq)) return;
   const last = lastSeqBySrc.get(payload.src) ?? -1;
   if (payload.seq <= last) return;
   lastSeqBySrc.set(payload.src, payload.seq);
@@ -451,6 +464,11 @@ window.__mdDebug = {
   get rev() { return currentStateRev; },
   get hasUndo() { return undoStack.length; },
   get hasRedo() { return redoStack.length; },
+  // FIX 5/2 (review): expõe o estado necessário para testar sem câmara real
+  // (câmara bloqueada no ambiente de teste) — running=false é o caminho do mural.
+  get cameraRunning() { return running; },
+  get photoOnDisplay() { return photoOnDisplay; },
+  get photoSeqId() { return photoSeqId; },
   simulateStroke(hand, pts) {
     const st = handState[hand];
     st.stroke = { pts: [], buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null, preSnap: snapshotDrawCanvas(), brush: { ...currentState } };
@@ -467,6 +485,11 @@ window.__mdDebug = {
   // idem, para injetar sequências 'tstroke' do tablet sem depender do touch real
   get tabletStrokeCount() { return tabletStrokes.size; },
   injectTstroke(payload) { handleTstroke(payload); },
+  // FIX 2 (review): idem — dispara a sequência real de foto sem depender de
+  // câmara (mesmo padrão de simulateStroke acima), para dar para testar o
+  // cancelamento por 'clear' num browser sem câmara/permissão negada.
+  get photoBusy() { return photoBusy; },
+  simulatePhotoSequence() { photoOnDisplay = true; startPhotoSequence(); },
 };
 
 let gotFirstState = false;
@@ -487,7 +510,13 @@ function handleMsg(payload) {
       pushUndo(snapshotDrawCanvas()); // FIX E: o clear passa a ser desfazível (só o drawCanvas participa)
       dctx.clearRect(0, 0, W, H);
       sctx.clearRect(0, 0, W, H); // traço em curso (FIX B) também some
-      if (scope === "all") { pctx.clearRect(0, 0, W, H); photoOnDisplay = false; }
+      if (scope === "all") {
+        pctx.clearRect(0, 0, W, H);
+        photoOnDisplay = false;
+        photoSeqId++; // FIX 2: invalida a sequência de foto em curso (ver startPhotoSequence) — sem
+        // isto, um 'clear' a meio da contagem/flash não impedia o passo final de
+        // drawVideoCover(), e a foto "ressuscitava" ~300ms depois de limpar, ao vivo.
+      }
       // cancela traços ATIVOS: senão o rAF seguinte redesenha-os e a largada
       // assava-os — o limpar "ressuscitava" parte do desenho (review PR #35)
       for (const hand of ["Left", "Right"]) {
@@ -502,6 +531,12 @@ function handleMsg(payload) {
       break;
     }
     case "photo":
+      // FIX 5 (review): sem câmara (modo mural, `running` false) não há frame
+      // nenhum para congelar — a sequência antiga corria a contagem toda e
+      // marcava photoOnDisplay=true na mesma (drawVideoCover sai cedo sem
+      // desenhar nada), oferecendo "Limpar desenho/Limpar tudo" no tablet
+      // para uma foto que nunca existiu. Avisa e não mexe em mais nada.
+      if (!running) { showNotice("📷 sem câmara — não é possível tirar foto (modo mural)"); break; }
       photoOnDisplay = true; // otimista: a sequência congela ~4s depois
       startPhotoSequence();
       break;
@@ -519,10 +554,25 @@ function handleMsg(payload) {
     case "undo": undo(); break; // FIX E — aditivo ao protocolo, sem payload
     case "redo": redo(); break;
     case "tstroke": handleTstroke(payload); break; // FEATURE "✏️ Desenhar": traço do tablet (aditivo)
-    case "warp": // FEATURE "📐 Warp": deformar a projeção (aditivo, kind novo)
-      warpLive = true;
-      applyWarpConfig(payload.n, payload.points, payload.testPattern);
+    case "warp": { // FEATURE "📐 Warp": deformar a projeção (aditivo, kind novo)
+      // FIX 4 (review): warp.setPoints() LANÇA se points.length !== n*n*2 (ver
+      // warp.js) — ao contrário dos outros caminhos vindos da rede neste
+      // ficheiro, este não tinha try/catch, deixando o warp num estado a meio
+      // e a exceção a matar o resto do handleMsg. Valida a forma ANTES de
+      // aplicar e embrulha a aplicação, para uma mensagem malformada nunca
+      // deixar o warp inconsistente nem partir mensagens seguintes.
+      const n = payload.n;
+      const nOk = n === undefined || (Number.isInteger(n) && n >= 2 && n <= 17); // 17 = clampN() máx. em warp.js
+      const effN = nOk && Number.isInteger(n) ? n : warpN;
+      const points = payload.points;
+      const pointsOk = points == null || (Array.isArray(points) && points.length === effN * effN * 2);
+      if (!nOk || !pointsOk) break; // forma inválida: ignora em silêncio (canal público)
+      try {
+        warpLive = true;
+        applyWarpConfig(n, points, payload.testPattern);
+      } catch { /* falha inesperada dentro do warp.js — ignora a mensagem, não parte o handler */ }
       break;
+    }
   }
 }
 
@@ -583,19 +633,35 @@ function drawVideoCover(ctx, video) {
 /* ================= sequência de foto ================= */
 const delay = ms => new Promise(r => setTimeout(r, ms));
 let photoBusy = false;
+// FIX 2 (review): token de sequência — a sequência (~3.15s: contagem 3-2-1 +
+// flash) é assíncrona e não tinha cancelamento nenhum. Um 'clear' scope 'all'
+// a meio limpava pctx mas a sequência continuava e no fim desenhava a foto na
+// mesma (drawVideoCover). Um 'clear' bump-a este token (ver handleMsg 'clear')
+// e cada passo com efeito visível confere-o antes de continuar, abortando em
+// silêncio se já não for o corrente.
+let photoSeqId = 0;
 async function startPhotoSequence() {
   if (photoBusy) return; // ignora 'photo' se já houver uma sequência a decorrer
   photoBusy = true;
+  const mySeq = ++photoSeqId; // esta é agora a sequência corrente — invalida qualquer anterior pendurada
   cam.classList.add("show");
   countdownNum.hidden = false;
   for (const n of [3, 2, 1]) {
+    if (mySeq !== photoSeqId) { abortPhotoSequence(); return; } // invalidado (clear a meio) — aborta antes do próximo número
     countdownNum.textContent = String(n);
     await delay(1000);
   }
+  if (mySeq !== photoSeqId) { abortPhotoSequence(); return; }
   countdownNum.hidden = true;
   flash.style.opacity = "1";
   await delay(150);
-  drawVideoCover(pctx, cam); // congela o frame atual, mesma geometria cover+espelho do tracking
+  if (mySeq === photoSeqId) drawVideoCover(pctx, cam); // só desenha se ainda for a sequência corrente — senão a foto "ressuscitava" depois de um clear a meio
+  flash.style.opacity = "0";
+  cam.classList.remove("show");
+  photoBusy = false;
+}
+function abortPhotoSequence() {
+  countdownNum.hidden = true;
   flash.style.opacity = "0";
   cam.classList.remove("show");
   photoBusy = false;

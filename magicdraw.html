@@ -294,8 +294,34 @@
     padding: 14px; display: flex; flex-direction: column; gap: 12px;
     max-width: 720px; width: 100%; backdrop-filter: blur(10px);
   }
+  /* "caixa cinzenta" maior (pedido do utilizador): os editores de Zonas/Warp
+     precisam de ver a fachada de perto para acertar pontos finos (volutas,
+     molduras) — deixa o painel crescer bem mais no ecrã grande. Só nestes
+     dois painéis (não no de Edifícios, que é só uma lista) para não alterar
+     o layout que já estava afinado lá. width:auto + max-width/max-height no
+     canvas (em vez de width:100%+aspect-ratio fixos) deixa o 16:9 ser
+     limitado pela LARGURA OU pela ALTURA disponível, o que for menor —
+     em telemóvel isto não muda nada (a largura continua a mandar). */
+  .admin-panel-wide { max-width: min(1500px, 96vw); }
+  .admin-panel-wide #adminCanvas, .admin-panel-wide #warpCanvas {
+    width: auto; height: auto; max-width: 100%; max-height: min(74dvh, 920px);
+  }
   .admin-panel p.hint {
     margin: 0; color: var(--muted); font-size: 12px; text-align: center;
+  }
+  /* wrapper só para poder posicionar o indicador de zoom e o botão de repor
+     em cima do canvas sem lhes dar layout próprio (position:absolute) */
+  .zoom-wrap { position: relative; }
+  .zoom-badge {
+    position: absolute; left: 8px; bottom: 8px; z-index: 2;
+    background: #05060ac0; border: 1px solid var(--line); border-radius: 8px;
+    padding: 3px 8px; font-size: 11px; font-weight: 700; color: var(--muted);
+    pointer-events: none; /* nunca rouba o toque ao canvas por baixo */
+  }
+  .zoom-reset-btn {
+    position: absolute; right: 8px; bottom: 8px; z-index: 2;
+    min-height: 0; height: auto; background: #1a1e2ac0; border: 1px solid var(--line);
+    border-radius: 8px; padding: 5px 10px; font-size: 11px; font-weight: 800;
   }
   #adminCanvas {
     width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 12px;
@@ -311,6 +337,8 @@
   #zoneTypeBtn.mode-occlude { border-color: #ff4d5555; }
   #zoneDoneBtn { border-color: #00ffcc; background: #0f2b26; flex-basis: 100%; }
   #refImgBtn.confirm { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
+  /* FIX F5: mesmo aviso visual de "confirm" reused no botão Guardar quando o slug colide com outro nome */
+  #buildingsSaveBtn.confirm { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
   #warpOpenBtn { border-color: #00ffcc55; }
 
   /* ---------- overlay admin: warp (grelha de projeção N×N) — 2º ecrã do admin ---------- */
@@ -463,15 +491,19 @@
 
   <!-- ================= overlay admin: zonas (áreas de desenho + oclusão) ================= -->
   <div id="adminOverlay" hidden>
-    <div class="admin-panel">
+    <div class="admin-panel admin-panel-wide">
       <h2 class="section">🪟 Zonas</h2>
       <div id="zoneModeSelect">
         <button id="zoneModeIncludeBtn" data-mode="include">🟢 Áreas de desenho</button>
         <button id="zoneModeOccludeBtn" data-mode="occlude">🔴 Zonas de oclusão</button>
       </div>
       <p class="hint">verde = onde se pode pintar (contorno da casa) · vermelho = tapado (janelas, portas)</p>
-      <canvas id="adminCanvas"></canvas>
-      <p class="hint">Arrasta um vértice para moldar · toca num "+" da aresta para inserir ponto · toca dentro para selecionar/mover</p>
+      <div class="zoom-wrap">
+        <canvas id="adminCanvas"></canvas>
+        <span id="adminZoomBadge" class="zoom-badge">1.0×</span>
+        <button id="adminZoomResetBtn" class="zoom-reset-btn" type="button">⤢ Repor</button>
+      </div>
+      <p class="hint">Roda o rato/trackpad (pinch) para dar zoom e afinar pontos · 2 dedos = zoom+pan · arrasta um vértice para moldar · toca num "+" da aresta para inserir ponto · toca dentro para selecionar/mover</p>
       <div id="adminActions">
         <button id="zoneAddBtn">➕<br>Criar zona</button>
         <button id="zoneCircleBtn">⭕<br>Criar círculo</button>
@@ -495,12 +527,16 @@
        Estado próprio (warpN/warpTool), TOTALMENTE à parte do undo/redo das zonas
        (fora de scope, ver nota junto ao warpTool abaixo). ================= -->
   <div id="warpOverlay" hidden>
-    <div class="admin-panel">
+    <div class="admin-panel admin-panel-wide">
       <h2 class="section">📐 Warp</h2>
       <p class="hint">arrasta os pontos da grelha para deformar a projeção e alinhar com o edifício</p>
       <div id="warpNSelect"></div>
-      <canvas id="warpCanvas"></canvas>
-      <p class="hint">arrasta um ponto (linha 0 = topo) · N muda a densidade da grelha, preservando os 4 cantos</p>
+      <div class="zoom-wrap">
+        <canvas id="warpCanvas"></canvas>
+        <span id="warpZoomBadge" class="zoom-badge">1.0×</span>
+        <button id="warpZoomResetBtn" class="zoom-reset-btn" type="button">⤢ Repor</button>
+      </div>
+      <p class="hint">arrasta um ponto (linha 0 = topo) · zoom com rato/trackpad ou 2 dedos para afinar · N muda a densidade da grelha, preservando os 4 cantos</p>
       <div id="warpActions">
         <button id="warpTestBtn">🔲<br>Grelha de teste</button>
         <button id="warpResetBtn">↺<br>Reset</button>
@@ -568,7 +604,12 @@ const $ = id => document.getElementById(id);
 /* ?room=X emparelha este tablet com a projeção que abriu o mesmo room —
    sem isto, todas as instalações (e qualquer visitante da página pública)
    partilhariam um único stream de comandos. */
-const ROOM = (new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "") || "default";
+// cap de 40: o ROOM entra nos ids do hand_config ("magicdraw-refimg:"+ROOM, 17
+// chars de prefixo) e a coluna id tem check <=64 — sem o cap, um ?room= longo
+// fazia TODOS os POSTs desse room levarem 400 e nada persistir (ao vivo parecia
+// funcionar pelo BroadcastChannel, mas um reload perdia o setup). O MESMO cap
+// tem de existir nos 4 ficheiros, senão os ecrãs abrem canais diferentes.
+const ROOM = ((new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "").slice(0, 40)) || "default";
 const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let seq = 0;
 
@@ -589,6 +630,40 @@ const SB_HDRS = { apikey: SB_KEY, Authorization: "Bearer " + SB_KEY, "Content-Ty
 const statusEl = $("statusConn");
 let sbChannel = null;
 
+// FIX F4: o pill passa a acumular DOIS estados — ligação Realtime (🟢/🟡) e se a
+// ÚLTIMA gravação cloud (zonas/warp/refimg) falhou. Sem isto uma gravação
+// rejeitada pela BD (400: tamanho, id, payload) parecia bem-sucedida e só se
+// descobria num reload, já no evento — o operador tem de ver "não gravado" já.
+let sbConnected = false;
+let cloudSaveFailed = false; // fica true até a PRÓXIMA gravação ter sucesso
+function renderStatusPill() {
+  statusEl.textContent = cloudSaveFailed ? "⚠️ não gravado" : (sbConnected ? "🟢 ligado" : "🟡 só local");
+}
+function setCloudSaveFailed(failed) {
+  if (cloudSaveFailed === failed) return; // evita reflow/spam a cada debounce se o estado não mudou
+  cloudSaveFailed = failed;
+  renderStatusPill();
+}
+// helper único de escrita em hand_config (zonas/warp/refimg) — verifica r.ok em
+// vez de só apanhar exceção de rede (padrão que saveBuildingAs já seguia) e
+// atualiza o pill; extraído para não repetir o mesmo bloco 3x.
+async function cloudPost(id, data) {
+  let r;
+  try {
+    r = await fetch(`${SB_URL}/rest/v1/hand_config`, {
+      method: "POST",
+      headers: { ...SB_HDRS, Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify([{ id, data, updated_at: new Date().toISOString() }]),
+    });
+  } catch {
+    setCloudSaveFailed(true); // offline/erro de rede — sem spam: só atualiza o pill, sem console.warn por segundo
+    return false;
+  }
+  setCloudSaveFailed(!r.ok);
+  if (!r.ok) console.warn(`magicdraw: gravação cloud rejeitada (id=${id}, status=${r.status})`);
+  return r.ok;
+}
+
 (async () => {
   try {
     const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
@@ -599,13 +674,14 @@ let sbChannel = null;
     sbChannel
       .on("broadcast", { event: "msg" }, ({ payload }) => onMsg(payload))
       .subscribe(status => {
-        if (status === "SUBSCRIBED") { statusEl.textContent = "🟢 ligado"; }
+        if (status === "SUBSCRIBED") { sbConnected = true; }
         else if (status === "CLOSED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          statusEl.textContent = "🟡 só local";
+          sbConnected = false;
         }
+        renderStatusPill();
       });
   } catch {
-    statusEl.textContent = "🟡 só local"; // sem rede: BroadcastChannel local continua a funcionar
+    sbConnected = false; renderStatusPill(); // sem rede: BroadcastChannel local continua a funcionar
   }
 })();
 
@@ -618,6 +694,11 @@ const lastSeq = new Map();
 let hasPhoto = false;
 function onMsg(msg) {
   if (!msg || msg.v !== 1 || msg.src === CLIENT_ID) return;
+  // FIX 3 (review): valida a FORMA antes do dedup — com `seq` undefined,
+  // `msg.seq <= prev` nunca é true (comparação com undefined é sempre false)
+  // e lastSeq.set(src, undefined) deixava esse src sem dedup pelo resto da
+  // sessão. Canal público: mensagem estranha, descarta em silêncio.
+  if (typeof msg.src !== "string" || !msg.src || !Number.isFinite(msg.seq)) return;
   const prev = lastSeq.get(msg.src) ?? -1;
   if (msg.seq <= prev) return;
   lastSeq.set(msg.src, msg.seq);
@@ -636,6 +717,15 @@ function onMsg(msg) {
   if (msg.kind === "photo") hasPhoto = true;
   if (msg.kind === "clear" && (!msg.scope || msg.scope === "all")) hasPhoto = false;
   if (msg.kind === "dstate") hasPhoto = !!msg.hasPhoto; // resposta do display ao nosso 'hello' — painel recarregado recupera o estado da foto
+  // FIX 1 (review): outro controlo (ou o canal global mapping-zones, partilhado
+  // com o mapping mode) mudou as zonas — segue-as localmente para o recorte do
+  // modo Desenhar (área desenhável) bater sempre com o que está atualmente em
+  // vigor, não só com o que este painel editou.
+  if (msg.kind === "zones" && Array.isArray(msg.zones)) {
+    zones = msg.zones.map(normalizeZone);
+    zonesHydrated = true;
+    syncDrawableRegion();
+  }
 }
 
 function send(payload) {
@@ -1026,7 +1116,15 @@ function normalizeZone(z) {
   if (!z) return z;
   const mode = z.mode === "include" ? "include" : "occlude";
   if (z.type === "ellipse") return { ...z, mode };
-  return { id: z.id, type: "poly", pts: z.pts, smooth: !!z.smooth, mode };
+  // FIX 6 (review): pts sempre um array de verdade a partir daqui — um pts
+  // malformado (ex.: só com .length numérico) não passa a diante para rebentar o render
+  return { id: z.id, type: "poly", pts: Array.isArray(z.pts) ? z.pts : [], smooth: !!z.smooth, mode };
+}
+// FIX 6 (review): mesmo guard "usável" do renderZones() do display — poly
+// precisa de >=3 pontos NUM ARRAY de verdade (não só um .length numérico,
+// que passava no guard antigo e rebentava a meio do render em TypeError)
+function isUsableZone(z) {
+  return !!z && !(z.type === "poly" && (!Array.isArray(z.pts) || z.pts.length < 3));
 }
 
 /* ---- traçado do contorno: TEM de ser igual ao de magicdraw-display.html
@@ -1104,21 +1202,16 @@ async function zonesCloudLoad() {
   } finally {
     zonesHydrated = true;
     if (pendingHelloZones) { pendingHelloZones = false; sendZones(adminOpen); }
+    syncDrawableRegion(); // FIX 1 (review): zonas carregadas da cloud — atualiza o recorte se o modo Desenhar já estiver aberto
   }
 }
 function zonesCloudSave() {
   zonesTouchedLocally = true;
   zonesHydrated = true; // edição local antes do load resolver também conta como hidratado
   clearTimeout(zonesCloudSaveT);
-  zonesCloudSaveT = setTimeout(async () => {
-    try {
-      await fetch(`${SB_URL}/rest/v1/hand_config`, {
-        method: "POST",
-        headers: { ...SB_HDRS, Prefer: "resolution=merge-duplicates" },
-        body: JSON.stringify([{ id: ZONES_ID, data: { zones }, updated_at: new Date().toISOString() }]),
-      });
-    } catch { /* offline: fica só emitido ao vivo, tenta gravar na próxima mudança */ }
-  }, 1000);
+  // FIX F4: cloudPost verifica r.ok e atualiza o pill (⚠️ não gravado em falha) —
+  // antes um 400 da BD (ex.: tamanho) era engolido, dava-se por gravado.
+  zonesCloudSaveT = setTimeout(() => { cloudPost(ZONES_ID, { zones }); }, 1000);
 }
 
 /* ---- imagem de referência (contorno da casa, só editor/tablet) ----
@@ -1132,14 +1225,11 @@ let refImgLoadedOnce = false; // carrega da cloud só na 1ª vez que o admin abr
 let refImgCloudSaveT = 0;
 function refImgCloudSave() {
   clearTimeout(refImgCloudSaveT);
-  refImgCloudSaveT = setTimeout(async () => {
-    try {
-      await fetch(`${SB_URL}/rest/v1/hand_config`, {
-        method: "POST",
-        headers: { ...SB_HDRS, Prefer: "resolution=merge-duplicates" },
-        body: JSON.stringify([{ id: REFIMG_ID, data: refImgDataUrl ? { img: refImgDataUrl } : {}, updated_at: new Date().toISOString() }]),
-      });
-    } catch { /* offline: tenta gravar na próxima mudança */ }
+  // FIX F4: mesmo helper cloudPost — a imagem é o payload mais provável de
+  // estourar o ceiling de 1.5MB (400 da BD), por isso é o caso mais importante
+  // a não passar por "gravado" quando na verdade foi rejeitado.
+  refImgCloudSaveT = setTimeout(() => {
+    cloudPost(REFIMG_ID, refImgDataUrl ? { img: refImgDataUrl } : {});
   }, 1500);
 }
 async function refImgCloudLoad() {
@@ -1236,6 +1326,11 @@ function sendZones(editing) {
   if (sbZonesChannel) {
     try { sbZonesChannel.send({ type: "broadcast", event: "msg", payload: msg }); } catch { /* ignora */ }
   }
+  // FIX 1 (review): sendZones() é o funil de TODAS as edições locais de zonas
+  // (criar/mover/apagar/curvas/tipo/undo-redo/carregar edifício) — um único
+  // ponto para manter o recorte do modo Desenhar em sincronia, em vez de
+  // espalhar a chamada por cada handler de zona.
+  syncDrawableRegion();
 }
 // throttle ~80ms durante drags (leading + trailing, para não perder o último ponto)
 let zonesThrottleTimer = null, zonesThrottlePending = false;
@@ -1248,8 +1343,149 @@ function sendZonesThrottled() {
   }, 80);
 }
 
+/* ---- zoom + pan de VISTA para os editores do admin (Zonas e Warp) ----
+   Pedido do utilizador: a fachada tem detalhe fino (volutas, molduras de
+   janelas) que à escala 1x é impossível acertar com precisão — isto deixa
+   aproximar a imagem para fazer fine-tune dos pontos. É zoom só de VISTA:
+   nunca mexe nas coordenadas normalizadas guardadas, só em COMO se desenha
+   e em como um toque de ecrã se converte em coordenada de conteúdo — por
+   isso é a MESMA função para os dois canvas (adminCanvas e warpCanvas), sem
+   duplicar a mecânica.
+   Sistema de coordenadas:
+     - "conteúdo" (px): 0..clientWidth / 0..clientHeight do canvas, o MESMO
+       espaço onde já viviam os *Px() e o desenho a 1x — não muda com o zoom.
+     - "ecrã" (px CSS): posição real do toque/rato relativa ao canvas
+       (getBoundingClientRect), o que muda é só a transformação usada para
+       desenhar o conteúdo dentro do canvas.
+   screenPx = scale * (contentPx - pan)  →  contentPx = pan + screenPx/scale */
+function createZoomPan(canvas, { onChange, cancelEditing, badgeEl }) {
+  const MIN_SCALE = 1, MAX_SCALE = 8;
+  const view = { scale: 1, panX: 0, panY: 0 };
+  const pointers = new Map(); // pointerId -> {x,y} em px de ecrã (para detetar pinch de 2 dedos)
+  let pinch = null;   // pinch de 2 dedos em curso: { startDist, startScale }
+  let dragPan = null; // pan por arrasto (meio/espaço/1 dedo em vazio): { pointerId, startX, startY, startPanX, startPanY }
+  let spaceHeld = false;
+
+  function clampPan() {
+    // o conteúdo ampliado nunca pode deixar zona vazia dentro do canvas —
+    // a scale 1 isto força pan a 0 (maxX/maxY dão 0), como pedido
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (!w || !h) return;
+    const maxX = Math.max(0, w - w / view.scale);
+    const maxY = Math.max(0, h - h / view.scale);
+    view.panX = Math.min(Math.max(view.panX, 0), maxX);
+    view.panY = Math.min(Math.max(view.panY, 0), maxY);
+  }
+  function screenToContent(sx, sy) {
+    return { x: view.panX + sx / view.scale, y: view.panY + sy / view.scale };
+  }
+  // zoom centrado num ponto de ECRÃ: o ponto de conteúdo que lá estava antes
+  // do zoom tem de ficar exatamente no mesmo pixel de ecrã depois (zoom-to-point,
+  // não zoom-to-center) — sem isto o zoom "foge" do sítio onde se quer afinar
+  function zoomAt(newScale, sx, sy) {
+    newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
+    const before = screenToContent(sx, sy);
+    view.scale = newScale;
+    view.panX = before.x - sx / newScale;
+    view.panY = before.y - sy / newScale;
+    clampPan();
+  }
+  function applyTransform(ctx, dpr) {
+    ctx.setTransform(dpr * view.scale, 0, 0, dpr * view.scale,
+      -view.panX * view.scale * dpr, -view.panY * view.scale * dpr);
+  }
+  function updateBadge() { if (badgeEl) badgeEl.textContent = view.scale.toFixed(1) + "×"; }
+  function reset() { view.scale = 1; view.panX = 0; view.panY = 0; updateBadge(); onChange(); }
+  // true enquanto um pinch/pan de vista está em curso — os handlers de edição
+  // de cada canvas consultam isto para NÃO começarem a arrastar um vértice
+  // por cima de um gesto de 2 dedos ou de pan
+  function isGesture() { return !!(pinch || dragPan); }
+  function rectPt(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+  // pan iniciado pelo PRÓPRIO editor (ex.: 1 dedo tocou em zona vazia com
+  // scale>1 — nada para editar ali, então em vez de não fazer nada arrasta a vista)
+  function beginPan(e, sx, sy) {
+    pointers.set(e.pointerId, { x: sx, y: sy });
+    dragPan = { pointerId: e.pointerId, startX: sx, startY: sy, startPanX: view.panX, startPanY: view.panY };
+    canvas.setPointerCapture(e.pointerId);
+  }
+
+  updateBadge();
+
+  canvas.addEventListener("wheel", e => {
+    // ctrlKey = gesto de pinch do trackpad no macOS/Chrome; wheel normal
+    // também dá zoom — preventDefault para nenhum dos dois fazer scroll da página
+    e.preventDefault();
+    const { x, y } = rectPt(e);
+    const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.02 : 0.0015));
+    zoomAt(view.scale * factor, x, y);
+    updateBadge(); onChange();
+  }, { passive: false });
+
+  canvas.addEventListener("dblclick", e => { e.preventDefault(); reset(); });
+
+  window.addEventListener("keydown", e => {
+    if (e.code === "Space" && !/^(input|textarea)$/i.test(e.target.tagName)) spaceHeld = true;
+  });
+  window.addEventListener("keyup", e => { if (e.code === "Space") spaceHeld = false; });
+
+  canvas.addEventListener("pointerdown", e => {
+    const p = rectPt(e);
+    pointers.set(e.pointerId, p);
+    if (pointers.size === 2) {
+      // 2º dedo chegou: isto é um pinch, não uma edição — cancela qualquer
+      // arrasto de vértice/ponto que o 1º dedo possa ter começado
+      cancelEditing?.();
+      dragPan = null;
+      const pts = [...pointers.values()];
+      pinch = { startDist: Math.max(1, Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)), startScale: view.scale };
+    } else if (pointers.size === 1 && (e.button === 1 || (e.button === 0 && spaceHeld))) {
+      // pan por arrasto: botão do meio do rato, ou espaço+arrasto
+      cancelEditing?.();
+      beginPan(e, p.x, p.y);
+    }
+  });
+  canvas.addEventListener("pointermove", e => {
+    if (!pointers.has(e.pointerId)) return;
+    const p = rectPt(e);
+    pointers.set(e.pointerId, p);
+    if (pinch && pointers.size >= 2) {
+      const pts = [...pointers.values()];
+      const dist = Math.max(1, Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y));
+      const midx = (pts[0].x + pts[1].x) / 2, midy = (pts[0].y + pts[1].y) / 2;
+      zoomAt(pinch.startScale * (dist / pinch.startDist), midx, midy);
+      updateBadge(); onChange();
+    } else if (dragPan && e.pointerId === dragPan.pointerId) {
+      // delta de ecrã → delta de conteúdo (÷ scale): a scale alto o mesmo
+      // arrasto em px de rato move a vista MENOS em conteúdo — consistente
+      // com o fine-tune que a feature inteira existe para dar aos vértices
+      view.panX = dragPan.startPanX - (p.x - dragPan.startX) / view.scale;
+      view.panY = dragPan.startPanY - (p.y - dragPan.startY) / view.scale;
+      clampPan();
+      onChange();
+    }
+  });
+  function endPointer(e) {
+    pointers.delete(e.pointerId);
+    if (pinch && pointers.size < 2) pinch = null;
+    if (dragPan && e.pointerId === dragPan.pointerId) dragPan = null;
+  }
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+
+  return { view, screenToContent, applyTransform, reset, isGesture, beginPan };
+}
+
 /* ---- canvas 16:9 do overlay: representa o ecrã do display ---- */
 const adminOverlay = $("adminOverlay"), adminCanvas = $("adminCanvas"), actx = adminCanvas.getContext("2d");
+const adminZoom = createZoomPan(adminCanvas, {
+  onChange: () => renderAdminCanvas(),
+  cancelEditing: () => { dragging = null; pendingZoneSnap = null; },
+  badgeEl: $("adminZoomBadge"),
+});
+$("adminZoomResetBtn").onclick = () => adminZoom.reset();
 function sizeAdminCanvas() {
   const dpr = window.devicePixelRatio || 1;
   const w = adminCanvas.clientWidth, h = adminCanvas.clientHeight;
@@ -1259,6 +1495,9 @@ function sizeAdminCanvas() {
 }
 function renderAdminCanvas() {
   const w = adminCanvas.clientWidth, h = adminCanvas.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  adminZoom.applyTransform(actx, dpr);
+  const s = adminZoom.view.scale; // divide raios/larguras por s: tamanho CONSTANTE em píxeis de ecrã, a qualquer zoom
   actx.clearRect(0, 0, w, h);
   actx.fillStyle = "#000"; actx.fillRect(0, 0, w, h);
   // imagem de referência (contorno da casa): camada de fundo, esticada ao canvas 16:9 —
@@ -1280,23 +1519,23 @@ function renderAdminCanvas() {
     actx.fillStyle = selected ? `rgba(${rgb},0.55)` : `rgba(${rgb},0.35)`;
     actx.fill();
     actx.strokeStyle = selected ? solid : dim;
-    actx.lineWidth = selected ? 3 : 2;
+    actx.lineWidth = (selected ? 3 : 2) / s;
     actx.stroke();
     // FIX G1: raio VISUAL reduzido (~60%) — o raio de HIT (VERTEX_HIT_R) fica igual, generoso ao toque
     for (const hpt of zoneHandlesPx(z, w, h)) {
       const isSelVertex = selected && hpt.kind === "vertex" && hpt.idx === selectedVertexIdx;
       actx.beginPath();
-      actx.arc(hpt.x, hpt.y, isSelVertex ? 8 : 6, 0, Math.PI * 2);
+      actx.arc(hpt.x, hpt.y, (isSelVertex ? 8 : 6) / s, 0, Math.PI * 2);
       actx.fillStyle = isSelVertex ? "#fff" : solid; actx.fill();
-      actx.strokeStyle = isSelVertex ? solid : "#fff"; actx.lineWidth = 1.5; actx.stroke();
+      actx.strokeStyle = isSelVertex ? solid : "#fff"; actx.lineWidth = 1.5 / s; actx.stroke();
     }
     // pegas "+" de inserção de vértice — só na zona selecionada, tipo poly
     if (selected && z.type === "poly") {
       for (const mp of zoneMidpointsPx(z, w, h)) {
-        actx.beginPath(); actx.arc(mp.x, mp.y, 5, 0, Math.PI * 2);
+        actx.beginPath(); actx.arc(mp.x, mp.y, 5 / s, 0, Math.PI * 2);
         actx.fillStyle = "#00ffcc55"; actx.fill();
-        actx.strokeStyle = "#00ffcc"; actx.lineWidth = 1.5; actx.stroke();
-        actx.fillStyle = "#00ffcc"; actx.font = "bold 13px sans-serif";
+        actx.strokeStyle = "#00ffcc"; actx.lineWidth = 1.5 / s; actx.stroke();
+        actx.fillStyle = "#00ffcc"; actx.font = `bold ${13 / s}px sans-serif`;
         actx.textAlign = "center"; actx.textBaseline = "middle";
         actx.fillText("+", mp.x, mp.y + 1);
       }
@@ -1339,8 +1578,9 @@ function pointInEllipsePx(px, py, z, w, h) {
 }
 function getCanvasPt(e) {
   const rect = adminCanvas.getBoundingClientRect();
-  const x = e.clientX - rect.left, y = e.clientY - rect.top;
-  return { x, y, w: rect.width, h: rect.height, nx: x / rect.width, ny: y / rect.height };
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top; // espaço de ECRÃ (px CSS reais do toque/rato)
+  const { x, y } = adminZoom.screenToContent(sx, sy); // espaço de CONTEÚDO (descontado zoom/pan) — é o que já era "x,y" antes do zoom existir
+  return { x, y, sx, sy, w: rect.width, h: rect.height, nx: x / rect.width, ny: y / rect.height };
 }
 
 // FIX F: delta de translação clampado ao [0,1] SEM deformar a forma — clampa
@@ -1359,18 +1599,20 @@ function clampTranslateDelta(startPts, dx, dy) {
 }
 
 /* ---- interação touch: arrastar pega, inserir vértice numa aresta, ou selecionar zona ---- */
-const VERTEX_HIT_R = 30; // px CSS, generoso para dedos
+const VERTEX_HIT_R = 30; // px CSS, generoso para dedos — CONSTANTE em ecrã: convertido para espaço de conteúdo (÷ scale) antes de comparar
 let dragging = null; // { zoneId, kind: 'vertex'|'center'|'rx'|'ry'|'body', idx? }
 adminCanvas.addEventListener("pointerdown", e => {
+  if (adminZoom.isGesture()) return; // pinch/pan de vista já assumiu este toque — não começar a editar por cima
   adminCanvas.setPointerCapture(e.pointerId);
-  const { x, y, w, h, nx, ny } = getCanvasPt(e);
+  const { x, y, sx, sy, w, h, nx, ny } = getCanvasPt(e);
+  const hitR = VERTEX_HIT_R / adminZoom.view.scale; // raio de HIT constante em px de ecrã, a qualquer zoom
 
   // 1) pegas (vértices de polígono ou pegas da elipse) — prioridade máxima
   let best = null, bestD = Infinity;
   for (const z of zones) {
     for (const hpt of zoneHandlesPx(z, w, h)) {
       const d = Math.hypot(hpt.x - x, hpt.y - y);
-      if (d < VERTEX_HIT_R && d < bestD) { bestD = d; best = { zone: z, handle: hpt }; }
+      if (d < hitR && d < bestD) { bestD = d; best = { zone: z, handle: hpt }; }
     }
   }
   if (best) {
@@ -1386,7 +1628,7 @@ adminCanvas.addEventListener("pointerdown", e => {
   const selZone = zones.find(z => z.id === selectedZoneId);
   if (selZone && selZone.type === "poly") {
     for (const mp of zoneMidpointsPx(selZone, w, h)) {
-      if (Math.hypot(mp.x - x, mp.y - y) < VERTEX_HIT_R) {
+      if (Math.hypot(mp.x - x, mp.y - y) < hitR) {
         pushZoneHistory();
         selZone.pts.splice(mp.edgeAfter + 1, 0, [clamp01(nx), clamp01(ny)]);
         selectedVertexIdx = mp.edgeAfter + 1;
@@ -1407,6 +1649,11 @@ adminCanvas.addEventListener("pointerdown", e => {
       zoneId: hitZone.id, kind: "body", startNX: nx, startNY: ny,
       startPts: hitZone.type === "ellipse" ? [[hitZone.cx, hitZone.cy]] : hitZone.pts.map(p => [p[0], p[1]]),
     };
+  } else if (adminZoom.view.scale > 1) {
+    // 1 dedo tocou em vazio (nenhuma zona/pega ali) com zoom ativo: nada para
+    // editar ali, então arrasta a VISTA em vez de não fazer nada — natural
+    // porque só acontece quando o passo 3) já não encontrou zona nenhuma
+    adminZoom.beginPan(e, sx, sy);
   }
   renderAdminCanvas(); updateZoneButtons();
 });
@@ -1621,6 +1868,14 @@ const WARP_HIT_R = 30; // px CSS, mesmo raio generoso do editor de zonas (VERTEX
 
 const warpOverlay = $("warpOverlay"), warpCanvasEl = $("warpCanvas"), wctx = warpCanvasEl.getContext("2d");
 $("warpOpenBtn").disabled = !warpToolAvailable;
+// mesma mecânica de zoom/pan do editor de Zonas (createZoomPan, ver acima) —
+// aqui a grelha de warp precisa do mesmo fine-tune junto ao contorno da fachada
+const warpZoom = createZoomPan(warpCanvasEl, {
+  onChange: () => renderWarpCanvas(),
+  cancelEditing: () => { warpDragIdx = -1; },
+  badgeEl: $("warpZoomBadge"),
+});
+$("warpZoomResetBtn").onclick = () => warpZoom.reset();
 
 /* ---- persistência cloud (Supabase · hand_config, id "magicdraw-warp") ----
    Mesmo padrão de zonesCloudLoad/zonesCloudSave: row por room, debounce
@@ -1656,14 +1911,9 @@ function warpCloudSave() {
   warpTouchedLocally = true;
   warpHydrated = true; // edição local antes do load resolver também conta como hidratado
   clearTimeout(warpCloudSaveT);
-  warpCloudSaveT = setTimeout(async () => {
-    try {
-      await fetch(`${SB_URL}/rest/v1/hand_config`, {
-        method: "POST",
-        headers: { ...SB_HDRS, Prefer: "resolution=merge-duplicates" },
-        body: JSON.stringify([{ id: WARP_ID, data: { n: warpN, points: warpPointsForProtocol(), testPattern: false }, updated_at: new Date().toISOString() }]),
-      });
-    } catch { /* offline: tenta gravar na próxima mudança */ }
+  // FIX F4: idem zonesCloudSave — cloudPost reporta falha no pill em vez de a engolir.
+  warpCloudSaveT = setTimeout(() => {
+    cloudPost(WARP_ID, { n: warpN, points: warpPointsForProtocol(), testPattern: false });
   }, 1000);
 }
 
@@ -1699,6 +1949,9 @@ function sizeWarpCanvas() {
 }
 function renderWarpCanvas() {
   const w = warpCanvasEl.clientWidth, h = warpCanvasEl.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  warpZoom.applyTransform(wctx, dpr);
+  const s = warpZoom.view.scale; // divide raios/larguras por s: tamanho CONSTANTE em píxeis de ecrã, a qualquer zoom
   wctx.clearRect(0, 0, w, h);
   wctx.fillStyle = "#000"; wctx.fillRect(0, 0, w, h);
   if (refImg) { wctx.globalAlpha = 0.55; wctx.drawImage(refImg, 0, 0, w, h); wctx.globalAlpha = 1; }
@@ -1706,7 +1959,7 @@ function renderWarpCanvas() {
   const pts = warpTool.getPoints(); // flat, row-major, linha 0 = topo (mesma convenção do warp.js)
   const n = warpN;
   const px = i => pts[i * 2] * w, py = i => pts[i * 2 + 1] * h;
-  wctx.strokeStyle = "rgba(0,255,204,0.55)"; wctx.lineWidth = 1.5;
+  wctx.strokeStyle = "rgba(0,255,204,0.55)"; wctx.lineWidth = 1.5 / s;
   for (let row = 0; row < n; row++) { // linhas horizontais da grelha
     wctx.beginPath();
     for (let col = 0; col < n; col++) {
@@ -1725,29 +1978,37 @@ function renderWarpCanvas() {
   }
   for (let i = 0; i < n * n; i++) { // pontos, pequenos (visual discreto, hit-test é que é generoso)
     wctx.beginPath();
-    wctx.arc(px(i), py(i), i === warpDragIdx ? 6 : 4, 0, Math.PI * 2);
+    wctx.arc(px(i), py(i), (i === warpDragIdx ? 6 : 4) / s, 0, Math.PI * 2);
     wctx.fillStyle = i === warpDragIdx ? "#fff" : "#00ffcc";
     wctx.fill();
-    wctx.strokeStyle = "#05060a"; wctx.lineWidth = 1.5; wctx.stroke();
+    wctx.strokeStyle = "#05060a"; wctx.lineWidth = 1.5 / s; wctx.stroke();
   }
 }
 window.addEventListener("resize", () => { if (!warpOverlay.hidden) sizeWarpCanvas(); });
 
 function getWarpPt(e) {
   const rect = warpCanvasEl.getBoundingClientRect();
-  return { x: e.clientX - rect.left, y: e.clientY - rect.top, w: rect.width, h: rect.height };
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top; // espaço de ECRÃ
+  const { x, y } = warpZoom.screenToContent(sx, sy); // espaço de CONTEÚDO (descontado zoom/pan)
+  return { x, y, sx, sy, w: rect.width, h: rect.height };
 }
 warpCanvasEl.addEventListener("pointerdown", e => {
   if (!warpToolAvailable) return;
-  warpCanvasEl.setPointerCapture(e.pointerId);
-  const { x, y, w, h } = getWarpPt(e);
+  if (warpZoom.isGesture()) return; // pinch/pan de vista já assumiu este toque — não começar a editar por cima
+  const { x, y, sx, sy, w, h } = getWarpPt(e);
   const pts = warpTool.getPoints();
-  let best = -1, bestD = WARP_HIT_R;
+  let best = -1, bestD = WARP_HIT_R / warpZoom.view.scale; // raio de HIT constante em px de ecrã, a qualquer zoom
   for (let i = 0; i < pts.length / 2; i++) {
     const d = Math.hypot(pts[i * 2] * w - x, pts[i * 2 + 1] * h - y);
     if (d < bestD) { bestD = d; best = i; }
   }
-  if (best >= 0) { warpDragIdx = best; renderWarpCanvas(); sendWarp(); } // emissão imediata no down
+  if (best >= 0) {
+    warpCanvasEl.setPointerCapture(e.pointerId);
+    warpDragIdx = best; renderWarpCanvas(); sendWarp(); // emissão imediata no down
+  } else if (warpZoom.view.scale > 1) {
+    // nenhum ponto tocado com zoom ativo: arrasta a vista — mesmo comportamento do editor de Zonas
+    warpZoom.beginPan(e, sx, sy);
+  }
 });
 warpCanvasEl.addEventListener("pointermove", e => {
   if (warpDragIdx < 0) return;
@@ -2022,9 +2283,34 @@ async function renderBuildingsList() {
 
 const buildingsNameInput = $("buildingsNameInput"), buildingsSaveBtn = $("buildingsSaveBtn"), buildingsSaveWarn = $("buildingsSaveWarn");
 const buildingsSaveBtnOriginal = buildingsSaveBtn.innerHTML;
+// FIX F5: slugifyBuildingName normaliza (minúsculas, sem acentos, separadores
+// colapsados) — "Praça Central" e "praca-central" dão o MESMO slug/id, e o
+// POST com merge-duplicates substituía o edifício anterior sem aviso nenhum.
+let buildingsSaveArmed = false, buildingsSaveArmedFor = null, buildingsSaveArmedTimer = null;
+function disarmBuildingsSave() {
+  clearTimeout(buildingsSaveArmedTimer);
+  buildingsSaveArmed = false; buildingsSaveArmedFor = null;
+  buildingsSaveBtn.classList.remove("confirm");
+  buildingsSaveBtn.innerHTML = buildingsSaveBtnOriginal;
+}
 buildingsSaveBtn.onclick = async () => {
   const name = buildingsNameInput.value.trim();
   if (!name) return;
+  const buildingId = "building:" + slugifyBuildingName(name);
+  if (!(buildingsSaveArmed && buildingsSaveArmedFor === buildingId)) {
+    // 1º toque: só decide se precisa de confirmação — não grava já
+    const idx = await buildingsIndexLoad();
+    const existing = idx.list.find(b => b.id === buildingId);
+    if (existing && existing.name !== name) { // mesmo slug, nome DIFERENTE = colisão silenciosa em potência
+      clearTimeout(buildingsSaveArmedTimer);
+      buildingsSaveArmed = true; buildingsSaveArmedFor = buildingId;
+      buildingsSaveBtn.classList.add("confirm");
+      buildingsSaveBtn.textContent = "substituir?";
+      buildingsSaveArmedTimer = setTimeout(disarmBuildingsSave, 3000); // like o resto do admin: expira sozinho
+      return;
+    }
+  }
+  disarmBuildingsSave(); // guardar por cima do MESMO nome (ou 2º toque confirmado) segue sem fricção
   buildingsSaveBtn.disabled = true;
   const res = await saveBuildingAs(name);
   buildingsSaveBtn.disabled = false;
@@ -2044,6 +2330,7 @@ $("buildingsOpenBtn").onclick = () => {
   adminOverlay.hidden = true;
   buildingsOverlay.hidden = false;
   buildingsSaveWarn.hidden = true;
+  disarmBuildingsSave();
   renderBuildingsList();
 };
 $("buildingsBackBtn").onclick = () => { buildingsOverlay.hidden = true; adminOverlay.hidden = false; };
@@ -2063,6 +2350,56 @@ const dCanvas = $("drawCanvasT"), dctx = dCanvas.getContext("2d");
 // fundo fica intacta — antes furava tudo até ao preto.
 const strokeEcho = document.createElement("canvas");
 const sectx = strokeEcho.getContext("2d");
+// ---- FIX 1 (review, reportado ao vivo): eco local confinado à área desenhável ----
+// Sem isto dava para pintar fora da zona verde/include no tablet — a
+// projeção já mascarava esses traços (não existem lá), mas o operador via
+// tinta no ecrã e acreditava estar a pintar dentro. Área desenhável = (união
+// das zonas 'include', se houver alguma; senão, o canvas inteiro) MENOS a
+// união das 'occlude' — EXATAMENTE a mesma conta que renderZones() faz no
+// display (magicdraw-display.html), reconstruída aqui com as MESMAS
+// traceZonePath/tracePolyPath já existentes acima (mesma geometria,
+// byte-a-byte — sem duplicar matemática nova).
+// drawMask: máscara alpha (opaco = desenhável, transparente = fora) — só
+// entra na composição da CAMADA DE TRAÇOS (destination-in em inkScratch);
+// a imagem de referência (renderDrawBase) NUNCA passa por ela, por isso o
+// operador continua a ver a fachada inteira — só a tinta fica confinada.
+const drawMask = document.createElement("canvas");
+const dmctx = drawMask.getContext("2d");
+const inkScratch = document.createElement("canvas");
+const ictx = inkScratch.getContext("2d");
+function rebuildDrawMask() {
+  const w = drawMask.width, h = drawMask.height;
+  if (!w || !h) return;
+  dmctx.setTransform(1, 0, 0, 1, 0, 0); // mesmo espaço de píxeis de dispositivo do strokeEcho (ver sizeDrawCanvas)
+  dmctx.clearRect(0, 0, w, h);
+  const usable = zones.filter(isUsableZone);
+  const includeZones = usable.filter(z => (z.mode || "occlude") === "include");
+  const occludeZones = usable.filter(z => (z.mode || "occlude") !== "include");
+  dmctx.fillStyle = "#000";
+  if (includeZones.length) {
+    for (const z of includeZones) { traceZonePath(dmctx, z, w, h); dmctx.fill(); } // união: fills sucessivos são idempotentes em sobreposição
+  } else {
+    dmctx.fillRect(0, 0, w, h); // sem 'include': o canvas inteiro é desenhável
+  }
+  dmctx.globalCompositeOperation = "destination-out";
+  for (const z of occludeZones) { traceZonePath(dmctx, z, w, h); dmctx.fill(); } // subtrai oclusão, mesmo dentro de um include
+  dmctx.globalCompositeOperation = "source-over";
+}
+// chamado sempre que `zones` for substituído/editado (admin, carregar
+// edifício, mensagem 'zones' recebida, load da cloud — ver sendZones/
+// zonesCloudLoad/onMsg) — só recalcula/recompõe se o ecrã de desenho estiver aberto
+function syncDrawableRegion() {
+  if (!drawScreenOpen) return;
+  rebuildDrawMask();
+  compositeEcho();
+}
+// máscara inicial (dims por omissão do canvas, 300×150, antes do 1º
+// sizeDrawCanvas) — sem isto ficava transparente em todo o lado (sem zonas
+// ainda carregadas conta como "sem include", devia ser tudo desenhável) e o
+// 1º compositeEcho() chamado antes de o ecrã de desenho alguma vez abrir
+// (ex.: onload de refImg) apagava tinta que nem existe ainda, mas mantém o
+// estado consistente por precaução
+rebuildDrawMask();
 let echoUndo = [], echoRedo = []; // histórico LOCAL do eco (snapshots da camada de traços)
 const ECHO_HISTORY_MAX = 10;   // tablet: memória limitada — poucos passos chegam (o display é a verdade)
 const ECHO_SNAP_MAX = 900;     // maior lado do snapshot em px — leve (num DPR2 1080p full-res eram ~32MiB/passo)
@@ -2108,12 +2445,22 @@ function renderDrawBase() {
   dctx.fillStyle = "#000"; dctx.fillRect(0, 0, w, h);
   if (refImg) { dctx.globalAlpha = 0.5; dctx.drawImage(refImg, 0, 0, w, h); dctx.globalAlpha = 1; }
 }
-// compõe o visível = base (preto + imagem) + camada de traços por cima
+// compõe o visível = base (preto + imagem, SEMPRE inteira — referência do
+// operador) + camada de traços recortada à área desenhável (FIX 1) por cima
 function compositeEcho() {
   renderDrawBase();
+  // recorta a tinta à área desenhável num scratch à parte (destination-in
+  // com drawMask) ANTES de a colar no canvas visível — a base já pintada por
+  // renderDrawBase() acima nunca é tocada por esta máscara
+  ictx.setTransform(1, 0, 0, 1, 0, 0);
+  ictx.clearRect(0, 0, inkScratch.width, inkScratch.height);
+  ictx.drawImage(strokeEcho, 0, 0);
+  ictx.globalCompositeOperation = "destination-in";
+  ictx.drawImage(drawMask, 0, 0);
+  ictx.globalCompositeOperation = "source-over";
   dctx.save();
-  dctx.setTransform(1, 0, 0, 1, 0, 0); // blit 1:1 em píxeis de dispositivo (strokeEcho tem as mesmas dims)
-  dctx.drawImage(strokeEcho, 0, 0);
+  dctx.setTransform(1, 0, 0, 1, 0, 0); // blit 1:1 em píxeis de dispositivo (mesmo espaço do drawMask/strokeEcho)
+  dctx.drawImage(inkScratch, 0, 0);
   dctx.restore();
 }
 function snapshotEcho() {
@@ -2154,7 +2501,12 @@ function sizeDrawCanvas() {
   // um resize limpa os traços e o histórico (mesmo ceiling do display)
   strokeEcho.width = cw * dpr; strokeEcho.height = ch * dpr;
   sectx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // FIX 1 (review): drawMask/inkScratch acompanham as MESMAS dims em píxeis de
+  // dispositivo do strokeEcho — têm de bater byte-a-byte no blit de compositeEcho()
+  drawMask.width = cw * dpr; drawMask.height = ch * dpr;
+  inkScratch.width = cw * dpr; inkScratch.height = ch * dpr;
   echoUndo = []; echoRedo = [];
+  rebuildDrawMask(); // resize: recalcula o recorte para o novo tamanho
   compositeEcho();
 }
 window.addEventListener("resize", () => { if (drawScreenOpen) sizeDrawCanvas(); });

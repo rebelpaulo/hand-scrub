@@ -919,6 +919,18 @@ function resetHover() {
   holdStart = 0;
 }
 
+// repõe TODA a máquina de dwell gestual (hoverCard/holdStart via resetHover,
+// + thumbsSince/cooldownUntil). processHands congela este estado inteiro
+// enquanto view==="mapping" (early-return) — sem isto, um dwell a meio antes
+// de entrar no mapping mode fica com holdStart antigo; ao sair, elapsed =
+// now - holdStart já passa de ACTIVATE_MS e go() dispara imediatamente,
+// navegando sozinho à frente do público (review).
+function resetDwellState() {
+  resetHover();
+  thumbsSince = 0;
+  cooldownUntil = 0;
+}
+
 /* ============================================================ MAPPING MODE
    painel de controlo remoto: escolher um cartão deixa de navegar e passa a
    mandar a experiência abrir no display.html remoto (BroadcastChannel +
@@ -936,11 +948,18 @@ const mapDetailTitle = $("mapDetailTitle"), mapDetailDesc = $("mapDetailDesc");
 const mapScenesEl = $("mapScenes"), mapOpenMagicdraw = $("mapOpenMagicdraw");
 
 /* ---------- contrato de sync (pinado — display.html implementa isto à letra) ---------- */
-const ROOM = (new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "") || "default";
+// cap de 40 — ver nota em magicdraw.html: o ROOM entra nos ids do hand_config
+// (check <=64) e o cap TEM de ser idêntico nos 4 ficheiros, senão os ecrãs
+// derivam nomes de canal diferentes e deixam de se ver.
+const ROOM = ((new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "").slice(0, 40)) || "default";
 const MAP_SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
 const MAP_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
 const MAP_CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let mapSeq = 0, mapBc = null, mapSbChannel = null, mapSbReady = false, mapSyncStarted = false;
+// incrementado a cada início/fim de ciclo — invalida o import()/subscribe()
+// assíncrono de um ciclo anterior que só resolva depois de já se ter saído
+// do mapping mode (ver teardownMappingSync/initMappingSync).
+let mapSyncToken = 0;
 // campreview começa ON: é o default das experiências ao abrir — assim o botão
 // reflete a realidade e o 1º toque esconde de facto (T28b finding 3)
 let mapWired = false, mapActiveApp = null, mapCamPreviewOn = true, mapActiveScene = null;
@@ -966,9 +985,13 @@ function mapOnMsg(payload) {
 function mapHandleMsg(payload) {
   switch (payload.kind) {
     case "hello":
-      // o display pediu o estado atual — reenvia o que está selecionado agora
+      // o display pediu o estado atual (ex.: reiniciou) — reenvia o que está
+      // selecionado agora, incluindo a cena ativa: sem isto o scrub assume
+      // cena 0 por omissão enquanto o painel continua a marcar outra como
+      // ativa (review).
       if (mapActiveApp) mapSend("open", { app: mapActiveApp });
       mapSend("campreview", { on: mapCamPreviewOn });
+      if (mapActiveApp === "scrub" && mapActiveScene != null) mapSend("scene", { i: mapActiveScene });
       break;
     case "status":
       setMapActiveApp(payload.app || null);
@@ -983,6 +1006,7 @@ function updateMapIndicator() {
 function initMappingSync() {
   if (mapSyncStarted) return;
   mapSyncStarted = true;
+  const token = ++mapSyncToken; // identifica este ciclo entrar/sair
   mapBc = new BroadcastChannel("mapping:" + ROOM);
   mapBc.onmessage = e => mapOnMsg(e.data);
   // import dinâmico guardado (mesmo padrão de magicdraw-display.html): uma
@@ -991,13 +1015,31 @@ function initMappingSync() {
   (async () => {
     try {
       const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
+      // saiu do mapping mode (ou voltou a entrar, novo ciclo) antes do import
+      // acabar — não abrir/deixar pendurado um canal de um ciclo já fechado.
+      if (token !== mapSyncToken) return;
       const sb = createClient(MAP_SUPABASE_URL, MAP_SUPABASE_ANON_KEY);
-      mapSbChannel = sb.channel("mapping:" + ROOM);
-      mapSbChannel.on("broadcast", { event: "msg" }, ({ payload }) => mapOnMsg(payload)).subscribe(status => {
+      const ch = sb.channel("mapping:" + ROOM);
+      ch.on("broadcast", { event: "msg" }, ({ payload }) => mapOnMsg(payload)).subscribe(status => {
+        if (token !== mapSyncToken) { try { ch.unsubscribe(); } catch (e) { /* ignora */ } return; }
         if (status === "SUBSCRIBED") { mapSbReady = true; updateMapIndicator(); mapSend("hello"); }
       });
+      mapSbChannel = ch;
     } catch (e) { /* offline/CDN em baixo: fica só o canal local */ }
   })();
+  updateMapIndicator();
+}
+
+// fecha BroadcastChannel + unsubscribe do canal Supabase e repõe
+// mapSyncStarted=false — sem isto, um ciclo entrar/sair em attract loop o
+// dia inteiro deixa um socket e um canal a processar mensagens para sempre
+// sem necessidade (review). Idempotente: chamar 2x não rebenta.
+function teardownMappingSync() {
+  mapSyncToken++; // invalida qualquer import/subscribe assíncrono ainda pendente
+  if (mapBc) { mapBc.onmessage = null; mapBc.close(); mapBc = null; }
+  if (mapSbChannel) { try { mapSbChannel.unsubscribe(); } catch (e) { /* ignora */ } mapSbChannel = null; }
+  mapSbReady = false;
+  mapSyncStarted = false;
   updateMapIndicator();
 }
 
@@ -1109,6 +1151,9 @@ function wireMapUI() {
 
 /* ---------- entrar/sair do mapping mode ---------- */
 function activateMappingView() {
+  // entrar no mapping mode congela processHands (early-return) — repõe o
+  // dwell ANTES de congelar, para não guardar um holdStart/thumbsSince a meio.
+  resetDwellState();
   mapRoomLabel.textContent = ROOM;
   wireMapUI();
   setView("mapping");
@@ -1123,6 +1168,11 @@ function enterMapping() {
 function exitMapping() {
   localStorage.removeItem("mappingMode");
   mappingMode = false;
+  teardownMappingSync();
+  // defesa em profundidade: o dwell já devia estar limpo desde a entrada
+  // (activateMappingView), mas repor outra vez aqui cobre qualquer caminho
+  // de saída futuro que não passe por lá — nunca sair "sujo".
+  resetDwellState();
   setView("attract");
 }
 
