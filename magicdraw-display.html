@@ -100,6 +100,10 @@
     opacity: .35; transition: opacity .2s;
   }
   #back:hover { opacity: 1; }
+  /* interface própria escondida na projeção (ver ponte postMessage no fim do
+     script): o "← voltar" é o único chrome deste ecrã, e projetado era um
+     botão na parede do edifício */
+  body.chrome-off #back { opacity: 0; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -1399,6 +1403,21 @@ fsHotspot.addEventListener("click", () => {
     return;
   }
   fsClickTimer = setTimeout(() => { fsClicks = 0; }, 1200);
+});
+
+/* ================= ponte postMessage (shell de projeção) =================
+   Este ecrã é o HOME_APP do display.html, mas não tinha ponte nenhuma: os
+   comandos do shell chegavam e eram ignorados em silêncio, e o "← voltar"
+   ficava projetado no edifício independentemente do estado dos controlos
+   (review PR #49). O 'ready' é o que faz o shell reenviar o estado guardado
+   (ver display.html, mesmo padrão do campreview). */
+if (window.parent !== window) {
+  document.body.classList.add("chrome-off"); // embebido: começa escondido
+  parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
+}
+window.addEventListener("message", e => {
+  if (e.origin !== location.origin || e.data?.mapping !== 1) return;
+  if (e.data.cmd === "chrome") document.body.classList.toggle("chrome-off", !e.data.on);
 });
 </script>
 </body>

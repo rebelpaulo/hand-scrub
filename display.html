@@ -340,6 +340,12 @@ let iframeReady = false;
 // (review). pendingScene É específico da app — esse sim limpa-se na troca.
 let pendingCampreview = null; // último {on} conhecido (para re-enviar ao 'ready')
 let pendingScene = null;      // último {i} enviado antes do 'ready', só da app atual
+// chrome (interface própria da experiência) é estado GLOBAL da sessão de
+// projeção, tal como campreview — mesmo padrão e mesma razão: sem isto, ao
+// trocar de app o operador tinha de voltar a escondê-la manualmente. Começa
+// null (nenhum comando ainda enviado); a própria app já nasce escondida por
+// omissão — só é preciso reenviar quando HOUVE um comando explícito.
+let pendingChrome = null; // último {on} conhecido (para re-enviar ao 'ready')
 
 function openApp(app) {
   const file = APP_FILES[app];
@@ -374,6 +380,10 @@ function handleCmd(payload) {
     case "campreview":
       pendingCampreview = { on: !!payload.on };
       toIframe({ cmd: "campreview", on: pendingCampreview.on });
+      break;
+    case "chrome":
+      pendingChrome = { on: !!payload.on };
+      toIframe({ cmd: "chrome", on: pendingChrome.on });
       break;
     case "scene":
       pendingScene = { i: payload.i };
@@ -426,6 +436,7 @@ window.addEventListener("message", e => {
   if (d.evt === "ready") {
     iframeReady = true;
     if (pendingCampreview) toIframe({ cmd: "campreview", on: pendingCampreview.on });
+    if (pendingChrome) toIframe({ cmd: "chrome", on: pendingChrome.on });
     if (pendingScene) toIframe({ cmd: "scene", i: pendingScene.i });
   }
 });

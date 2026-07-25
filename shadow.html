@@ -131,6 +131,11 @@
   }
   #hint[hidden] { display: none; }
   body.ui-hidden #hint { opacity: 0; transform: translateX(-50%) translateY(12px); pointer-events: none; }
+  /* o "← voltar" também é interface própria: projetado na fachada era um botão
+     na parede da igreja tal como a barra. Ficava de fora por só o #hint estar
+     coberto por esta regra. */
+  body.ui-hidden #backLink { opacity: 0; pointer-events: none; }
+  #backLink { transition: opacity .3s; }
   body.ui-hidden { cursor: none; }
 
   #toast {
@@ -143,7 +148,7 @@
 </style>
 </head>
 <body>
-  <a class="btn" href="index.html" style="position:fixed;top:16px;left:16px;z-index:95;text-decoration:none">← voltar</a>
+  <a id="backLink" class="btn" href="index.html" style="position:fixed;top:16px;left:16px;z-index:95;text-decoration:none">← voltar</a>
   <canvas id="stage"></canvas>
   <div id="vignette"></div>
   <div id="grain"></div>
@@ -197,14 +202,25 @@ function toast(msg, dur = 1800) {
   t.textContent = msg; t.classList.add("show");
   clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), dur);
 }
+// PRINCÍPIO (ver display.html/C1): dentro do shell de projeção, quem comanda a
+// UI é o ecrã de controlo, não o rato por cima da janela do projetor — sem
+// isto, o auto-hide era reposto sem parar pelo próprio rato do operador.
+const embedded = window.parent !== window;
+let chromeOn = !embedded; // fora do shell: comporta-se como sempre; embebido: começa escondida
 let idleT;
 function wakeUI() {
+  if (embedded && !chromeOn) return; // projeção com chrome desligado: o rato não acorda a UI
   document.body.classList.remove("ui-hidden");
   clearTimeout(idleT);
   idleT = setTimeout(() => document.body.classList.add("ui-hidden"), 4500);
 }
+function applyChrome() {
+  if (chromeOn) { wakeUI(); return; }
+  clearTimeout(idleT);
+  document.body.classList.add("ui-hidden");
+}
 ["pointermove", "pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, wakeUI));
-wakeUI();
+applyChrome();
 
 /* seguro de dia-de-evento: "i" inverte manualmente a polaridade da máscara
    e trava o ajuste automático (checkMaskPolarity deixa de mexer sozinho) */
@@ -852,6 +868,7 @@ window.addEventListener("message", e => {
   if (e.origin !== location.origin || e.data?.mapping !== 1) return;
   // se o preview ainda não estiver pronto (câmara não arrancou), ignora em silêncio
   if (e.data.cmd === "campreview") pip.setCamPreview?.(!!e.data.on);
+  else if (e.data.cmd === "chrome") { chromeOn = !!e.data.on; applyChrome(); }
 });
 </script>
 </body>

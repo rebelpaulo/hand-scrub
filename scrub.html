@@ -472,14 +472,31 @@ function toast(msg) {
   clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 1800);
 }
 // auto-hide UI when idle
+// PRINCÍPIO (ver display.html/C1): dentro do shell de projeção, quem comanda a
+// UI é o ecrã de controlo, não o rato por cima da janela do projetor — sem
+// isto, o auto-hide era reposto sem parar pelo próprio rato do operador.
+const embedded = window.parent !== window;
+let chromeOn = !embedded; // fora do shell: comporta-se como sempre; embebido: começa escondida
 let idleT;
 function wakeUI() {
+  if (embedded && !chromeOn) return; // projeção com chrome desligado: o rato não acorda a barra
   document.body.classList.remove("ui-hidden");
   clearTimeout(idleT);
   idleT = setTimeout(() => document.body.classList.add("ui-hidden"), 4000);
 }
+function applyChrome() {
+  if (chromeOn) { wakeUI(); return; }
+  clearTimeout(idleT);
+  document.body.classList.add("ui-hidden");
+  // Fecha também os popovers abertos (review PR #49): 'ui-hidden' esconde o
+  // #bar, mas #settings.open/#trimPanel.open têm display:flex próprio e
+  // ficavam projetados no edifício — visíveis e clicáveis — logo a seguir a o
+  // operador ter desligado os controlos e a acreditar que estavam escondidos.
+  $("settings")?.classList.remove("open");
+  $("trimPanel")?.classList.remove("open");
+}
 ["pointermove", "pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, wakeUI));
-wakeUI();
+applyChrome();
 
 $("playBtn").onclick = () => player.paused ? player.play() : player.pause();
 $("fsBtn").onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
@@ -1170,6 +1187,7 @@ window.addEventListener("message", e => {
   if (e.origin !== location.origin || e.data?.mapping !== 1) return;
   if (e.data.cmd === "campreview") pip.setCamPreview(!!e.data.on);
   else if (e.data.cmd === "scene" && Number.isInteger(e.data.i) && SCENES[e.data.i]) selectScene(e.data.i);
+  else if (e.data.cmd === "chrome") { chromeOn = !!e.data.on; applyChrome(); }
 });
 </script>
 </body>

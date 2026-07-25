@@ -553,6 +553,7 @@
         <div class="map-actions">
           <button type="button" class="map-btn" id="mapSetupBtn">⚙️ Setup</button>
           <button type="button" class="map-btn" id="mapCamBtn">👁 Preview câmara</button>
+          <button type="button" class="map-btn" id="mapChromeBtn" title="Mostra/esconde os botões da experiência (cenas, play/pausa, trim, ecrã inteiro) na projeção">🎛️ Controlos na projeção</button>
           <button type="button" class="map-btn" id="mapHomeBtn">⬛ Ecrã preto</button>
         </div>
       </div>
@@ -974,7 +975,7 @@ const mapHotspot = $("mapHotspot");
 const mapConfirm = $("mapConfirm"), mapConfirmText = $("mapConfirmText");
 const mapConfirmOk = $("mapConfirmOk"), mapConfirmCancel = $("mapConfirmCancel");
 const mapSetup = $("mapSetup"), mapSetupClose = $("mapSetupClose"), mapCopyUrlBtn = $("mapCopyUrlBtn");
-const mapSetupBtn = $("mapSetupBtn"), mapCamBtn = $("mapCamBtn"), mapHomeBtn = $("mapHomeBtn");
+const mapSetupBtn = $("mapSetupBtn"), mapCamBtn = $("mapCamBtn"), mapChromeBtn = $("mapChromeBtn"), mapHomeBtn = $("mapHomeBtn");
 const mapRoomLabel = $("mapRoomLabel"), mapIndicator = $("mapIndicator");
 const mapAppsEl = $("mapApps"), mapDetailPlaceholder = $("mapDetailPlaceholder"), mapDetailContent = $("mapDetailContent");
 const mapDetailTitle = $("mapDetailTitle"), mapDetailDesc = $("mapDetailDesc");
@@ -997,7 +998,10 @@ let mapSeq = 0, mapBc = null, mapSbChannel = null, mapSbClient = null, mapSbRead
 let mapSyncToken = 0;
 // campreview começa ON: é o default das experiências ao abrir — assim o botão
 // reflete a realidade e o 1º toque esconde de facto (T28b finding 3)
-let mapWired = false, mapActiveApp = null, mapCamPreviewOn = true, mapActiveScene = null;
+// chrome (interface própria da experiência: cenas, play/pausa, trim, ecrã
+// inteiro) começa OFF — quem comanda a experiência embebida é este painel,
+// não a barra dela própria projetada na fachada (ver princípio em display.html).
+let mapWired = false, mapActiveApp = null, mapCamPreviewOn = true, mapActiveScene = null, mapChromeOn = false;
 
 function mapSend(kind, extra = {}) {
   const payload = { v: 1, src: MAP_CLIENT_ID, seq: ++mapSeq, kind, ...extra };
@@ -1026,6 +1030,7 @@ function mapHandleMsg(payload) {
       // ativa (review).
       if (mapActiveApp) mapSend("open", { app: mapActiveApp });
       mapSend("campreview", { on: mapCamPreviewOn });
+      mapSend("chrome", { on: mapChromeOn });
       if (mapActiveApp === "scrub" && mapActiveScene != null) mapSend("scene", { i: mapActiveScene });
       break;
     case "status":
@@ -1146,6 +1151,11 @@ function toggleMapCamPreview() {
   mapSend("campreview", { on: mapCamPreviewOn });
   mapCamBtn.classList.toggle("on", mapCamPreviewOn);
 }
+function toggleMapChrome() {
+  mapChromeOn = !mapChromeOn;
+  mapSend("chrome", { on: mapChromeOn });
+  mapChromeBtn.classList.toggle("on", mapChromeOn);
+}
 function sendMapScene(i) {
   mapActiveScene = i;
   mapSend("scene", { i });
@@ -1201,6 +1211,8 @@ function wireMapUI() {
   });
   mapCamBtn.addEventListener("click", toggleMapCamPreview);
   mapCamBtn.classList.toggle("on", mapCamPreviewOn); // estado visual inicial coerente
+  mapChromeBtn.addEventListener("click", toggleMapChrome);
+  mapChromeBtn.classList.toggle("on", mapChromeOn); // estado visual inicial coerente
   mapHomeBtn.addEventListener("click", mapGoHome);
   mapSetupBtn.addEventListener("click", openMapSetup);
   mapSetupClose.addEventListener("click", () => { mapSetup.hidden = true; });

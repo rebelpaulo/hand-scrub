@@ -50,6 +50,8 @@
     position: fixed; left: 14px; top: 14px; font-size: 11px; color: var(--muted);
     z-index: 10; opacity: .6; pointer-events: none;
   }
+  /* interface própria escondida na projeção (ver ponte postMessage) */
+  body.chrome-off #panel, body.chrome-off #corner { opacity: 0; pointer-events: none; }
 
   /* ---------- draggable tracking preview (PiP) — ver o que o MediaPipe vê,
      mesmo padrão do scrub.html (#pip/.pip-h/.view/.hud/.pill) ---------- */
@@ -1055,7 +1057,14 @@ void main() {
   window.addEventListener("message", e => {
     if (e.origin !== location.origin || e.data?.mapping !== 1) return;
     if (e.data.cmd === "campreview") setPipVisible(!!e.data.on);
+    else if (e.data.cmd === "chrome") document.body.classList.toggle("chrome-off", !e.data.on);
   });
+  // PRINCÍPIO (ver display.html/C1): dentro do shell de projeção quem comanda a
+  // interface é o ecrã de controlo. Aqui o chrome próprio é a dica + os botões
+  // de efeito (#panel) e a etiqueta da sala (#corner) — projetados, ficavam
+  // escritos na fachada. Os efeitos continuam a trocar-se por tecla e por
+  // comando, por isso esconder não tira função nenhuma.
+  if (window.parent !== window) document.body.classList.add("chrome-off");
 
   // window.__lab: getters sempre disponíveis (inofensivos, só leitura). Os
   // mutadores (trocar fonte de vídeo, forçar caixa/landmarks sem mãos reais,

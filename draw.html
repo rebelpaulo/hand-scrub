@@ -38,6 +38,10 @@
   }
   #notice[hidden] { display: none; }
 
+  /* interface própria (link "voltar" + dica) — escondida na projeção (ver
+     ponte postMessage no fim do script: comando 'chrome') */
+  body.chrome-off .own-chrome { opacity: 0; pointer-events: none; }
+
   /* ---------- start overlay (loader shown until hand tracking is ready) ---------- */
   #startOverlay {
     position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column;
@@ -72,10 +76,10 @@
 </style>
 </head>
 <body>
-  <a href="index.html" style="position:fixed;top:16px;left:16px;z-index:95;text-decoration:none;color:#eef2f8;background:#0f1219cc;border:1px solid #2a3245;border-radius:11px;padding:8px 14px;font-size:13px;font-weight:600">← voltar</a>
+  <a href="index.html" class="own-chrome" style="position:fixed;top:16px;left:16px;z-index:95;text-decoration:none;color:#eef2f8;background:#0f1219cc;border:1px solid #2a3245;border-radius:11px;padding:8px 14px;font-size:13px;font-weight:600;transition:opacity .3s">← voltar</a>
   <canvas id="stage"></canvas>
 
-  <div id="hint">🤏 aperta o polegar e o indicador para escrever no ar</div>
+  <div id="hint" class="own-chrome" style="transition:opacity .3s">🤏 aperta o polegar e o indicador para escrever no ar</div>
   <div id="notice" hidden></div>
 
   <!-- start / loader overlay -->
@@ -401,12 +405,18 @@ async function start() {
 start();
 
 /* ================= ponte postMessage (shell de projeção) ================= */
+// PRINCÍPIO (ver display.html/C1): dentro do shell de projeção, o link
+// "voltar" e a dica não são projetados na fachada — não há barra própria como
+// no scrub.html (sem play/pausa/trim/ecrã inteiro), só estes dois elementos.
 const pipWrap = $("pipWrap");
+const embedded = window.parent !== window;
+if (embedded) document.body.classList.add("chrome-off"); // começa escondida
 if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
 window.addEventListener("message", e => {
   if (e.origin !== location.origin || e.data?.mapping !== 1) return;
   // esconde/mostra o preview da câmara (canvas + vídeo fonte) sem tocar no tracking
   if (e.data.cmd === "campreview") pipWrap.style.display = e.data.on ? "" : "none";
+  else if (e.data.cmd === "chrome") document.body.classList.toggle("chrome-off", !e.data.on);
 });
 </script>
 </body>
