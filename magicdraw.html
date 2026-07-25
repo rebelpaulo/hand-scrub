@@ -1154,8 +1154,19 @@ function onMsg(msg) {
     // FIX F6: com o editor de zonas aberto, adotar zonas remotas sem
     // redesenhar deixava o canvas mostrar geometria desatualizada face ao
     // estado real (só se atualizava na próxima interação local).
-    if (adminOpen) renderAdminCanvas();
+    refreshZoneViews();
   }
+}
+
+// Redesenha os editores que MOSTRAM zonas, se estiverem abertos. Chamado de
+// todos os sítios onde `zones` é substituído por fora da edição local: mensagem
+// de outro controlo e load da cloud. O editor de warp entrou nesta lista com o
+// overlay de zonas (review PR #48) — sem isto ficava a mostrar a calibração
+// antiga até o operador mexer num ponto ou reabrir, e o overlay existe
+// justamente para ele confiar no alinhamento que está a ver.
+function refreshZoneViews() {
+  if (adminOpen) renderAdminCanvas();
+  if (!warpOverlay.hidden) renderWarpCanvas();
 }
 
 function send(payload) {
@@ -1675,6 +1686,7 @@ async function zonesCloudLoad() {
     zonesHydrated = true;
     if (pendingHelloZones) { pendingHelloZones = false; sendZones(adminOpen); }
     syncDrawableRegion(); // FIX 1 (review): zonas carregadas da cloud — atualiza o recorte se o modo Desenhar já estiver aberto
+    refreshZoneViews();   // review PR #48: o load pode resolver depois de um editor já ter desenhado
   }
 }
 function zonesCloudSave() {
