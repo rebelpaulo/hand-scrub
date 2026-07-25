@@ -708,6 +708,15 @@ function go(href) {
   navigated = true;
   window.location.href = href;
 }
+// FIX F3: fica falso logo após entrar/sair do mapping mode (ver resetDwellState)
+// até o rato voltar a MEXER de verdade. Sem isto, um cartão que reaparece sob
+// um cursor parado (ex.: o botão "Sair" ficava onde um cartão passou a estar)
+// já nasce com :hover verdadeiro — o Chrome recalcula :hover em mudanças de
+// layout sem exigir movimento real — e o dwell de rato ativava-se sozinho ao
+// fim da transição CSS, sem o operador ter tocado no rato. Global (não por
+// cartão) porque a troca de vista pode "prender" qualquer um deles.
+let mouseMovedSinceModeSwitch = true;
+document.addEventListener("pointermove", () => { mouseMovedSinceModeSwitch = true; }, { passive: true });
 cards.forEach(card => {
   card.addEventListener("click", () => go(card.dataset.href));
   const fillCircle = card.querySelector(".dwell circle.fill");
@@ -716,7 +725,7 @@ cards.forEach(card => {
   card.addEventListener("mouseleave", () => { hovering = false; });
   fillCircle.addEventListener("transitionend", e => {
     if (e.propertyName !== "stroke-dashoffset") return;
-    if (hovering && card.matches(":hover")) go(card.dataset.href);
+    if (mouseMovedSinceModeSwitch && hovering && card.matches(":hover")) go(card.dataset.href);
   });
 });
 
@@ -929,6 +938,12 @@ function resetDwellState() {
   resetHover();
   thumbsSince = 0;
   cooldownUntil = 0;
+  // FIX F3: exige um MOVIMENTO real do rato antes do próximo dwell de rato
+  // poder ativar (caminho separado do gestual acima — ver mouseMovedSinceModeSwitch
+  // + transitionend nos cards). Sem isto, confirmar "Sair do mapping mode"
+  // com o cursor por cima de onde um cartão reaparece fazia a home navegar
+  // sozinha ~0.6s depois, mesmo sem o operador ter tocado no rato.
+  mouseMovedSinceModeSwitch = false;
 }
 
 /* ============================================================ MAPPING MODE

@@ -283,6 +283,11 @@ function send(kind, extra = {}) {
 const lastSeqCmd = new Map();
 function onCmdMsg(payload) {
   if (!payload || payload.v !== 1 || payload.src === CLIENT_ID) return;
+  // FIX F5: valida a FORMA antes do dedup (mesma regra de magicdraw.html/
+  // magicdraw-display.html) — com `seq` undefined, `payload.seq <= last`
+  // nunca é true e lastSeqCmd.set(src, undefined) desligava o dedup desse
+  // src pelo resto da sessão do projetor. Canal público: descarta em silêncio.
+  if (typeof payload.src !== "string" || !payload.src || !Number.isFinite(payload.seq)) return;
   const last = lastSeqCmd.get(payload.src) ?? -1;
   if (payload.seq <= last) return;
   lastSeqCmd.set(payload.src, payload.seq);
@@ -291,6 +296,8 @@ function onCmdMsg(payload) {
 const lastSeqZones = new Map();
 function onZonesMsg(payload) {
   if (!payload || payload.v !== 1 || payload.src === CLIENT_ID) return;
+  // FIX F5: idem onCmdMsg — mesma validação de forma no recetor de zonas.
+  if (typeof payload.src !== "string" || !payload.src || !Number.isFinite(payload.seq)) return;
   const last = lastSeqZones.get(payload.src) ?? -1;
   if (payload.seq <= last) return;
   lastSeqZones.set(payload.src, payload.seq);

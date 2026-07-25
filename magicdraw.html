@@ -303,8 +303,17 @@
      limitado pela LARGURA OU pela ALTURA disponível, o que for menor —
      em telemóvel isto não muda nada (a largura continua a mandar). */
   .admin-panel-wide { max-width: min(1500px, 96vw); }
+  /* FIX F1: width:auto num <canvas> NÃO usa o 16:9 do CSS aspect-ratio —
+     resolve para o tamanho INTRÍNSECO do elemento (o bitmap 300px por
+     omissão), por isso max-width/max-height nunca chegavam a limitar nada e
+     o "aumentar a caixa" media inversamente: o canvas ENCOLHIA para 300×169.
+     Fix: largura EXPLÍCITA (nunca auto) — o menor entre 100% do painel e a
+     largura que cabe em 74dvh a 16:9 (aspect-ratio já vem da regra base
+     #adminCanvas/#warpCanvas); em telemóvel min() resolve sempre para 100%,
+     igual ao comportamento anterior a esta regra. */
   .admin-panel-wide #adminCanvas, .admin-panel-wide #warpCanvas {
-    width: auto; height: auto; max-width: 100%; max-height: min(74dvh, 920px);
+    width: min(100%, calc(min(74dvh, 920px) * 16 / 9));
+    height: auto;
   }
   .admin-panel p.hint {
     margin: 0; color: var(--muted); font-size: 12px; text-align: center;
@@ -635,13 +644,19 @@ let sbChannel = null;
 // rejeitada pela BD (400: tamanho, id, payload) parecia bem-sucedida e só se
 // descobria num reload, já no evento — o operador tem de ver "não gravado" já.
 let sbConnected = false;
-let cloudSaveFailed = false; // fica true até a PRÓXIMA gravação ter sucesso
+// FIX F4: por ID em falha (não um único booleano) — com um só booleano, um
+// POST bem-sucedido de QUALQUER id (ex. zonas) limpava o aviso mesmo com
+// outro id (ex. imagem) ainda por gravar depois de um 400. O pill mostra o
+// aviso enquanto este conjunto não estiver vazio; cada gravação só remove o
+// SEU id.
+const cloudSaveFailedIds = new Set();
 function renderStatusPill() {
-  statusEl.textContent = cloudSaveFailed ? "⚠️ não gravado" : (sbConnected ? "🟢 ligado" : "🟡 só local");
+  statusEl.textContent = cloudSaveFailedIds.size ? "⚠️ não gravado" : (sbConnected ? "🟢 ligado" : "🟡 só local");
 }
-function setCloudSaveFailed(failed) {
-  if (cloudSaveFailed === failed) return; // evita reflow/spam a cada debounce se o estado não mudou
-  cloudSaveFailed = failed;
+function setCloudSaveFailed(id, failed) {
+  const had = cloudSaveFailedIds.has(id);
+  if (had === failed) return; // evita reflow/spam a cada debounce se o estado não mudou
+  if (failed) cloudSaveFailedIds.add(id); else cloudSaveFailedIds.delete(id);
   renderStatusPill();
 }
 // helper único de escrita em hand_config (zonas/warp/refimg) — verifica r.ok em
@@ -656,10 +671,10 @@ async function cloudPost(id, data) {
       body: JSON.stringify([{ id, data, updated_at: new Date().toISOString() }]),
     });
   } catch {
-    setCloudSaveFailed(true); // offline/erro de rede — sem spam: só atualiza o pill, sem console.warn por segundo
+    setCloudSaveFailed(id, true); // offline/erro de rede — sem spam: só atualiza o pill, sem console.warn por segundo
     return false;
   }
-  setCloudSaveFailed(!r.ok);
+  setCloudSaveFailed(id, !r.ok);
   if (!r.ok) console.warn(`magicdraw: gravação cloud rejeitada (id=${id}, status=${r.status})`);
   return r.ok;
 }
@@ -725,6 +740,10 @@ function onMsg(msg) {
     zones = msg.zones.map(normalizeZone);
     zonesHydrated = true;
     syncDrawableRegion();
+    // FIX F6: com o editor de zonas aberto, adotar zonas remotas sem
+    // redesenhar deixava o canvas mostrar geometria desatualizada face ao
+    // estado real (só se atualizava na próxima interação local).
+    if (adminOpen) renderAdminCanvas();
   }
 }
 
@@ -1169,12 +1188,15 @@ function zoneHandlesPx(z, w, h) {
   return z.pts.map(([x, y], idx) => ({ x: x * w, y: y * h, kind: "vertex", idx }));
 }
 // pegas "+" nos pontos médios das arestas (só poly) — tocar insere um vértice ali
+// `len` (FIX F2): comprimento da aresta em px, para o hit-test poder encolher
+// o raio de acerto do "+" em zonas pequenas (ver VERTEX_HIT_R mais abaixo).
 function zoneMidpointsPx(z, w, h) {
   if (z.type !== "poly") return [];
   const n = z.pts.length;
   return z.pts.map(([x, y], i) => {
     const [x2, y2] = z.pts[(i + 1) % n];
-    return { x: ((x + x2) / 2) * w, y: ((y + y2) / 2) * h, edgeAfter: i };
+    const ex = x * w, ey = y * h, ex2 = x2 * w, ey2 = y2 * h;
+    return { x: (ex + ex2) / 2, y: (ey + ey2) / 2, edgeAfter: i, len: Math.hypot(ex2 - ex, ey2 - ey) };
   });
 }
 const clamp01 = v => Math.min(1, Math.max(0, v));
@@ -1627,8 +1649,22 @@ adminCanvas.addEventListener("pointerdown", e => {
   // 2) pegas "+" de inserção de vértice — só na zona já selecionada, tipo poly
   const selZone = zones.find(z => z.id === selectedZoneId);
   if (selZone && selZone.type === "poly") {
+    // FIX F2: centro geométrico da zona em px — só o comprimento da própria
+    // aresta (mp.len) não chega numa zona ACHATADA (ex. 0.25×0.25 num canvas
+    // 332×187): a aresta é "comprida" mas o ponto médio ainda fica perto do
+    // centro no eixo curto. Limitar também por METADE da distância ao
+    // centro garante que os "+" de arestas opostas nunca se encontram sobre
+    // o interior — o corpo fica sempre livre para arrastar.
+    const cxPx = selZone.pts.reduce((s, p) => s + p[0], 0) / selZone.pts.length * w;
+    const cyPx = selZone.pts.reduce((s, p) => s + p[1], 0) / selZone.pts.length * h;
     for (const mp of zoneMidpointsPx(selZone, w, h)) {
-      if (Math.hypot(mp.x - x, mp.y - y) < hitR) {
+      // FIX F2: numa zona pequena o raio generoso de 30px do "+" chegava a
+      // engolir o CENTRO da forma — um toque no corpo inseria um vértice e
+      // deformava a zona em vez de a arrastar. Pegas de vértice reais
+      // (acima) mantêm o raio cheio.
+      const centroidDist = Math.hypot(mp.x - cxPx, mp.y - cyPx);
+      const midHitR = Math.min(hitR, mp.len / 3, centroidDist / 2);
+      if (Math.hypot(mp.x - x, mp.y - y) < midHitR) {
         pushZoneHistory();
         selZone.pts.splice(mp.edgeAfter + 1, 0, [clamp01(nx), clamp01(ny)]);
         selectedVertexIdx = mp.edgeAfter + 1;
