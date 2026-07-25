@@ -413,9 +413,13 @@ function handleZonesMsg(payload) {
 // campreview/scene enviados antes de a app lá dentro estar pronta a ouvir)
 window.addEventListener("message", e => {
   if (e.origin !== location.origin) return;
-  // ao trocar de app, um 'ready' tardio do iframe ANTERIOR (ainda a
-  // descarregar/desmontar) não pode marcar iframeReady=true prematuramente
-  // para o novo — só aceita mensagens do iframe atual (review).
+  // só aceita mensagens vindas DESTE iframe (rejeita a janela de topo, outros
+  // frames e extensões). ATENÇÃO ao que isto NÃO faz: para o mesmo elemento
+  // <iframe>, contentWindow é o MESMO WindowProxy antes e depois de trocar o
+  // src, por isso um 'ready' tardio do documento anterior passa este teste na
+  // mesma. É inofensivo hoje (iframeReady só é escrito, e o reenvio de
+  // pendingCampreview/pendingScene é idempotente); distinguir gerações a sério
+  // exigiria um contador dentro da própria mensagem (review).
   if (e.source !== stage.contentWindow) return;
   const d = e.data;
   if (!d || d.mapping !== 1) return;
