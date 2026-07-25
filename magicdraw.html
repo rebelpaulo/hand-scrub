@@ -74,13 +74,19 @@
     white-space: nowrap; display: flex; align-items: center; gap: 6px;
   }
   .chipdot { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1px #ffffff33; flex: 0 0 auto; }
+  #statusChipIc .ic { width: 14px; height: 14px; }
 
   /* base partilhada com o admin (zonas/warp/edifícios também usam h2.section) —
-     fica como estava, propositadamente neutra */
+     fica como estava, propositadamente neutra. ÚNICO acrescento deste ticket:
+     display:flex+gap para alinhar o ícone de linha que agora todos os
+     cabeçalhos têm (substituem o emoji que ia solto no texto) — fonte, peso,
+     maiúsculas e cor continuam intocados, incl. nos 3 cabeçalhos do admin. */
   h2.section {
     margin: 0 2px; font-size: clamp(11px, 2.6vmin, 13px); font-weight: 800; letter-spacing: .04em;
     text-transform: uppercase; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
   }
+  h2.section .ic { width: 15px; height: 15px; }
   /* REDESIGN: título com display face + pontinho de acento (cor do grupo) —
      reforça a hierarquia "blocos" sem depender só de texto pequeno maiúsculo.
      ESCOPADO a #panelRoot (só as 6 secções do painel principal) para NÃO
@@ -114,6 +120,18 @@
     gap: 4px; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease;
   }
   button:active { transform: scale(.92); }
+  /* ---------- ícones de linha (redesign): regra ÚNICA para TODO o conjunto —
+     sem preenchimentos sólidos, sem cor fixa (stroke:currentColor herda a cor
+     de texto do botão, incl. o acento das classes .on/.mode-* abaixo). Cada
+     símbolo é definido uma única vez no <svg><defs> do topo do body; aqui só
+     se dimensiona o <svg class="ic"> que o referencia (<use>) — largura/altura
+     em vez do font-size que os emojis usavam. flex-shrink:0 para nunca
+     encolher quando o rótulo de texto ao lado é longo. */
+  .ic {
+    fill: none; stroke: currentColor; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round;
+    width: 22px; height: 22px; flex: 0 0 auto; display: block;
+  }
   /* REDESIGN: "bloco" empurrável — sombra inferior chunky que encolhe ao
      premir, simula profundidade física (estilo "vibrant & block-based").
      filter:drop-shadow (não box-shadow) para NUNCA colidir com os box-shadow
@@ -193,14 +211,15 @@
      hierarquia pedida sem mexer no tamanho/legibilidade dos alvos grandes. */
   .tabBtn, #grpActions button { font-family: var(--font-display); }
   .tabBtn { flex: 1; min-height: 60px; font-size: 12px; font-weight: 800; }
-  .tabBtn.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; animation: btnPop .28s cubic-bezier(.34,1.56,.64,1); }
+  .tabBtn .ic { width: 24px; height: 24px; }
+  .tabBtn.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; animation: btnPop .28s cubic-bezier(.34,1.56,.64,1); color: var(--neon); }
 
   /* ---------- pinceis: grelha responsiva, alvo >=90/72px ---------- */
   #brushes { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
   #brushes button { min-height: 96px; font-size: 12px; font-weight: 700; padding: 8px 4px; }
-  #brushes button .ic { font-size: 32px; line-height: 1; }
+  #brushes button .ic { width: 32px; height: 32px; }
   #brushes button.on {
-    border-color: var(--neon); background: #0f2b26;
+    border-color: var(--neon); background: #0f2b26; color: var(--neon);
     box-shadow: 0 0 0 3px #00ffcc33, 0 0 22px -2px var(--neon);
     animation: btnPop .28s cubic-bezier(.34,1.56,.64,1);
   }
@@ -219,14 +238,14 @@
   #sizes { display: flex; gap: 10px; justify-content: center; }
   #sizes button { flex: 1; min-height: 90px; }
   #sizes button .dot { border-radius: 50%; background: var(--neon); }
-  #sizes button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; animation: btnPop .28s cubic-bezier(.34,1.56,.64,1); }
+  #sizes button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; animation: btnPop .28s cubic-bezier(.34,1.56,.64,1); color: var(--neon); }
   #sizes button .lbl { font-size: 11px; color: var(--muted); font-weight: 700; }
 
   /* ---------- simetria: segmentado ---------- */
   #mirrors { display: flex; gap: 10px; }
   #mirrors button { flex: 1; min-height: 90px; font-size: 15px; font-weight: 800; }
-  #mirrors button .ic { font-size: 26px; }
-  #mirrors button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; animation: btnPop .28s cubic-bezier(.34,1.56,.64,1); }
+  #mirrors button .ic { width: 26px; height: 26px; }
+  #mirrors button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; animation: btnPop .28s cubic-bezier(.34,1.56,.64,1); color: var(--neon); }
 
   /* ---------- pré-visualização ---------- */
   #previewWrap { display: flex; align-items: center; gap: 10px; }
@@ -239,21 +258,21 @@
      o texto pequeno diz a ação (o que acontece ao tocar). Mesma lógica de sempre
      (abre/fecha #drawScreen, ver JS) — só comunicação. */
   #drawModeBtn { width: 100%; min-height: 88px; font-size: 15px; font-weight: 800; gap: 2px; }
-  #drawModeBtn .ic { font-size: 28px; }
+  #drawModeBtn .ic { width: 28px; height: 28px; }
   #drawModeBtn .modeLabel { font-family: var(--font-display); font-size: 17px; font-weight: 700; letter-spacing: .01em; }
   /* hint pequeno fica no sans do sistema (não Baloo 2) — a 11px a display
      face perde nitidez; #grpActions button já herdaria --font-display */
   #drawModeBtn .modeHint { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; font-size: 11px; font-weight: 600; color: var(--muted); }
   /* modo ATIVO = hand tracking (omissão): azul "mãos", ação oferecida = desenhar */
-  #drawModeBtn.mode-hands { background: linear-gradient(160deg, #0f1f36, #1a1e2ac0); border-color: var(--hands); box-shadow: 0 0 0 3px #2f8fff2e, 0 0 20px -4px var(--hands); }
+  #drawModeBtn.mode-hands { background: linear-gradient(160deg, #0f1f36, #1a1e2ac0); border-color: var(--hands); box-shadow: 0 0 0 3px #2f8fff2e, 0 0 20px -4px var(--hands); color: var(--hands); }
   #drawModeBtn.mode-hands .modeHint { color: #bcdcff; }
   /* modo ATIVO = desenho no tablet: verde-néon (mesma cor "on" do resto do painel),
      ação oferecida = voltar às mãos */
-  #drawModeBtn.mode-draw { background: linear-gradient(160deg, #0f2a1f, #1a1e2ac0); border-color: var(--neon); box-shadow: 0 0 0 3px #00ffcc33, 0 0 20px -4px var(--neon); }
+  #drawModeBtn.mode-draw { background: linear-gradient(160deg, #0f2a1f, #1a1e2ac0); border-color: var(--neon); box-shadow: 0 0 0 3px #00ffcc33, 0 0 20px -4px var(--neon); color: var(--neon); }
   #drawModeBtn.mode-draw .modeHint { color: #a8f5e4; }
   #actions { display: flex; gap: 10px; }
   #photoBtn { flex: 1; min-height: 100px; font-size: 16px; font-weight: 800; background: linear-gradient(160deg, #2a1f00, #1a1e2ac0); border-color: #ffd23f55; }
-  #photoBtn .ic { font-size: 34px; }
+  #photoBtn .ic { width: 34px; height: 34px; }
   /* tempero festival: glow pulsante no botão da foto, para chamar o olhar */
   @keyframes photoGlow { 0%, 100% { box-shadow: 0 0 14px -4px #ffd23f77; } 50% { box-shadow: 0 0 26px -2px #ffd23fdd; } }
   #photoBtn { animation: photoGlow 2.6s ease-in-out infinite; }
@@ -265,15 +284,15 @@
      dourado=foto, vermelho=limpar já em uso) — grupo de ações lê-se como
      grupo mesmo à distância. */
   #historyActions button { flex: 1; min-height: 90px; font-size: 14px; font-weight: 800; background: linear-gradient(160deg, #101a2ac0, #1a1e2ac0); border-color: #3d4a6655; }
-  #historyActions button .ic { font-size: 30px; }
+  #historyActions button .ic { width: 30px; height: 30px; }
   #clearRow { display: flex; gap: 10px; }
   #clearRow button { flex: 1; min-height: 100px; font-size: 16px; font-weight: 800; }
   #clearRow button[hidden] { display: none; }
   #clearBtn { background: linear-gradient(160deg, #2a0f14, #1a1e2ac0); border-color: #ff4d5555; }
-  #clearBtn .ic { font-size: 34px; }
+  #clearBtn .ic { width: 34px; height: 34px; }
   #clearBtn.confirm { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
   #clearDrawBtn, #clearAllBtn { font-size: 14px; font-weight: 800; }
-  #clearDrawBtn .ic, #clearAllBtn .ic { font-size: 30px; }
+  #clearDrawBtn .ic, #clearAllBtn .ic { width: 30px; height: 30px; }
   #clearDrawBtn { background: linear-gradient(160deg, #0f1f2a, #1a1e2ac0); border-color: #00c8ff55; }
   #clearAllBtn { background: #3a0f14; border-color: #ff4d55; box-shadow: 0 0 22px -2px #ff4d55; }
 
@@ -287,6 +306,7 @@
     background: #1a1e2a99; border: 1px solid var(--line); opacity: .45;
     font-size: 18px; padding: 0; touch-action: none;
   }
+  #adminGearBtn .ic { width: 20px; height: 20px; }
   #adminGearBtn::before {
     content: ""; position: absolute; inset: -2px; border-radius: 50%;
     background: conic-gradient(var(--neon) calc(var(--p, 0) * 1%), transparent 0);
@@ -340,7 +360,7 @@
 
     #brushes { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr); width: 100%; height: 100%; }
     #brushes button { min-height: 0; height: 100%; }
-    #brushes button .ic { font-size: clamp(22px, 3.4vmin, 38px); }
+    #brushes button .ic { width: clamp(22px, 3.4vmin, 38px); height: clamp(22px, 3.4vmin, 38px); }
 
     #colors { display: grid; grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(3, 1fr); width: 100%; height: 100%; place-items: center; }
     /* min-height:0 é o essencial aqui: um item de grid com aspect-ratio tem
@@ -424,20 +444,23 @@
     position: absolute; right: 8px; bottom: 8px; z-index: 2;
     min-height: 0; height: auto; background: #1a1e2ac0; border: 1px solid var(--line);
     border-radius: 8px; padding: 5px 10px; font-size: 11px; font-weight: 800;
+    flex-direction: row; gap: 4px; /* botão base é column; este é ícone+texto lado a lado */
   }
+  .zoom-reset-btn .ic { width: 14px; height: 14px; }
   #adminCanvas {
     width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 12px;
     touch-action: none; display: block;
   }
   #adminActions { display: flex; flex-wrap: wrap; gap: 10px; }
   #adminActions button { flex: 1; min-width: 90px; min-height: 60px; font-size: 12px; font-weight: 800; }
+  #adminActions button .ic { width: 22px; height: 22px; }
   #adminActions button:disabled { opacity: .35; }
   #zoneAddBtn, #zoneCircleBtn { border-color: #00ffcc55; }
   #zoneDelBtn, #zonePointDelBtn { border-color: #ff4d5555; }
-  #zoneCurveBtn.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
+  #zoneCurveBtn.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; color: var(--neon); }
   #zoneTypeBtn.mode-include { border-color: #00dc7855; }
   #zoneTypeBtn.mode-occlude { border-color: #ff4d5555; }
-  #zoneDoneBtn { border-color: #00ffcc; background: #0f2b26; flex-basis: 100%; }
+  #zoneDoneBtn { border-color: #00ffcc; background: #0f2b26; flex-basis: 100%; color: var(--neon); }
   #refImgBtn.confirm { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
   /* FIX F5: mesmo aviso visual de "confirm" reused no botão Guardar quando o slug colide com outro nome */
   #buildingsSaveBtn.confirm { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
@@ -453,8 +476,9 @@
   #warpNSelect button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
   #warpActions { display: flex; flex-wrap: wrap; gap: 10px; }
   #warpActions button { flex: 1; min-width: 90px; min-height: 60px; font-size: 12px; font-weight: 800; }
+  #warpActions button .ic { width: 22px; height: 22px; }
   #warpTestBtn.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
-  #warpDoneBtn { border-color: #00ffcc; background: #0f2b26; flex-basis: 100%; }
+  #warpDoneBtn { border-color: #00ffcc; background: #0f2b26; flex-basis: 100%; color: var(--neon); }
   #buildingsOpenBtn { border-color: #00ffcc55; }
 
   /* ---------- overlay admin: 💾 edifícios (presets nomeados) — 3º ecrã do admin ---------- */
@@ -463,7 +487,8 @@
   #buildingsList { display: flex; flex-direction: column; gap: 8px; max-height: 42vh; overflow-y: auto; }
   .building-row { display: flex; align-items: center; gap: 8px; background: #1a1e2ac0; border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; }
   .building-name { flex: 1; font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .building-row button { min-width: 84px; min-height: 48px; padding: 6px 10px; font-size: 12px; font-weight: 800; flex-direction: row; }
+  .building-row button { min-width: 84px; min-height: 48px; padding: 6px 10px; font-size: 12px; font-weight: 800; flex-direction: row; gap: 6px; }
+  .building-row button .ic { width: 18px; height: 18px; }
   .building-row button.building-del { border-color: #ff4d5555; min-width: 48px; }
   .building-row button.building-del.confirm { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
   #buildingsSaveWarn { color: #ffd23f; font-size: 12px; text-align: center; margin: 0; }
@@ -474,12 +499,14 @@
     background: #1a1e2ac0; color: var(--text); padding: 0 14px; font-size: 14px; font-family: inherit;
   }
   #buildingsSaveRow button { min-width: 130px; min-height: 54px; font-size: 12px; font-weight: 800; border-color: #00ffcc55; }
+  #buildingsSaveRow button .ic { width: 20px; height: 20px; }
   #buildingsActions { display: flex; gap: 10px; }
   #buildingsActions button { flex: 1; min-height: 54px; font-size: 12px; font-weight: 800; }
+  #buildingsActions button .ic { width: 20px; height: 20px; }
 
   /* ---------- seletor: áreas de desenho (verde) vs zonas de oclusão (vermelho) ---------- */
   #zoneModeSelect { display: flex; gap: 8px; }
-  #zoneModeSelect button { flex: 1; min-height: 54px; font-size: 13px; font-weight: 800; }
+  #zoneModeSelect button { flex: 1; min-height: 54px; font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 8px; }
   #zoneModeSelect button[data-mode="include"].on { border-color: #00dc78; background: #0a2b1c; box-shadow: 0 0 0 3px #00dc7833; }
   #zoneModeSelect button[data-mode="occlude"].on { border-color: #ff4d55; background: #3a0f14; box-shadow: 0 0 22px -2px #ff4d55; }
 
@@ -504,7 +531,8 @@
     padding: 6px 8px; overflow-x: auto; background: #0c0e14cc; border-bottom: 1px solid var(--line);
   }
   #drawTop button { min-width: 44px; min-height: 44px; flex: 0 0 auto; padding: 0; font-size: 20px; }
-  #drawTop button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
+  #drawTop button .ic { width: 22px; height: 22px; }
+  #drawTop button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; color: var(--neon); }
   #drawSide {
     grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 8px;
     padding: 8px 6px; overflow: hidden; background: #0c0e14cc; border-right: 1px solid var(--line);
@@ -531,17 +559,198 @@
   /* barra de ações primária (desfazer/refazer/foto/limpar/fechar) do ecrã de
      desenho — alvo ≥72px como o resto do painel (linha subiu para 88px acima) */
   #drawBottom button { flex: 1; min-height: 72px; font-size: 12px; font-weight: 800; }
-  #drawCloseBtn { border-color: var(--hands); }
+  #drawBottom button .ic { width: 26px; height: 26px; }
+  #drawCloseBtn { border-color: var(--hands); color: var(--hands); }
 </style>
 </head>
 <body>
+  <!-- ================= sprite de ícones de linha (redesign: substitui os
+       emojis usados como ícone — Chrome/iPadOS/Android desenham cada emoji de
+       forma diferente e nunca combinam). UM único conjunto de regras para
+       todos: viewBox 24×24, fill:none, stroke:currentColor (a cor vem do CSS
+       do botão, não do símbolo — ver .ic abaixo), mesmo stroke-width em todos.
+       Definido UMA VEZ aqui (<symbol>+<use>) para não inchar o HTML dos
+       botões: cada botão só referencia "#ic-nome", nunca repete o path.
+       Os emojis dos CARIMBOS desenhados no canvas (STAMP_EMOJIS*) são
+       conteúdo do desenho, não ícones — não têm entrada aqui, MUST NOT tocar. -->
+  <svg style="display:none" aria-hidden="true">
+    <defs>
+      <!-- pincéis -->
+      <symbol id="ic-neon" viewBox="0 0 24 24"><path d="M13 2 5 14h6l-2 8 10-12h-6l2-8z"/></symbol>
+      <symbol id="ic-rainbow" viewBox="0 0 24 24">
+        <path d="M3 18a9 9 0 0 1 18 0"/>
+        <path d="M6.5 18a5.5 5.5 0 0 1 11 0"/>
+        <path d="M10 18a2 2 0 0 1 4 0"/>
+        <path d="M2 18h20"/>
+      </symbol>
+      <symbol id="ic-glitter" viewBox="0 0 24 24">
+        <path d="M12 2c0 5 1 8 8 10-7 2-8 5-8 10 0-5-1-8-8-10 7-2 8-5 8-10z"/>
+        <path d="M19 3c0 1.5.3 2.4 2 3-1.7.6-2 1.5-2 3 0-1.5-.3-2.4-2-3 1.7-.6 2-1.5 2-3z"/>
+      </symbol>
+      <!-- carimbos: base larga "impressa" + cabo estreito — silhueta de carimbo de borracha, nunca confundível com um pincel -->
+      <symbol id="ic-stamp" viewBox="0 0 24 24">
+        <rect x="10" y="3" width="4" height="4" rx="1"/>
+        <path d="M8 10h8l2 7H6l2-7z"/>
+        <rect x="4" y="19" width="16" height="3" rx="1"/>
+      </symbol>
+      <!-- spray: lata larga e curta + nuvem de tracinhos (névoa) — nunca um cilindro estreito como caneta/marcador -->
+      <symbol id="ic-spray" viewBox="0 0 24 24">
+        <path d="M5 5 7 3"/>
+        <rect x="7" y="4" width="4" height="3" rx="1"/>
+        <rect x="6" y="7" width="9" height="14" rx="2"/>
+        <path d="M17 8h2M18.5 11h2M17 14h2"/>
+      </symbol>
+      <!-- marcador: DIAGONAL (corpo inclinado + rasto da ponta em baixo). O barril
+           vertical anterior lia-se como um copo e ficava perto do lápis de cera;
+           a inclinação separa as duas silhuetas de imediato, mesmo a 20px. -->
+      <symbol id="ic-marker" viewBox="0 0 24 24">
+        <path d="M20.4 12.6 15.8 17.2a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L12.4 4.6"/>
+        <path d="m7.4 11.4-4 4V19h5.6l3-3"/>
+      </symbol>
+      <!-- lápis de cera: pontas do papel torcido (picos) no topo + PONTA EM BICO (triângulo) no fundo — silhueta oposta à do marcador de propósito -->
+      <symbol id="ic-crayon" viewBox="0 0 24 24">
+        <path d="M7 6 9 3h6l2 3"/>
+        <path d="M8 6h8v7l-4 9-4-9V6z"/>
+      </symbol>
+      <!-- borracha: bloco biselado (paralelogramo) com costura — nunca um cilindro/ponta como os outros pincéis -->
+      <symbol id="ic-eraser" viewBox="0 0 24 24">
+        <path d="M8 21 3 16l9-9 8 8-6 6H8z"/>
+        <path d="M13 8l6 6"/>
+        <path d="M5 18h8"/>
+      </symbol>
+      <!-- ações -->
+      <symbol id="ic-hand" viewBox="0 0 24 24">
+        <path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12"/>
+        <path d="M11 12V4.5a1.5 1.5 0 0 1 3 0V12"/>
+        <path d="M14 12.5V6a1.5 1.5 0 0 1 3 0v7"/>
+        <path d="M17 13V9a1.5 1.5 0 0 1 3 0v6c0 3.9-2.7 7-6.5 7C10 22 8 20 6.5 18L4 14.2c-.5-.8-.2-1.8.6-2.2.7-.4 1.6-.2 2.1.5L8 14"/>
+      </symbol>
+      <symbol id="ic-pen" viewBox="0 0 24 24">
+        <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+        <path d="M15 5l4 4"/>
+      </symbol>
+      <symbol id="ic-camera" viewBox="0 0 24 24">
+        <path d="M4 8a1 1 0 0 1 1-1h2l1.5-2h7L17 7h2a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8z"/>
+        <circle cx="12" cy="13" r="3.5"/>
+      </symbol>
+      <symbol id="ic-undo" viewBox="0 0 24 24">
+        <path d="M9 14 4 9l5-5"/>
+        <path d="M4 9h10.5A5.5 5.5 0 0 1 20 14.5v0A5.5 5.5 0 0 1 14.5 20H10"/>
+      </symbol>
+      <symbol id="ic-redo" viewBox="0 0 24 24">
+        <path d="M15 14l5-5-5-5"/>
+        <path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H14"/>
+      </symbol>
+      <symbol id="ic-trash" viewBox="0 0 24 24">
+        <path d="M4 7h16"/>
+        <path d="M9 7V4h6v3"/>
+        <path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/>
+        <path d="M10 11v6M14 11v6"/>
+      </symbol>
+      <symbol id="ic-brush" viewBox="0 0 24 24">
+        <path d="M4 20c0-3 1-5 3-5s3 2 3 5"/>
+        <path d="M9 15 18 6a2 2 0 0 0-3-3L6 12"/>
+        <path d="M6 12l2 2"/>
+      </symbol>
+      <symbol id="ic-palette" viewBox="0 0 24 24">
+        <path d="M12 3a9 8 0 1 0 0 16c1.2 0 2-.8 2-2 0-.6-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.2 0-1 .8-1.5 2-1.5h2c2 0 3.5-1.5 3.5-4C20.5 5.7 16.7 3 12 3z"/>
+        <circle cx="8" cy="10.5" r="1"/>
+        <circle cx="8.5" cy="14.5" r="1"/>
+        <circle cx="12" cy="8" r="1"/>
+        <circle cx="15.5" cy="9.5" r="1"/>
+      </symbol>
+      <symbol id="ic-magic" viewBox="0 0 24 24">
+        <path d="M4 20 15 9"/>
+        <path d="M13 3l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"/>
+        <path d="M19 12l.5 1.5L21 14l-1.5.5L19 16l-.5-1.5L17 14l1.5-.5.5-1.5z"/>
+      </symbol>
+      <symbol id="ic-size" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9"/>
+        <circle cx="12" cy="12" r="4"/>
+      </symbol>
+      <symbol id="ic-symmetry" viewBox="0 0 24 24">
+        <path d="M12 3v18"/>
+        <path d="M4.5 7.5l15 9"/>
+        <path d="M19.5 7.5l-15 9"/>
+      </symbol>
+      <symbol id="ic-close" viewBox="0 0 24 24"><path d="M5 5l14 14M19 5 5 19"/></symbol>
+      <symbol id="ic-eye" viewBox="0 0 24 24">
+        <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/>
+        <circle cx="12" cy="12" r="3"/>
+      </symbol>
+      <symbol id="ic-gear" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3"/>
+        <circle cx="12" cy="12" r="7.5"/>
+        <path d="M12 2v3M12 19v3M22 12h-3M5 12H2M19.1 4.9l-2.1 2.1M7 15l-2.1 2.1M19.1 19.1l-2.1-2.1M7 9 4.9 4.9"/>
+      </symbol>
+      <!-- admin/editores -->
+      <symbol id="ic-zone" viewBox="0 0 24 24">
+        <path d="M6 4h9l6 6v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" stroke-dasharray="2.5 2.5"/>
+      </symbol>
+      <!-- grelha de teste do warp: grelha reta (contraste com ic-warp, que é a mesma grelha deformada) -->
+      <symbol id="ic-grid" viewBox="0 0 24 24">
+        <path d="M3 3h18v18H3z"/>
+        <path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>
+      </symbol>
+      <!-- reset: seta circular anti-horária -->
+      <symbol id="ic-reset" viewBox="0 0 24 24">
+        <path d="M3 12a9 9 0 1 0 2.6-6.4"/>
+        <path d="M3 4v5h5"/>
+      </symbol>
+      <symbol id="ic-warp" viewBox="0 0 24 24">
+        <path d="M3 3h18v18H3z"/>
+        <path d="M3 9c4 0 5 2 9 2s5-2 9-2"/>
+        <path d="M3 15c4 0 5-2 9-2s5 2 9 2"/>
+        <path d="M9 3c0 4 2 5 2 9s-2 5-2 9"/>
+        <path d="M15 3c0 4-2 5-2 9s2 5 2 9"/>
+      </symbol>
+      <symbol id="ic-building" viewBox="0 0 24 24">
+        <path d="M4 21V9l8-5 8 5v12"/>
+        <path d="M4 21h16"/>
+        <path d="M9 21v-5h6v5"/>
+        <path d="M9 10h2M13 10h2M9 14h2M13 14h2"/>
+      </symbol>
+      <symbol id="ic-save" viewBox="0 0 24 24">
+        <path d="M5 3h11l3 3v15H5V3z"/>
+        <path d="M8 3v5h8V3"/>
+        <path d="M7 21v-7h10v7"/>
+      </symbol>
+      <symbol id="ic-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="ic-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></symbol>
+      <symbol id="ic-image" viewBox="0 0 24 24">
+        <rect x="3" y="4" width="18" height="16" rx="2"/>
+        <circle cx="8.5" cy="9.5" r="1.75"/>
+        <path d="M3 16l5-5 4 4 3-3 6 6"/>
+      </symbol>
+      <symbol id="ic-curve" viewBox="0 0 24 24">
+        <path d="M4 19C4 10 10 5 20 5"/>
+        <circle cx="4" cy="19" r="1.5"/>
+        <circle cx="20" cy="5" r="1.5"/>
+      </symbol>
+      <symbol id="ic-toggle" viewBox="0 0 24 24">
+        <path d="M4 12a8 8 0 0 1 14-5.3M20 4v4h-4"/>
+        <path d="M20 12a8 8 0 0 1-14 5.3M4 20v-4h4"/>
+      </symbol>
+      <symbol id="ic-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+      <symbol id="ic-check" viewBox="0 0 24 24"><path d="M4 13l5 5L20 6"/></symbol>
+      <symbol id="ic-back" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+      <symbol id="ic-zoomreset" viewBox="0 0 24 24">
+        <path d="M4 9V6a2 2 0 0 1 2-2h3"/>
+        <path d="M15 4h3a2 2 0 0 1 2 2v3"/>
+        <path d="M20 15v3a2 2 0 0 1-2 2h-3"/>
+        <path d="M9 20H6a2 2 0 0 1-2-2v-3"/>
+      </symbol>
+    </defs>
+  </svg>
   <a id="back" href="index.html">← voltar</a>
   <!-- barra de estado: persistente e acessível nos dois layouts (fixed) — em
        telemóvel é a única pista do pincel/cor/tamanho atuais quando a página
        correspondente não está à vista (ver #panelRoot/.page abaixo) -->
   <div id="status">
-    <span id="statusChip"><span id="statusChipIc">✨</span><span id="statusChipDot" class="chipdot"></span><span id="statusChipSize">14px</span></span>
-    <span id="statusConn">🟡 só local</span>
+    <span id="statusChip"><span id="statusChipIc"><svg class="ic"><use id="statusChipUse" href="#ic-neon"></use></svg></span><span id="statusChipDot" class="chipdot"></span><span id="statusChipSize">14px</span></span>
+    <!-- estado da ligação: ponto de cor (.chipdot, o mesmo do chip de tamanho) em
+         vez de emoji — coerente com o resto do painel, sem depender da fonte do SO -->
+    <span id="statusConn"><span id="statusConnDot" class="chipdot"></span><span id="statusConnTxt">só local</span></span>
   </div>
 
   <!-- ================= ecrã principal: 3 "páginas" (mesmos elementos/ids nos
@@ -550,27 +759,27 @@
   <div id="panelRoot">
     <div class="page" id="pageBrushes" data-page="brushes">
       <section class="grp" id="grpBrushes">
-        <h2 class="section">✏️ Pincéis</h2>
+        <h2 class="section"><svg class="ic"><use href="#ic-brush"></use></svg><span>Pincéis</span></h2>
         <div class="card"><div id="brushes"></div></div>
       </section>
       <section class="grp" id="grpSizes">
-        <h2 class="section">⚪ Tamanho</h2>
+        <h2 class="section"><svg class="ic"><use href="#ic-size"></use></svg><span>Tamanho</span></h2>
         <div class="card"><div id="sizes"></div></div>
       </section>
     </div>
     <div class="page" id="pageColors" data-page="colors">
       <section class="grp" id="grpColors">
-        <h2 class="section">🎨 Cores</h2>
+        <h2 class="section"><svg class="ic"><use href="#ic-palette"></use></svg><span>Cores</span></h2>
         <div class="card"><div id="colors"></div></div>
       </section>
       <section class="grp" id="grpMirrors">
-        <h2 class="section">❄️ Simetria</h2>
+        <h2 class="section"><svg class="ic"><use href="#ic-symmetry"></use></svg><span>Simetria</span></h2>
         <div class="card"><div id="mirrors"></div></div>
       </section>
     </div>
     <div class="page" id="pageMagic" data-page="magic">
       <section class="grp" id="grpPreview">
-        <h2 class="section">👁️ Pré-visualização</h2>
+        <h2 class="section"><svg class="ic"><use href="#ic-eye"></use></svg><span>Pré-visualização</span></h2>
         <div class="card" id="previewWrap"><canvas id="preview"></canvas></div>
       </section>
       <section class="grp" id="grpActions">
@@ -578,21 +787,21 @@
              ATIVO (renderModeBtn, no JS) — conteúdo inicial aqui é só o estado por
              omissão (hand tracking), evita FOUC antes do 1º render -->
         <button id="drawModeBtn" class="mode-hands">
-          <span class="ic">✋</span>
+          <svg class="ic"><use href="#ic-hand"></use></svg>
           <span class="modeLabel">Mãos</span>
           <span class="modeHint">toca para desenhar no tablet</span>
         </button>
         <div id="actions">
-          <button id="photoBtn"><span class="ic">📸</span><span>Foto</span></button>
+          <button id="photoBtn"><svg class="ic"><use href="#ic-camera"></use></svg><span>Foto</span></button>
         </div>
         <div id="historyActions">
-          <button id="undoBtn"><span class="ic">↩️</span><span>Desfazer</span></button>
-          <button id="redoBtn"><span class="ic">↪️</span><span>Refazer</span></button>
+          <button id="undoBtn"><svg class="ic"><use href="#ic-undo"></use></svg><span>Desfazer</span></button>
+          <button id="redoBtn"><svg class="ic"><use href="#ic-redo"></use></svg><span>Refazer</span></button>
         </div>
         <div id="clearRow">
-          <button id="clearBtn"><span class="ic">🗑</span><span>Limpar</span></button>
-          <button id="clearDrawBtn" hidden><span class="ic">🖌</span><span>Limpar desenho</span></button>
-          <button id="clearAllBtn" hidden><span class="ic">🗑</span><span>Limpar tudo</span></button>
+          <button id="clearBtn"><svg class="ic"><use href="#ic-trash"></use></svg><span>Limpar</span></button>
+          <button id="clearDrawBtn" hidden><svg class="ic"><use href="#ic-brush"></use></svg><span>Limpar desenho</span></button>
+          <button id="clearAllBtn" hidden><svg class="ic"><use href="#ic-trash"></use></svg><span>Limpar tudo</span></button>
         </div>
       </section>
     </div>
@@ -600,42 +809,44 @@
 
   <!-- tab bar: só visível em retrato estreito (telemóvel) — landscape esconde-a via CSS -->
   <div id="tabBar">
-    <button class="tabBtn" data-tabtarget="brushes">🖌<br>Pincéis</button>
-    <button class="tabBtn" data-tabtarget="colors">🎨<br>Cores</button>
-    <button class="tabBtn" data-tabtarget="magic">✨<br>Magia</button>
+    <button class="tabBtn" data-tabtarget="brushes"><svg class="ic"><use href="#ic-brush"></use></svg><span>Pincéis</span></button>
+    <button class="tabBtn" data-tabtarget="colors"><svg class="ic"><use href="#ic-palette"></use></svg><span>Cores</span></button>
+    <button class="tabBtn" data-tabtarget="magic"><svg class="ic"><use href="#ic-magic"></use></svg><span>Magia</span></button>
   </div>
 
   <footer>Magic Draw · painel touch</footer>
-  <button id="adminGearBtn" aria-label="Modo admin: zonas de oclusão (mantém premido 3s)">⚙️</button>
+  <button id="adminGearBtn" aria-label="Modo admin: zonas de oclusão (mantém premido 3s)"><svg class="ic"><use href="#ic-gear"></use></svg></button>
 
   <!-- ================= overlay admin: zonas (áreas de desenho + oclusão) ================= -->
   <div id="adminOverlay" hidden>
     <div class="admin-panel admin-panel-wide">
-      <h2 class="section">🪟 Zonas</h2>
+      <h2 class="section"><svg class="ic"><use href="#ic-zone"></use></svg><span>Zonas</span></h2>
+      <!-- verde = áreas de desenho, vermelho = oclusão: ponto de cor (.chipdot,
+           o mesmo das swatches e do pill de estado) em vez de emoji -->
       <div id="zoneModeSelect">
-        <button id="zoneModeIncludeBtn" data-mode="include">🟢 Áreas de desenho</button>
-        <button id="zoneModeOccludeBtn" data-mode="occlude">🔴 Zonas de oclusão</button>
+        <button id="zoneModeIncludeBtn" data-mode="include"><span class="chipdot" style="background:#3ddc97"></span>Áreas de desenho</button>
+        <button id="zoneModeOccludeBtn" data-mode="occlude"><span class="chipdot" style="background:#ff4d55"></span>Zonas de oclusão</button>
       </div>
       <p class="hint">verde = onde se pode pintar (contorno da casa) · vermelho = tapado (janelas, portas)</p>
       <div class="zoom-wrap">
         <canvas id="adminCanvas"></canvas>
         <span id="adminZoomBadge" class="zoom-badge">1.0×</span>
-        <button id="adminZoomResetBtn" class="zoom-reset-btn" type="button">⤢ Repor</button>
+        <button id="adminZoomResetBtn" class="zoom-reset-btn" type="button"><svg class="ic"><use href="#ic-zoomreset"></use></svg>Repor</button>
       </div>
       <p class="hint">Roda o rato/trackpad (pinch) para dar zoom e afinar pontos · 2 dedos = zoom+pan · arrasta um vértice para moldar · toca num "+" da aresta para inserir ponto · toca dentro para selecionar/mover</p>
       <div id="adminActions">
-        <button id="zoneAddBtn">➕<br>Criar zona</button>
-        <button id="zoneCircleBtn">⭕<br>Criar círculo</button>
-        <button id="refImgBtn">🖼<br>Imagem</button>
-        <button id="zoneCurveBtn" disabled>◠<br>Curvas</button>
-        <button id="zoneTypeBtn" disabled>🔁<br>Tipo</button>
-        <button id="zonePointDelBtn" disabled>−<br>Ponto</button>
-        <button id="zoneDelBtn" disabled>🗑<br>Apagar</button>
-        <button id="zoneUndoBtn" disabled>↩️<br>Desfazer</button>
-        <button id="zoneRedoBtn" disabled>↪️<br>Refazer</button>
-        <button id="warpOpenBtn">📐<br>Warp</button>
-        <button id="buildingsOpenBtn">💾<br>Edifícios</button>
-        <button id="zoneDoneBtn">✔<br>Concluir</button>
+        <button id="zoneAddBtn"><svg class="ic"><use href="#ic-plus"></use></svg><br>Criar zona</button>
+        <button id="zoneCircleBtn"><svg class="ic"><use href="#ic-circle"></use></svg><br>Criar círculo</button>
+        <button id="refImgBtn"><svg class="ic"><use href="#ic-image"></use></svg><br>Imagem</button>
+        <button id="zoneCurveBtn" disabled><svg class="ic"><use href="#ic-curve"></use></svg><br>Curvas</button>
+        <button id="zoneTypeBtn" disabled><svg class="ic"><use href="#ic-toggle"></use></svg><br>Tipo</button>
+        <button id="zonePointDelBtn" disabled><svg class="ic"><use href="#ic-minus"></use></svg><br>Ponto</button>
+        <button id="zoneDelBtn" disabled><svg class="ic"><use href="#ic-trash"></use></svg><br>Apagar</button>
+        <button id="zoneUndoBtn" disabled><svg class="ic"><use href="#ic-undo"></use></svg><br>Desfazer</button>
+        <button id="zoneRedoBtn" disabled><svg class="ic"><use href="#ic-redo"></use></svg><br>Refazer</button>
+        <button id="warpOpenBtn"><svg class="ic"><use href="#ic-warp"></use></svg><br>Warp</button>
+        <button id="buildingsOpenBtn"><svg class="ic"><use href="#ic-building"></use></svg><br>Edifícios</button>
+        <button id="zoneDoneBtn"><svg class="ic"><use href="#ic-check"></use></svg><br>Concluir</button>
       </div>
     </div>
   </div>
@@ -647,20 +858,20 @@
        (fora de scope, ver nota junto ao warpTool abaixo). ================= -->
   <div id="warpOverlay" hidden>
     <div class="admin-panel admin-panel-wide">
-      <h2 class="section">📐 Warp</h2>
+      <h2 class="section"><svg class="ic"><use href="#ic-warp"></use></svg><span>Warp</span></h2>
       <p class="hint">arrasta os pontos da grelha para deformar a projeção e alinhar com o edifício</p>
       <div id="warpNSelect"></div>
       <div class="zoom-wrap">
         <canvas id="warpCanvas"></canvas>
         <span id="warpZoomBadge" class="zoom-badge">1.0×</span>
-        <button id="warpZoomResetBtn" class="zoom-reset-btn" type="button">⤢ Repor</button>
+        <button id="warpZoomResetBtn" class="zoom-reset-btn" type="button"><svg class="ic"><use href="#ic-zoomreset"></use></svg>Repor</button>
       </div>
       <p class="hint">arrasta um ponto (linha 0 = topo) · zoom com rato/trackpad ou 2 dedos para afinar · N muda a densidade da grelha, preservando os 4 cantos</p>
       <div id="warpActions">
-        <button id="warpTestBtn">🔲<br>Grelha de teste</button>
-        <button id="warpResetBtn">↺<br>Reset</button>
-        <button id="warpBackBtn">←<br>Zonas</button>
-        <button id="warpDoneBtn">✔<br>Concluir</button>
+        <button id="warpTestBtn"><svg class="ic"><use href="#ic-grid"></use></svg><br>Grelha de teste</button>
+        <button id="warpResetBtn"><svg class="ic"><use href="#ic-reset"></use></svg><br>Reset</button>
+        <button id="warpBackBtn"><svg class="ic"><use href="#ic-back"></use></svg><br>Zonas</button>
+        <button id="warpDoneBtn"><svg class="ic"><use href="#ic-check"></use></svg><br>Concluir</button>
       </div>
     </div>
   </div>
@@ -677,16 +888,17 @@
        reemite 'zones'/'warp' pelos canais já existentes. ================= -->
   <div id="buildingsOverlay" hidden>
     <div class="admin-panel">
-      <h2 class="section">💾 Edifícios</h2>
+      <h2 class="section"><svg class="ic"><use href="#ic-building"></use></svg><span>Edifícios</span></h2>
       <p class="hint">setups completos (zonas + warp + imagem) guardados por nome — troca de edifício sem reconfigurar tudo outra vez</p>
       <div id="buildingsList"></div>
+      <!-- ⚠️ "falhou" (aviso, não é botão) fora do inventário de ícones pedido — MUST NOT tocar -->
       <p id="buildingsSaveWarn" hidden>⚠️ imagem de referência não coube (limite ~1.5MB da row) — guardado sem imagem</p>
       <div id="buildingsSaveRow">
         <input id="buildingsNameInput" type="text" placeholder="Guardar atual como…" maxlength="80" />
-        <button id="buildingsSaveBtn">💾<br>Guardar</button>
+        <button id="buildingsSaveBtn"><svg class="ic"><use href="#ic-save"></use></svg><br>Guardar</button>
       </div>
       <div id="buildingsActions">
-        <button id="buildingsBackBtn">←<br>Zonas</button>
+        <button id="buildingsBackBtn"><svg class="ic"><use href="#ic-back"></use></svg><br>Zonas</button>
       </div>
     </div>
   </div>
@@ -701,14 +913,14 @@
     </div>
     <div id="drawCanvasWrap"><canvas id="drawCanvasT"></canvas></div>
     <div id="drawBottom">
-      <button id="drawUndoBtn">↩️</button>
-      <button id="drawRedoBtn">↪️</button>
-      <button id="drawPhotoBtn">📸</button>
-      <button id="drawClearBtn">🗑</button>
+      <button id="drawUndoBtn"><svg class="ic"><use href="#ic-undo"></use></svg></button>
+      <button id="drawRedoBtn"><svg class="ic"><use href="#ic-redo"></use></svg></button>
+      <button id="drawPhotoBtn"><svg class="ic"><use href="#ic-camera"></use></svg></button>
+      <button id="drawClearBtn"><svg class="ic"><use href="#ic-trash"></use></svg></button>
       <!-- eco do indicador de modo (dentro do ecrã de desenho, que tapa o painel
            principal): deixa claro que tocar aqui devolve o controlo às mãos —
            mesmo onclick/comportamento de sempre, só o rótulo mudou -->
-      <button id="drawCloseBtn"><span class="ic">✋</span><span>Mãos</span></button>
+      <button id="drawCloseBtn"><svg class="ic"><use href="#ic-hand"></use></svg><span>Mãos</span></button>
     </div>
   </div>
 
@@ -721,6 +933,11 @@ import { createWarp } from "./warp.js";
    canais: BroadcastChannel local + Supabase Realtime Broadcast.
    ================================================================== */
 const $ = id => document.getElementById(id);
+// ícone de linha (ver <svg><defs><symbol id="ic-..."> no topo do body): gera o
+// <use> em vez de repetir o path — um único ponto para todo o HTML gerado por
+// JS (botões de pincel/simetria/rail de desenho/estado admin), ver .ic no CSS
+// para o dimensionamento (substitui o font-size que os emojis usavam).
+const icSvg = name => `<svg class="ic"><use href="#ic-${name}"></use></svg>`;
 
 /* ================= protocolo de sync ================= */
 /* ?room=X emparelha este tablet com a projeção que abriu o mesmo room —
@@ -763,8 +980,14 @@ let sbConnected = false;
 // aviso enquanto este conjunto não estiver vazio; cada gravação só remove o
 // SEU id.
 const cloudSaveFailedIds = new Set();
+const statusConnDot = $("statusConnDot"), statusConnTxt = $("statusConnTxt");
 function renderStatusPill() {
-  statusEl.textContent = cloudSaveFailedIds.size ? "⚠️ não gravado" : (sbConnected ? "🟢 ligado" : "🟡 só local");
+  // ponto de cor + texto (sem emoji): vermelho = gravação falhada, verde =
+  // Realtime ligado, âmbar = só local. Mesma leitura à distância no evento.
+  const [dot, txt] = cloudSaveFailedIds.size ? ["#ff4d55", "não gravado"]
+    : sbConnected ? ["#3ddc97", "ligado"] : ["#ffd23f", "só local"];
+  statusConnDot.style.background = dot;
+  statusConnTxt.textContent = txt;
 }
 function setCloudSaveFailed(id, failed) {
   const had = cloudSaveFailedIds.has(id);
@@ -924,15 +1147,20 @@ setInterval(sendState, 3000);
 window.__mdDebug = { get rev() { return stateRev; }, get lastSeenRev() { return lastSeenRev; } };
 
 /* ================= pincéis ================= */
+// ic: nome do símbolo em #ic-<nome> (ver <svg><defs> no topo do body), não o
+// emoji — cada um foi desenhado para se distinguir dos outros pela SILHUETA
+// (marcador = ponta plana; lápis de cera = ponta em bico; borracha = bloco
+// biselado; spray = lata + névoa; carimbo = base larga "impressa"), para
+// crianças que ainda não leem reconhecerem o pincel sem depender do rótulo.
 const BRUSHES = [
-  { tool: "neon",    ic: "✨", label: "Néon" },
-  { tool: "rainbow", ic: "🌈", label: "Arco-íris" },
-  { tool: "glitter", ic: "⭐", label: "Brilhos" },
-  { tool: "stamp",   ic: "🦋", label: "Carimbos" },
-  { tool: "spray",   ic: "🎨", label: "Spray" },
-  { tool: "marker",  ic: "🖊️", label: "Marcador" },
-  { tool: "crayon",  ic: "🖍️", label: "Lápis de cera" },
-  { tool: "eraser",  ic: "🧽", label: "Borracha" },
+  { tool: "neon",    ic: "neon",    label: "Néon" },
+  { tool: "rainbow", ic: "rainbow", label: "Arco-íris" },
+  { tool: "glitter", ic: "glitter", label: "Brilhos" },
+  { tool: "stamp",   ic: "stamp",   label: "Carimbos" },
+  { tool: "spray",   ic: "spray",   label: "Spray" },
+  { tool: "marker",  ic: "marker",  label: "Marcador" },
+  { tool: "crayon",  ic: "crayon",  label: "Lápis de cera" },
+  { tool: "eraser",  ic: "eraser",  label: "Borracha" },
 ];
 // selectTool/selectColor/selectRainbow/selectSize: partilhados entre os
 // botões normais (grelhas grandes) e os mini-botões do ecrã de desenho —
@@ -948,7 +1176,7 @@ const brushesEl = $("brushes");
 for (const b of BRUSHES) {
   const btn = document.createElement("button");
   btn.dataset.tool = b.tool;
-  btn.innerHTML = `<span class="ic">${b.ic}</span><span>${b.label}</span>`;
+  btn.innerHTML = `${icSvg(b.ic)}<span>${b.label}</span>`;
   btn.onclick = () => selectTool(b.tool);
   brushesEl.appendChild(btn);
 }
@@ -1031,16 +1259,16 @@ function renderSizes() {
 
 /* ================= simetria ================= */
 const MIRRORS = [
-  { m: 0, ic: "✖️", label: "Off" },
-  { m: 2, ic: "❄️", label: "2×" },
-  { m: 4, ic: "❄️", label: "4×" },
-  { m: 8, ic: "❄️", label: "8×" },
+  { m: 0, ic: "close",     label: "Off" },
+  { m: 2, ic: "symmetry",  label: "2×" },
+  { m: 4, ic: "symmetry",  label: "4×" },
+  { m: 8, ic: "symmetry",  label: "8×" },
 ];
 const mirrorsEl = $("mirrors");
 for (const mv of MIRRORS) {
   const btn = document.createElement("button");
   btn.dataset.mirror = mv.m;
-  btn.innerHTML = `<span class="ic">${mv.ic}</span><span>${mv.label}</span>`;
+  btn.innerHTML = `${icSvg(mv.ic)}<span>${mv.label}</span>`;
   btn.onclick = () => { state.mirror = mv.m; renderMirrors(); bumpRevAndSend(); };
   mirrorsEl.appendChild(btn);
 }
@@ -1165,10 +1393,10 @@ window.addEventListener("resize", renderPreview);
    chamado a partir de renderPreview() porque TODOS os seletores (selectTool/
    selectColor/selectRainbow/selectSize) já a invocam, um único ponto em vez de
    espalhar a chamada por cada handler ================= */
-const statusChipIcEl = $("statusChipIc"), statusChipDotEl = $("statusChipDot"), statusChipSizeEl = $("statusChipSize");
+const statusChipUseEl = $("statusChipUse"), statusChipDotEl = $("statusChipDot"), statusChipSizeEl = $("statusChipSize");
 function renderStatusChip() {
   const b = BRUSHES.find(x => x.tool === state.tool);
-  statusChipIcEl.textContent = b ? b.ic : "✨";
+  statusChipUseEl.setAttribute("href", "#ic-" + (b ? b.ic : "neon"));
   statusChipDotEl.style.background = state.tool === "rainbow"
     ? "conic-gradient(red,orange,yellow,lime,cyan,blue,magenta,red)"
     : state.color;
@@ -1192,7 +1420,7 @@ photoBtn.onclick = () => {
   const t = setInterval(() => {
     n--;
     if (n > 0) { label.textContent = `${n}…`; return; }
-    label.textContent = "📸";
+    label.textContent = "✓"; // fim da contagem — sem emoji, o ícone da câmara já fica visível o tempo todo ao lado
     clearInterval(t);
     setTimeout(() => {
       photoBusy = false;
@@ -1478,7 +1706,7 @@ let refImgConfirmTimer = null;
 function updateRefImgButton() {
   clearTimeout(refImgConfirmTimer);
   refImgBtn.classList.remove("confirm");
-  refImgBtn.innerHTML = refImgDataUrl ? "🗑<br>Imagem" : "🖼<br>Imagem";
+  refImgBtn.innerHTML = refImgDataUrl ? `${icSvg("trash")}<br>Imagem` : `${icSvg("image")}<br>Imagem`;
 }
 refImgBtn.onclick = () => {
   if (!refImgDataUrl) { refImgInput.click(); return; } // sem imagem: abre o seletor de ficheiro
@@ -2532,7 +2760,7 @@ async function renderBuildingsList() {
     };
     const delBtn = document.createElement("button");
     delBtn.className = "building-del";
-    delBtn.textContent = "🗑";
+    delBtn.innerHTML = icSvg("trash");
     let delArmed = false, delTimer = null;
     delBtn.onclick = () => {
       if (delArmed) { // 2º toque: confirma (mesmo padrão de dupla confirmação do resto do admin)
@@ -2544,7 +2772,7 @@ async function renderBuildingsList() {
       delArmed = true;
       delBtn.classList.add("confirm");
       delBtn.textContent = "confirmar?";
-      delTimer = setTimeout(() => { delArmed = false; delBtn.classList.remove("confirm"); delBtn.textContent = "🗑"; }, 3000);
+      delTimer = setTimeout(() => { delArmed = false; delBtn.classList.remove("confirm"); delBtn.innerHTML = icSvg("trash"); }, 3000);
     };
     row.append(nameEl, loadBtn, delBtn);
     buildingsListEl.appendChild(row);
@@ -2684,7 +2912,7 @@ const drawTopEl = $("drawTop"), drawColorsEl = $("drawColors"), drawSizesEl = $(
 for (const b of BRUSHES) {
   const btn = document.createElement("button");
   btn.dataset.tool = b.tool;
-  btn.innerHTML = `<span class="ic">${b.ic}</span>`;
+  btn.innerHTML = icSvg(b.ic);
   btn.title = b.label;
   btn.onclick = () => selectTool(b.tool);
   drawTopEl.appendChild(btn);
@@ -2790,7 +3018,7 @@ const drawModeBtnEl = $("drawModeBtn");
 function renderModeBtn() {
   drawModeBtnEl.classList.toggle("mode-draw", drawScreenOpen);
   drawModeBtnEl.classList.toggle("mode-hands", !drawScreenOpen);
-  drawModeBtnEl.querySelector(".ic").textContent = drawScreenOpen ? "🖊️" : "✋";
+  drawModeBtnEl.querySelector(".ic use").setAttribute("href", drawScreenOpen ? "#ic-pen" : "#ic-hand");
   drawModeBtnEl.querySelector(".modeLabel").textContent = drawScreenOpen ? "Desenho" : "Mãos";
   drawModeBtnEl.querySelector(".modeHint").textContent = drawScreenOpen
     ? "toca para voltar às mãos"
