@@ -852,9 +852,16 @@ void main() {
   }
 
   /* ---- abrir/fechar: tecla P, comando "campreview", botão ✕ / reabrir ---- */
+  // definido dentro do IIFE de arrastar/redimensionar (fitPip), chamado daqui
+  let clampPip = () => {};
   function setPipVisible(on) {
     pipEl.hidden = !on;
     pipReopenEl.hidden = !!on;
+    // Reenquadra ao reabrir (review PR #47): o listener de resize sai cedo
+    // enquanto o preview está escondido, por isso um redimensionamento ou
+    // rotação nesse intervalo deixava-o com left/top de um ecrã que já não
+    // existe — reaparecia fora do ecrã e sem forma de o arrastar de volta.
+    if (on) clampPip();
   }
   function togglePip() { setPipVisible(pipEl.hidden); }
   pipCloseEl.addEventListener("click", e => { e.stopPropagation(); setPipVisible(false); });
@@ -912,13 +919,19 @@ void main() {
     pipResizeEl.addEventListener("pointercancel", endResize);
     pipResizeEl.addEventListener("lostpointercapture", endResize);
 
-    window.addEventListener("resize", () => {
-      if (pipEl.hidden) return;
+    // encolhe se já não couber e volta a prender dentro do ecrã — usado no
+    // resize E ao reabrir o preview (ver setPipVisible/clampPip)
+    function fitPip() {
       if (pipEl.offsetWidth > window.innerWidth - 24) {
         pipEl.style.width = Math.max(200, window.innerWidth - 24) + "px";
       }
       const r = pipEl.getBoundingClientRect();
       placePip(r.left, r.top);
+    }
+    clampPip = fitPip;
+    window.addEventListener("resize", () => {
+      if (pipEl.hidden) return; // escondido: fica para o reabrir, que chama fitPip
+      fitPip();
     });
   })();
 
@@ -1003,6 +1016,12 @@ void main() {
     else if (e.key === "0" || e.key === "Escape") {
       // apaga a caixa; re-arma quando uma mão sumir e as duas voltarem (updateBox)
       hasBox = false; boxCorners = null; boxCleared = true;
+      // Regista já o motivo (review PR #47): com a câmara estagnada, o
+      // updateBox não volta a correr sem um frame novo, e o painel ficava a
+      // mostrar indefinidamente o último motivo — quase sempre "a seguir" —
+      // com a caixa apagada. Diagnóstico a mentir é pior do que não ter.
+      boxReason = "apagada"; rejectedQuad = null;
+      updatePipHud(performance.now()); // repinta já: sem frame novo o tick() não corre e o pill ficava a mentir
     } else if (e.key === "p" || e.key === "P") {
       togglePip(); // NEW: preview de tracking
     }
