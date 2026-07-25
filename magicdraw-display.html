@@ -516,6 +516,10 @@ function handleMsg(payload) {
         photoSeqId++; // FIX 2: invalida a sequência de foto em curso (ver startPhotoSequence) — sem
         // isto, um 'clear' a meio da contagem/flash não impedia o passo final de
         // drawVideoCover(), e a foto "ressuscitava" ~300ms depois de limpar, ao vivo.
+        // ...e aborta JÁ: só invalidar o token deixava a contagem/flash no ecrã
+        // até ~1s (a granularidade do delay), o que ao vivo se lê como "o limpar
+        // não funcionou", e engolia em silêncio um 'photo' pedido nessa janela.
+        if (photoBusy) abortPhotoSequence();
       }
       // cancela traços ATIVOS: senão o rAF seguinte redesenha-os e a largada
       // assava-os — o limpar "ressuscitava" parte do desenho (review PR #35)

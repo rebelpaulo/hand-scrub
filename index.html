@@ -1044,6 +1044,13 @@ function initMappingSync() {
         // "Maximum call stack size exceeded" (18 erros por saída, verificação).
         if (token !== mapSyncToken) return;
         if (status === "SUBSCRIBED") { mapSbReady = true; updateMapIndicator(); mapSend("hello"); }
+        // queda do canal (wifi a soluçar a meio de um evento): sem isto o pill
+        // continuava "🟢 ligado" e o mapSend insistia num canal morto — o
+        // operador só descobria que os comandos não chegavam ao display quando
+        // já nada respondia. Mesmo padrão que magicdraw.html já usava (review).
+        else if (status === "CLOSED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          mapSbReady = false; updateMapIndicator();
+        }
       });
       mapSbChannel = ch;
       mapSbClient = sb;
