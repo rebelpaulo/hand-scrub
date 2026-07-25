@@ -527,6 +527,19 @@
           </div>
         </button>
 
+        <button class="card" type="button" data-accent="amber" data-href="lab.html">
+          <div class="preview"><span class="icon">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V6a2 2 0 0 1 2-2h3"/><path d="M15 4h3a2 2 0 0 1 2 2v3"/><path d="M20 15v3a2 2 0 0 1-2 2h-3"/><path d="M9 20H6a2 2 0 0 1-2-2v-3"/><circle cx="12" cy="12" r="3"/></svg>
+          </span></div>
+          <div class="dwell">
+            <svg aria-hidden="true" viewBox="0 0 46 46"><circle class="track" cx="23" cy="23" r="20"/><circle class="fill" cx="23" cy="23" r="20"/></svg>
+          </div>
+          <div class="body">
+            <h3 class="title">🎞️ Motion Lab</h3>
+            <p class="desc">molda uma caixa com as mãos e o vídeo lá dentro ganha efeito — abre e fecha os dedos para mudar o tamanho</p>
+          </div>
+        </button>
+
       </div>
     </section>
 
@@ -565,6 +578,10 @@
           <button type="button" class="map-card" data-accent="violet" data-app="magicdraw">
             <span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8 19 13"/><path d="M15 9h.01"/><path d="M17.8 6.2 19 5"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/></svg></span>
             <span class="txt"><span class="t">🪄 Magic Draw</span><span class="d">toca para abrir no ecrã</span></span>
+          </button>
+          <button type="button" class="map-card" data-accent="amber" data-app="lab">
+            <span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V6a2 2 0 0 1 2-2h3"/><path d="M15 4h3a2 2 0 0 1 2 2v3"/><path d="M20 15v3a2 2 0 0 1-2 2h-3"/><path d="M9 20H6a2 2 0 0 1-2-2v-3"/><circle cx="12" cy="12" r="3"/></svg></span>
+            <span class="txt"><span class="t">🎞️ Motion Lab</span><span class="d">toca para abrir no ecrã</span></span>
           </button>
         </div>
 
@@ -681,6 +698,7 @@ const EXPERIENCES = [
   { name: "✍️ PINCH DRAW",       accent: "#ff4dd2" },
   { name: "🌬️ ENXAME",          accent: "#cbd5e1" },
   { name: "🪄 MAGIC DRAW",       accent: "#a78bfa" },
+  { name: "🎞️ MOTION LAB",      accent: "#f59e0b" },
 ];
 let expIdx = 0;
 function paintExperience(i) {
@@ -1100,6 +1118,10 @@ const MAP_APPS = {
   magicdraw: {
     title: "🪄 Magic Draw",
     desc: "Desenha diretamente sobre a fachada do edifício, mapeada zona a zona. O controlo do desenho fica no tablet — abre o painel para escolher cores, apagar traços e gerir as zonas da projeção.",
+  },
+  lab: {
+    title: "🎞️ Motion Lab",
+    desc: "Forma uma caixa com as mãos e o vídeo ganha um efeito só lá dentro. Abre os dedos para aumentar a caixa, fecha-os para encolher — a moldura acompanha o gesto em tempo real.",
   },
 };
 // ordem confirmada em scrub.html (const SCENES) — os índices têm de bater certo

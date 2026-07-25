@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Motion Lab — caixa nas mãos</title>
+<style>
+  :root { --panel: #0f1219cc; --line: #2a3245; --text: #eef2f8; --muted: #98a2b6; --hot: #fb7185; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: var(--text); }
+
+  /* vídeo da câmara: nunca é mostrado diretamente — serve só de fonte para a
+     textura WebGL (desenhado, espelhado, no #src, que por sua vez alimenta o
+     shader). Tudo o que o utilizador vê passa pelo #gl. */
+  video#cam { position: fixed; inset: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  canvas#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
+
+  #notice {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 22px; max-width: min(86vw, 440px); text-align: center;
+    font-size: 15px; line-height: 1.5; z-index: 20; backdrop-filter: blur(6px);
+  }
+  #notice[hidden] { display: none; }
+
+  #panel {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    z-index: 10; transition: opacity .5s ease, transform .5s ease; opacity: 1;
+  }
+  #panel.idle { opacity: 0; pointer-events: none; transform: translateX(-50%) translateY(8px); }
+
+  #hint {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 14px; font-size: 12.5px; color: var(--muted); text-align: center;
+    max-width: 90vw;
+  }
+  #hint b { color: var(--text); }
+
+  #buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #buttons button {
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    border-radius: 10px; padding: 9px 14px; font-size: 13px; cursor: pointer;
+    font-family: inherit;
+  }
+  #buttons button.active { background: var(--hot); border-color: var(--hot); color: #1a0a0d; font-weight: 600; }
+
+  #corner {
+    position: fixed; left: 14px; top: 14px; font-size: 11px; color: var(--muted);
+    z-index: 10; opacity: .6; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+  <video id="cam" autoplay playsinline muted></video>
+  <canvas id="gl"></canvas>
+
+  <div id="notice" hidden></div>
+
+  <div id="corner"></div>
+
+  <div id="panel">
+    <div id="hint">
+      Mostra <b>as duas mãos</b> abertas para abrir a caixa entre elas.
+      Abre mais a mão para aumentar a <b>altura</b>, afasta as mãos para aumentar a <b>largura</b>.
+      Esconde uma mão para <b>congelar</b> a caixa.
+      Teclas <b>1–5</b> trocam o efeito, <b>[</b>/<b>]</b> ajustam a densidade, <b>0</b>/<b>Esc</b> apaga a caixa.
+    </div>
+    <div id="buttons">
+      <button data-i="0">1 · ascii</button>
+      <button data-i="1">2 · halftone</button>
+      <button data-i="2">3 · pixelate</button>
+      <button data-i="3">4 · glitch</button>
+      <button data-i="4">5 · nenhum</button>
+    </div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ==========================================================================
+   * MATEMÁTICA PURA (sem DOM) — homografia 3×3 em forma fechada + One Euro.
+   * ========================================================================== */
+
+  // Homografia direta que leva o quadrado unitário (u,v) aos 4 cantos do
+  // quad em pixels de ecrã: (0,0)->p0=TL, (1,0)->p1=TR, (1,1)->p2=BR, (0,1)->p3=BL.
+  // Fórmula fechada clássica (Heckbert, "Fundamentals of Texture Mapping and
+  // Image Warping", 1989, apêndice): resolve os 8 graus de liberdade de uma
+  // projetividade a partir de 4 correspondências de pontos, sem iteração.
+  // Devolve M em row-major: [a,b,c, d,e,f, g,h,1] tal que
+  //   [x*w, y*w, w]^T = M · [u, v, 1]^T
+  function computeForwardHomography(p0, p1, p2, p3) {
+    const dx1 = p1.x - p2.x, dx2 = p3.x - p2.x, dx3 = p0.x - p1.x + p2.x - p3.x;
+    const dy1 = p1.y - p2.y, dy2 = p3.y - p2.y, dy3 = p0.y - p1.y + p2.y - p3.y;
+    let g = 0, h = 0;
+    if (Math.abs(dx3) > 1e-9 || Math.abs(dy3) > 1e-9) {
+      // quad não é um paralelogramo — precisa dos termos projetivos g,h
+      const den = dx1 * dy2 - dx2 * dy1;
+      g = (dx3 * dy2 - dx2 * dy3) / den;
+      h = (dx1 * dy3 - dx3 * dy1) / den;
+    }
+    const a = p1.x - p0.x + g * p1.x, b = p3.x - p0.x + h * p3.x, c = p0.x;
+    const d = p1.y - p0.y + g * p1.y, e = p3.y - p0.y + h * p3.y, f = p0.y;
+    return [a, b, c, d, e, f, g, h, 1];
+  }
+
+  // Inversa de uma 3×3 genérica (adjugate/det) — devolve null se singular
+  // (cantos degenerados/colineares) OU se qualquer elemento de entrada/saída
+  // não for finito (M pode ter -Infinity/NaN, p.ex. quando TR==BR faz den=0
+  // em computeForwardHomography; Math.abs(NaN) < 1e-12 é falso, por isso o
+  // guard do det sozinho não chega). O chamador cai para "sem caixa" nesse frame.
+  function invert3x3(m) {
+    if (!m.every(Number.isFinite)) return null;
+    const [a, b, c, d, e, f, g, h, i] = m;
+    const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+    const D = -(b * i - c * h), E = a * i - c * g, F = -(a * h - b * g);
+    const G = b * f - c * e, H = -(a * f - c * d), I = a * e - b * d;
+    const det = a * A + b * B + c * C;
+    if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null;
+    const inv = 1 / det;
+    const result = [A * inv, D * inv, G * inv, B * inv, E * inv, H * inv, C * inv, F * inv, I * inv];
+    return result.every(Number.isFinite) ? result : null;
+  }
+
+  // screen -> (u,v): aplica a inversa e desomogeneiza. Ponto está DENTRO do
+  // quad sse 0<=u<=1 && 0<=v<=1 — é este o teste "dentro/fora" usado no shader
+  // (lá replicado em GLSL; aqui fica testável em Node).
+  function screenToUV(inv, x, y) {
+    const w = inv[6] * x + inv[7] * y + inv[8];
+    if (Math.abs(w) < 1e-9) return null;
+    return { u: (inv[0] * x + inv[1] * y + inv[2]) / w, v: (inv[3] * x + inv[4] * y + inv[5]) / w };
+  }
+
+  function forwardMap(M, u, v) {
+    const w = M[6] * u + M[7] * v + M[8];
+    return { x: (M[0] * u + M[1] * v + M[2]) / w, y: (M[3] * u + M[4] * v + M[5]) / w };
+  }
+
+  // One Euro filter (Casiez, Roussel, Vogel — CHI 2012). Faz o que uma EMA
+  // simples não consegue: em repouso o cutoff é BAIXO (muito suavizado, sem
+  // tremor), mas assim que a velocidade estimada (dxHat) sobe, o cutoff sobe
+  // com ela e o filtro deixa de atrasar o movimento rápido. Uma EMA de alpha
+  // fixo tem de escolher UM compromisso entre os dois casos; este filtro não.
+  function alphaOneEuro(cutoff, dt) {
+    const tau = 1 / (2 * Math.PI * cutoff);
+    return 1 / (1 + tau / dt);
+  }
+  function LowPass() {
+    this.y = 0; this.init = false;
+  }
+  LowPass.prototype.filter = function (x, a) {
+    this.y = this.init ? a * x + (1 - a) * this.y : x;
+    this.init = true;
+    return this.y;
+  };
+  function OneEuroFilter(minCutoff, beta, dCutoff) {
+    this.minCutoff = minCutoff; this.beta = beta; this.dCutoff = dCutoff;
+    this.xFilt = new LowPass(); this.dxFilt = new LowPass();
+    this.xPrev = null; this.tPrev = null;
+  }
+  OneEuroFilter.prototype.filter = function (x, t) {
+    const dt = this.tPrev === null ? 1 / 60 : Math.max(1e-6, t - this.tPrev);
+    this.tPrev = t;
+    const dx = this.xPrev === null ? 0 : (x - this.xPrev) / dt;
+    this.xPrev = x;
+    const edx = this.dxFilt.filter(dx, alphaOneEuro(this.dCutoff, dt));
+    const cutoff = this.minCutoff + this.beta * Math.abs(edx);
+    return this.xFilt.filter(x, alphaOneEuro(cutoff, dt));
+  };
+
+  function toColumnMajor(m) { return [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]]; }
+
+  /* ==========================================================================
+   * ESTADO / CONSTANTES
+   * ========================================================================== */
+
+  // cap do room byte-a-byte igual aos outros ficheiros do repo (ver display.html,
+  // index.html, magicdraw.html, magicdraw-display.html) — aceite mas não usado
+  // para sincronização aqui: esta experiência não tem estado partilhado entre painéis.
+  const ROOM = ((new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "").slice(0, 40)) || "default";
+
+  // One Euro: minCutoff baixo p/ suavizar tremor em repouso, beta pequeno mas
+  // suficiente p/ o cutoff subir depressa quando a mão acelera (afastar/aproximar)
+  const OE = { minCutoff: 1.0, beta: 0.007, dCutoff: 1.0 };
+
+  const EFFECTS = ["ascii", "halftone", "pixelate", "glitch", "none"];
+  let effectIndex = 0; // default: ascii — garante que a caixa é visível assim que existe
+  let gridN = 24;
+
+  const camEl = document.getElementById("cam");
+  const glCanvas = document.getElementById("gl");
+  const noticeEl = document.getElementById("notice");
+  const panelEl = document.getElementById("panel");
+  const buttonsEl = document.getElementById("buttons");
+  const cornerEl = document.getElementById("corner");
+  cornerEl.textContent = "room: " + ROOM;
+
+  const srcCanvas = document.createElement("canvas"); // staging 2D: cover+espelho do vídeo, por frame
+  const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true });
+
+  let W = 0, H = 0;
+  function applySize(w, h) {
+    W = w; H = h;
+    glCanvas.width = W; glCanvas.height = H;
+    srcCanvas.width = W; srcCanvas.height = H;
+    if (gl) gl.viewport(0, 0, W, H);
+  }
+  // separado de applySize() para o gancho de teste poder impor um tamanho
+  // explícito num browser automatizado onde a aba corre oculta (innerWidth=0)
+  function resize() { applySize(window.innerWidth, window.innerHeight); }
+
+  function showNotice(msg) { noticeEl.textContent = msg; noticeEl.hidden = false; }
+  function clearNotice() { noticeEl.hidden = true; }
+
+  /* ==========================================================================
+   * WEBGL — mesmo padrão de warp.js (compileShader/quad de ecrã/texImage2D por
+   * frame), mas SEM importar warp.js: o mapeamento aqui é uma homografia exata
+   * (closed-form), não uma grelha bilinear N×N com Newton-Raphson por pixel.
+   * ========================================================================== */
+
+  let gl = null, program = null, quadBuffer = null, srcTex = null, atlasTex = null, uLoc = {};
+
+  function compileShader(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      const log = gl.getShaderInfoLog(sh);
+      gl.deleteShader(sh);
+      throw new Error("lab.html: erro a compilar shader: " + log);
+    }
+    return sh;
+  }
+
+  const VERTEX_SRC = `
+attribute vec2 aPos;
+varying vec2 vUV;
+void main() {
+  vUV = vec2((aPos.x + 1.0) * 0.5, (1.0 - aPos.y) * 0.5); // vUV.y = 0 no TOPO
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+
+  const FRAGMENT_SRC = `
+precision highp float;
+
+uniform sampler2D uSource;
+uniform sampler2D uAtlas;
+uniform mat3 uM;       // (u,v,1) -> pixels de ecrã dentro da caixa (homografia direta)
+uniform mat3 uMinv;    // pixels de ecrã -> (u,v,1) (inversa closed-form, sem Newton-Raphson)
+uniform vec2 uResolution;
+uniform float uN;      // densidade da grelha, em células por lado — no espaço da CAIXA
+uniform float uEffect; // 0 ascii, 1 halftone, 2 pixelate, 3 glitch, 4 none
+uniform float uTime;
+uniform float uHasBox; // 0/1 — ainda não há caixa válida (mãos em falta ou quad inválido)
+varying vec2 vUV;
+
+// textura fonte carregada com UNPACK_FLIP_Y_WEBGL=true (mesma convenção do
+// warp.js): a linha 0 (topo do ecrã) fica em v=1, por isso o 1.0-y aqui.
+vec2 screenToTexUV(vec2 px) { return vec2(px.x / uResolution.x, 1.0 - px.y / uResolution.y); }
+
+float luminance(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+// hash determinístico p/ o glitch — sem textura de ruído extra, custo zero
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+
+void main() {
+  vec2 fragPx = vec2(vUV.x * uResolution.x, vUV.y * uResolution.y);
+  vec3 base = texture2D(uSource, screenToTexUV(fragPx)).rgb;
+
+  if (uHasBox < 0.5) { gl_FragColor = vec4(base, 1.0); return; }
+
+  vec3 uvw = uMinv * vec3(fragPx, 1.0);
+  if (abs(uvw.z) < 1e-6) { gl_FragColor = vec4(base, 1.0); return; }
+  vec2 uv = uvw.xy / uvw.z;
+  float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
+  if (inside < 0.5) { gl_FragColor = vec4(base, 1.0); return; }
+
+  int effect = int(uEffect + 0.5);
+  vec3 result;
+
+  if (effect == 3) {
+    // glitch: sem grelha por célula — deslocamento por banda horizontal no
+    // espaço da caixa (uv.y), + separação de canais RGB com offset extra em u.
+    float rows = max(4.0, floor(uN * 0.5));
+    float band = floor(uv.y * rows);
+    float off = (hash(vec2(band + floor(uTime * 10.0), 0.0)) - 0.5) * 0.12;
+    vec2 shifted = vec2(clamp(uv.x + off, 0.0, 1.0), uv.y);
+    float split = 0.012;
+    vec2 uvR = vec2(clamp(shifted.x + split, 0.0, 1.0), shifted.y);
+    vec2 uvB = vec2(clamp(shifted.x - split, 0.0, 1.0), shifted.y);
+    vec3 pR = uM * vec3(uvR, 1.0), pG = uM * vec3(shifted, 1.0), pB = uM * vec3(uvB, 1.0);
+    float r = texture2D(uSource, screenToTexUV(pR.xy / pR.z)).r;
+    float g = texture2D(uSource, screenToTexUV(pG.xy / pG.z)).g;
+    float b = texture2D(uSource, screenToTexUV(pB.xy / pB.z)).b;
+    result = vec3(r, g, b);
+  } else if (effect == 4) {
+    // none: vídeo cru, sem quantizar nada — referência p/ comparar com os outros
+    result = base;
+  } else {
+    // ascii / halftone / pixelate partilham a MESMA célula, ancorada ao espaço
+    // da caixa (u,v) e não ao ecrã — decisão de desenho: assim os glifos/pontos
+    // crescem com a caixa (parece algo que se está a segurar), em vez de
+    // "rastejarem" por baixo dela quando a caixa se move.
+    vec2 cellUV = uv * uN;
+    vec2 cellIndex = floor(cellUV);
+    vec2 cellLocal = fract(cellUV);
+    vec2 cellCenter = (cellIndex + 0.5) / uN;
+    vec3 p = uM * vec3(cellCenter, 1.0);
+    vec3 cellColor = texture2D(uSource, clamp(screenToTexUV(p.xy / p.z), 0.0, 1.0)).rgb;
+    float lum = luminance(cellColor);
+
+    if (effect == 0) {
+      // ascii: atlas 2D construído uma vez (rampa " .:-=+*#%@", 10 glifos em linha)
+      float glyphIndex = clamp(floor(lum * 9.999), 0.0, 9.0);
+      float mask = texture2D(uAtlas, vec2((glyphIndex + cellLocal.x) / 10.0, cellLocal.y)).r;
+      result = cellColor * mask;
+    } else if (effect == 1) {
+      // halftone: raio do ponto cresce com a densidade — mais escuro = ponto maior
+      float d = length(cellLocal - 0.5);
+      float radius = mix(0.05, 0.46, 1.0 - lum);
+      float dotMask = step(d, radius);
+      result = mix(vec3(1.0), cellColor, dotMask);
+    } else {
+      // pixelate: quantização — 1 cor plana por célula
+      result = cellColor;
+    }
+  }
+
+  gl_FragColor = vec4(result, 1.0);
+}`;
+
+  function initGL() {
+    gl = glCanvas.getContext("webgl2", { premultipliedAlpha: false }) ||
+         glCanvas.getContext("webgl", { premultipliedAlpha: false }) ||
+         glCanvas.getContext("experimental-webgl", { premultipliedAlpha: false });
+    if (!gl) throw new Error("WebGL não suportado neste browser");
+
+    quadBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+
+    const vs = compileShader(gl.VERTEX_SHADER, VERTEX_SRC);
+    const fs = compileShader(gl.FRAGMENT_SHADER, FRAGMENT_SRC);
+    program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.bindAttribLocation(program, 0, "aPos");
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      throw new Error("lab.html: erro a ligar programa: " + gl.getProgramInfoLog(program));
+    }
+    gl.deleteShader(vs); gl.deleteShader(fs);
+
+    uLoc = {
+      uSource: gl.getUniformLocation(program, "uSource"),
+      uAtlas: gl.getUniformLocation(program, "uAtlas"),
+      uM: gl.getUniformLocation(program, "uM"),
+      uMinv: gl.getUniformLocation(program, "uMinv"),
+      uResolution: gl.getUniformLocation(program, "uResolution"),
+      uN: gl.getUniformLocation(program, "uN"),
+      uEffect: gl.getUniformLocation(program, "uEffect"),
+      uTime: gl.getUniformLocation(program, "uTime"),
+      uHasBox: gl.getUniformLocation(program, "uHasBox"),
+    };
+
+    srcTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, srcTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    atlasTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, atlasTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); // sem NEAREST havia bleeding entre glifos vizinhos
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    uploadAtlas(buildAsciiAtlas());
+  }
+
+  function buildAsciiAtlas() {
+    const ramp = " .:-=+*#%@";
+    const cell = 32, c = document.createElement("canvas");
+    c.width = cell * ramp.length; c.height = cell;
+    const cx = c.getContext("2d");
+    cx.fillStyle = "#000"; cx.fillRect(0, 0, c.width, c.height);
+    cx.fillStyle = "#fff";
+    cx.font = "bold 26px monospace";
+    cx.textAlign = "center"; cx.textBaseline = "middle";
+    for (let i = 0; i < ramp.length; i++) cx.fillText(ramp[i], i * cell + cell / 2, cell / 2 + 1);
+    return c;
+  }
+  function uploadAtlas(canvas) {
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, atlasTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+  }
+  function uploadSourceTexture(el) {
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, srcTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el);
+  }
+
+  function render(now) {
+    gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+    gl.useProgram(program);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, srcTex); gl.uniform1i(uLoc.uSource, 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, atlasTex); gl.uniform1i(uLoc.uAtlas, 1);
+    gl.uniform2f(uLoc.uResolution, glCanvas.width, glCanvas.height);
+    gl.uniform1f(uLoc.uN, gridN);
+    gl.uniform1f(uLoc.uEffect, effectIndex);
+    gl.uniform1f(uLoc.uTime, now / 1000);
+
+    // sem matriz válida (quad singular/não-finito) -> sem caixa neste frame,
+    // nunca cai para IDENTITY3 (isso deixava (0,0) do ecrã contar como "dentro")
+    let drawBox = false;
+    if (hasBox) {
+      const M = computeForwardHomography(boxCorners.TL, boxCorners.TR, boxCorners.BR, boxCorners.BL);
+      const Minv = invert3x3(M);
+      if (Minv) {
+        gl.uniformMatrix3fv(uLoc.uM, false, toColumnMajor(M));
+        gl.uniformMatrix3fv(uLoc.uMinv, false, toColumnMajor(Minv));
+        drawBox = true;
+      }
+    }
+    gl.uniform1f(uLoc.uHasBox, drawBox ? 1 : 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  /* ==========================================================================
+   * MÃOS — mediapipe (arranque idêntico a magicdraw-display.html:1300-1311)
+   * ========================================================================== */
+
+  let landmarker = null, cameraReady = false, lastVideoTime = -1;
+
+  // Se o modelo de mãos falhar (rede, CDN em baixo), arranca a câmara na
+  // mesma — degradação honesta: sem uHasBox a caixa nunca aparece, mas o
+  // shader mostra o vídeo cru (uHasBox<0.5 -> base), então a pessoa continua
+  // a ver-se a si própria em vez de ecrã preto. Só falha em avisar se a
+  // própria câmara também não estiver disponível.
+  async function startCamera() {
+    let modelOk = true;
+    try {
+      const { FilesetResolver, HandLandmarker } =
+        await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
+      const fileset = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+      landmarker = await HandLandmarker.createFromOptions(fileset, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO", numHands: 2
+      });
+    } catch (e) {
+      modelOk = false;
+      console.error("lab.html: falha a carregar o modelo de mãos", e);
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: "user" } });
+      camEl.srcObject = stream;
+      await camEl.play();
+      cameraReady = true;
+      if (modelOk) {
+        clearNotice();
+      } else {
+        showNotice("⚠️ sem modelo de mãos (rede?) — vês a câmara em direto, sem caixa por gestos");
+      }
+      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+        cameraReady = false;
+        showNotice("📷 câmara desligada");
+      });
+    } catch (e) {
+      showNotice(modelOk
+        ? "📷 câmara indisponível — liga uma câmara e recarrega a página"
+        : "📷 câmara e modelo de mãos indisponíveis — liga uma câmara e recarrega a página");
+    }
+  }
+
+  function coverTransform(fw, fh) {
+    const s = Math.max(W / fw, H / fh);
+    return { s, offX: (W - fw * s) / 2, offY: (H - fh * s) / 2 };
+  }
+  // espelhado: o utilizador tem de se ver como num espelho (mesma matemática de magicdraw-display.html)
+  function camToScreen(nx, ny) {
+    const vw = camEl.videoWidth || 1280, vh = camEl.videoHeight || 720;
+    const { s, offX, offY } = coverTransform(vw, vh);
+    return { x: W - (offX + nx * vw * s), y: offY + ny * vh * s };
+  }
+  function drawSourceFrame(el, vw, vh) {
+    const s = Math.max(W / vw, H / vh);
+    const dw = vw * s, dh = vh * s, offX = (W - dw) / 2, offY = (H - dh) / 2;
+    srcCtx.save();
+    srcCtx.translate(W, 0); srcCtx.scale(-1, 1); // mesmo espelho do camToScreen
+    srcCtx.drawImage(el, 0, 0, vw, vh, offX, offY, dw, dh);
+    srcCtx.restore();
+  }
+
+  const handState = {
+    Left: { visible: false, thumb: { x: 0, y: 0 }, index: { x: 0, y: 0 } },
+    Right: { visible: false, thumb: { x: 0, y: 0 }, index: { x: 0, y: 0 } },
+  };
+
+  function processHands(res) {
+    const hands = res.landmarks || [];
+    const seen = { Left: false, Right: false };
+    for (let i = 0; i < hands.length && i < 2; i++) {
+      const lm = hands[i];
+      const label = res.handednesses?.[i]?.[0]?.categoryName || "Right";
+      const userHand = label === "Left" ? "Right" : "Left"; // vista selfie espelhada
+      if (seen[userHand]) continue;
+      seen[userHand] = true;
+      const st = handState[userHand];
+      st.visible = true;
+      st.thumb = camToScreen(lm[4].x, lm[4].y);
+      st.index = camToScreen(lm[8].x, lm[8].y);
+    }
+    for (const hand of ["Left", "Right"]) {
+      if (!seen[hand]) handState[hand].visible = false;
+    }
+  }
+
+  /* ==========================================================================
+   * CAIXA — 4 cantos (polegar+indicador de cada mão), suavizados por One Euro.
+   * Segue enquanto as DUAS mãos estiverem visíveis (pinch não entra na
+   * decisão): abrir a mão afasta polegar/indicador dessa mão e aumenta a
+   * altura da caixa; afastar as mãos aumenta a largura. Perder uma mão
+   * congela a caixa onde estava — é o "largar" natural.
+   * ========================================================================== */
+
+  const oe = {
+    TLx: new OneEuroFilter(OE.minCutoff, OE.beta, OE.dCutoff), TLy: new OneEuroFilter(OE.minCutoff, OE.beta, OE.dCutoff),
+    TRx: new OneEuroFilter(OE.minCutoff, OE.beta, OE.dCutoff), TRy: new OneEuroFilter(OE.minCutoff, OE.beta, OE.dCutoff),
+    BRx: new OneEuroFilter(OE.minCutoff, OE.beta, OE.dCutoff), BRy: new OneEuroFilter(OE.minCutoff, OE.beta, OE.dCutoff),
+    BLx: new OneEuroFilter(OE.minCutoff, OE.beta, OE.dCutoff), BLy: new OneEuroFilter(OE.minCutoff, OE.beta, OE.dCutoff),
+  };
+  let boxCorners = null, hasBox = false;
+  let boxCleared = false; // tecla 0/Esc: esconde a caixa até uma mão sumir e as duas voltarem (re-arma como um "largar")
+  let manualBoxActive = false, manualBox = null; // gancho de teste — ver window.__lab
+
+  function orientation(a, b, c) { return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); }
+  function segmentsCross(p1, p2, p3, p4) {
+    const d1 = orientation(p3, p4, p1), d2 = orientation(p3, p4, p2);
+    const d3 = orientation(p1, p2, p3), d4 = orientation(p1, p2, p4);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  }
+  // quad TL->TR->BR->BL->TL é válido sse for simples (as duas arestas opostas
+  // não se cruzam — despista o caso "em gravata" de mãos cruzadas/rodadas) e
+  // tiver área não-degenerada (despista cantos colineares/coincidentes).
+  function isValidQuad(q) {
+    const pts = [q.TL, q.TR, q.BR, q.BL];
+    if (!pts.every(p => Number.isFinite(p.x) && Number.isFinite(p.y))) return false;
+    if (segmentsCross(q.TL, q.TR, q.BR, q.BL)) return false;
+    if (segmentsCross(q.TR, q.BR, q.BL, q.TL)) return false;
+    let area2 = 0;
+    for (let i = 0; i < 4; i++) {
+      const p = pts[i], n = pts[(i + 1) % 4];
+      area2 += p.x * n.y - n.x * p.y;
+    }
+    return Math.abs(area2) / 2 > 1; // > 1px² — descarta degenerados
+  }
+
+  function updateBox(now) {
+    if (manualBoxActive) { boxCorners = manualBox; hasBox = true; return; }
+    const L = handState.Left, R = handState.Right;
+    if (!(L.visible && R.visible)) { boxCleared = false; return; } // solto: caixa congela onde estava
+    if (boxCleared) return; // apagada por tecla — espera uma mão sumir para re-armar
+
+    // a mão mais à esquerda no ecrã dá a aresta esquerda, a outra a direita;
+    // dentro de cada mão, o ponto mais acima (y menor) é o canto de cima —
+    // ordem final sempre [TL, TR, BR, BL], independentemente de qual mão é qual.
+    const Lcx = (L.thumb.x + L.index.x) / 2, Rcx = (R.thumb.x + R.index.x) / 2;
+    const left = Lcx <= Rcx ? L : R, right = left === L ? R : L;
+    const lTop = left.thumb.y <= left.index.y ? left.thumb : left.index;
+    const lBot = left.thumb.y <= left.index.y ? left.index : left.thumb;
+    const rTop = right.thumb.y <= right.index.y ? right.thumb : right.index;
+    const rBot = right.thumb.y <= right.index.y ? right.index : right.thumb;
+
+    const t = now / 1000;
+    const next = {
+      TL: { x: oe.TLx.filter(lTop.x, t), y: oe.TLy.filter(lTop.y, t) },
+      TR: { x: oe.TRx.filter(rTop.x, t), y: oe.TRy.filter(rTop.y, t) },
+      BR: { x: oe.BRx.filter(rBot.x, t), y: oe.BRy.filter(rBot.y, t) },
+      BL: { x: oe.BLx.filter(lBot.x, t), y: oe.BLy.filter(lBot.y, t) },
+    };
+    if (!isValidQuad(next)) return; // quad em gravata/degenerado: descarta este frame, mantém a última caixa válida
+    boxCorners = next;
+    hasBox = true;
+  }
+
+  /* ==========================================================================
+   * LOOP
+   * ========================================================================== */
+
+  let testSourceEl = null; // gancho de teste: substitui a câmara por um canvas sintético
+  let syntheticLandmarks = null; // gancho de teste: substitui landmarker.detectForVideo() — ver window.__lab.setLandmarks
+
+  // corpo de 1 frame, isolado de requestAnimationFrame — a verificação desta
+  // ticket corre num browser automatizado onde separadores em segundo plano
+  // podem nunca receber um primeiro rAF (throttling de visibilidade); o gancho
+  // de teste forceFrame() chama isto diretamente, sem depender do rAF.
+  function tick(now) {
+    try {
+      if (manualBoxActive) {
+        updateBox(now);
+      } else if (syntheticLandmarks) {
+        // caminho real de processHands()+updateBox(), sem câmara nem modelo —
+        // é a única forma de exercitar F1/F2 num browser automatizado sem câmara.
+        processHands(syntheticLandmarks);
+        updateBox(now);
+      } else if (landmarker && cameraReady && camEl.currentTime !== lastVideoTime) {
+        lastVideoTime = camEl.currentTime;
+        const res = landmarker.detectForVideo(camEl, now);
+        processHands(res);
+        updateBox(now);
+      }
+      const el = testSourceEl || camEl;
+      const vw = testSourceEl ? (el.width || 0) : (el.videoWidth || 0);
+      const vh = testSourceEl ? (el.height || 0) : (el.videoHeight || 0);
+      if (vw && vh) {
+        drawSourceFrame(el, vw, vh);
+        uploadSourceTexture(srcCanvas);
+        render(now);
+      }
+    } catch (err) {
+      console.error("lab.html: erro no frame (loop continua)", err);
+    }
+  }
+  function frame(now) {
+    tick(now);
+    requestAnimationFrame(frame);
+  }
+
+  /* ==========================================================================
+   * UI — botões + teclas, painel esconde-se sozinho ao fim de inatividade
+   * ========================================================================== */
+
+  function setEffect(i) {
+    effectIndex = Math.max(0, Math.min(EFFECTS.length - 1, i));
+    for (const b of buttonsEl.children) b.classList.toggle("active", Number(b.dataset.i) === effectIndex);
+  }
+  setEffect(0);
+  buttonsEl.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-i]");
+    if (b) setEffect(Number(b.dataset.i));
+  });
+
+  let lastActivity = Date.now();
+  function bump() { lastActivity = Date.now(); panelEl.classList.remove("idle"); }
+  ["pointermove", "pointerdown", "keydown", "touchstart"].forEach(evt =>
+    window.addEventListener(evt, bump, { passive: true }));
+  setInterval(() => { if (Date.now() - lastActivity > 3500) panelEl.classList.add("idle"); }, 500);
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key >= "1" && e.key <= "5") setEffect(e.key.charCodeAt(0) - "1".charCodeAt(0));
+    else if (e.key === "[") gridN = Math.max(4, gridN - 2);
+    else if (e.key === "]") gridN = Math.min(48, gridN + 2);
+    else if (e.key === "0" || e.key === "Escape") {
+      // apaga a caixa; re-arma quando uma mão sumir e as duas voltarem (updateBox)
+      hasBox = false; boxCorners = null; boxCleared = true;
+    }
+  });
+
+  /* ==========================================================================
+   * ARRANQUE
+   * ========================================================================== */
+
+  window.addEventListener("resize", resize);
+  resize();
+  try {
+    initGL();
+  } catch (e) {
+    showNotice("⚠️ WebGL indisponível neste browser");
+    console.error(e);
+  }
+  if (gl) requestAnimationFrame(frame);
+  startCamera();
+
+  // window.__lab: getters sempre disponíveis (inofensivos, só leitura). Os
+  // mutadores (trocar fonte de vídeo, forçar caixa/landmarks sem mãos reais,
+  // avançar frames à força) só abrem com ?debug=1 na URL — não são caminhos
+  // que a UI real expõe, e servem para a verificação headless desta ticket
+  // (sem câmara) provar por contagem de píxeis que o efeito só aparece dentro
+  // da caixa, e exercitar o caminho real de processHands()+updateBox().
+  const DEBUG = new URLSearchParams(location.search).get("debug") === "1";
+  const labGetters = {
+    getGridN() { return gridN; },
+    getGL() { return gl; },
+    getGLCanvas() { return glCanvas; },
+    getSrcCanvas() { return srcCanvas; },
+    getBoxCorners() { return boxCorners; },
+    hasBox() { return hasBox; },
+  };
+  window.__lab = DEBUG ? Object.assign({}, labGetters, {
+    setSource(el) { testSourceEl = el; },
+    clearSource() { testSourceEl = null; },
+    setBox(tl, tr, br, bl) { manualBox = { TL: tl, TR: tr, BR: br, BL: bl }; manualBoxActive = true; hasBox = true; },
+    clearBox() { manualBoxActive = false; },
+    // injeta um resultado no formato do HandLandmarker ({landmarks, handednesses})
+    // para exercitar processHands()+updateBox() sem câmara nem modelo real.
+    setLandmarks(res) { syntheticLandmarks = res; },
+    clearLandmarks() { syntheticLandmarks = null; },
+    setEffect,
+    setN(n) { gridN = n; },
+    forceFrame(now) { tick(now == null ? performance.now() : now); },
+    setSize(w, h) { applySize(w, h); },
+    _math: { computeForwardHomography, invert3x3, screenToUV, forwardMap, OneEuroFilter, isValidQuad },
+  }) : labGetters;
+})();
+</script>
+</body>
+</html>

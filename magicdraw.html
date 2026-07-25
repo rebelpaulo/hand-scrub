@@ -1887,7 +1887,13 @@ function createZoomPan(canvas, { onChange, cancelEditing, badgeEl }) {
     updateBadge(); onChange();
   }, { passive: false });
 
-  canvas.addEventListener("dblclick", e => { e.preventDefault(); reset(); });
+  // NÃO repor o zoom no duplo-clique. Afinar vértices é clicar repetidamente
+  // quase no mesmo sítio: dois desses cliques dentro da janela do duplo-clique
+  // disparavam 'dblclick' e mandavam a vista para 1× — quanto mais depressa se
+  // afinava, mais isto acontecia, e havia que voltar a fazer zoom a cada
+  // correção. O reset continua a existir onde não estorva: o botão "Repor"
+  // (#adminZoomResetBtn / #warpZoomResetBtn), visível nos dois editores.
+  canvas.addEventListener("dblclick", e => e.preventDefault()); // só evita a seleção de texto do browser
 
   window.addEventListener("keydown", e => {
     if (e.code === "Space" && !/^(input|textarea)$/i.test(e.target.tagName)) spaceHeld = true;
