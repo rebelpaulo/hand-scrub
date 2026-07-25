@@ -602,13 +602,20 @@ function cloudSave() {
     for (const [k, v] of Object.entries(trims)) {
       if (!k.startsWith("upload:")) presetTrims[k] = { in: +v.in.toFixed(2), out: +v.out.toFixed(2) };
     }
+    // FIX F4: antes só se apanhava exceção de rede — um 400 da BD (payload
+    // inválido, id fora do check) ficava sem qualquer sinal, os cortes pareciam
+    // gravados e só se perdiam num reload noutro dispositivo, já no evento.
+    // scrub.html não tem UI de operador para isto, por isso o mínimo é um
+    // console.warn claro (id + status); o debounce de 1200ms já existente
+    // evita spam — isto só corre quando o timer realmente dispara.
     try {
-      await fetch(`${SB_URL}/rest/v1/hand_config`, {
+      const r = await fetch(`${SB_URL}/rest/v1/hand_config`, {
         method: "POST",
         headers: { ...SB_HDRS, Prefer: "resolution=merge-duplicates" },
         body: JSON.stringify([{ id: CFG_ID, data: { t: presetTrims, s: activeScene }, updated_at: new Date().toISOString() }]),
       });
-    } catch { /* offline: fica no localStorage */ }
+      if (!r.ok) console.warn(`scrub: gravação cloud rejeitada (id=${CFG_ID}, status=${r.status})`);
+    } catch { console.warn(`scrub: gravação cloud falhou por rede (id=${CFG_ID})`); } // offline: fica no localStorage
   }, 1200);
 }
 const trimPanel = $("trimPanel"), trimStrip = $("trimStrip");

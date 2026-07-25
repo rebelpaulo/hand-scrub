@@ -100,7 +100,15 @@ function zoneHandlesPx(z, w, h) {
 // recorte destination-out da união das include, occlude a preto por cima.
 function renderZones() {
   zctx.clearRect(0, 0, ZW, ZH);
-  const usable = zones.filter(z => !(z.type === "poly" && (!z.pts || z.pts.length < 3)));
+  // endurecido: exige z truthy (uma zona nula sobrevivente rebentava no
+  // z.type sem guarda) e, para poly, pts a ser mesmo um array utilizável —
+  // sem isto uma mensagem 'zones' malformada parava a máscara em silêncio
+  // até reload, sem exceção visível (review).
+  // FIX V2 (review): antes qualquer objeto NÃO-elipse com >=3 pts passava
+  // (type indefinido/errado incluído) — restringe ao type==="poly" explícito,
+  // que é o que normalizeZone() sempre atribui (ver acima); um objeto solto
+  // parecido com zona nunca devia chegar a desenhar-se.
+  const usable = zones.filter(z => z && (z.type === "ellipse" || (z.type === "poly" && Array.isArray(z.pts) && z.pts.length >= 3)));
 
   if (zoneEditing) {
     for (const z of usable) {
@@ -153,6 +161,15 @@ window.addEventListener("resize", resize);
    se aplica e persiste o que chega pelo canal de comandos. */
 let keystoneCorners = null; // [[x,y]x4] normalizado, ou null
 
+// valida a forma ANTES de aceitar/atribuir a keystoneCorners — um payload
+// malformado/forjado (ex.: só 2 pontos) não pode corromper o estado: o
+// destructuring [x,y] em applyKeystone() rebentaria e, sem esta validação,
+// o valor mau já teria ficado atribuído antes do throw (review).
+function isValidCorners(corners) {
+  return Array.isArray(corners) && corners.length === 4 &&
+    corners.every(p => Array.isArray(p) && p.length === 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+}
+
 function adj(m) {
   return [
     m[4] * m[8] - m[5] * m[7], m[2] * m[7] - m[1] * m[8], m[1] * m[5] - m[2] * m[4],
@@ -194,14 +211,25 @@ function applyKeystone() {
   // zonas marcam geometria física fixa e warpá-las junto tirava-as das
   // janelas reais a cada ajuste (review PR #36).
   if (!keystoneCorners) { stage.style.transform = "none"; return; }
-  const w = window.innerWidth, h = window.innerHeight;
-  const px = keystoneCorners.map(([x, y]) => [x * w, y * h]);
-  const H = general2DProjection(w, h, px[0], px[1], px[2], px[3]);
-  const k = H[8] || 1;
-  const [a, b, c, d, e, f, g, hh] = H.map(v => v / k);
-  // matrix3d é column-major; z fica intocado (m13=0,m23=0,m33=1,m43=0)
-  stage.style.transform =
-    `matrix3d(${a},${d},0,${g}, ${b},${e},0,${hh}, 0,0,1,0, ${c},${f},0,1)`;
+  // defesa em profundidade: mesmo com a validação em handleCmd, um
+  // keystoneCorners corrompido por outro caminho (ex.: dados antigos na
+  // cloud) não pode partir resize() para sempre (chamado no listener de
+  // window.resize, sem try/catch) — repõe identidade e avisa em vez de
+  // deixar a exceção subir ao caller (review).
+  try {
+    const w = window.innerWidth, h = window.innerHeight;
+    const px = keystoneCorners.map(([x, y]) => [x * w, y * h]);
+    const H = general2DProjection(w, h, px[0], px[1], px[2], px[3]);
+    const k = H[8] || 1;
+    const [a, b, c, d, e, f, g, hh] = H.map(v => v / k);
+    // matrix3d é column-major; z fica intocado (m13=0,m23=0,m33=1,m43=0)
+    stage.style.transform =
+      `matrix3d(${a},${d},0,${g}, ${b},${e},0,${hh}, 0,0,1,0, ${c},${f},0,1)`;
+  } catch (err) {
+    console.warn("mapping: keystone inválido, a repor identidade", err);
+    keystoneCorners = null;
+    stage.style.transform = "none";
+  }
 }
 async function keystoneCloudLoad() {
   try {
@@ -213,18 +241,30 @@ async function keystoneCloudLoad() {
     if (cfg?.corners) { keystoneCorners = cfg.corners; applyKeystone(); }
   } catch { /* offline: fica identidade até chegar um 'keystone' ao vivo */ }
 }
+// FIX F4: antes só se apanhava exceção de rede (.catch) — um 400 da BD (payload
+// inválido, id fora do check) ficava sem qualquer sinal, o keystone parecia
+// gravado e só se perdia num reload, já no evento. display.html não tem UI de
+// operador (é o ecrã do projetor), por isso o mínimo aqui é um console.warn
+// claro com o id e o status para aparecer na consola de quem estiver a montar.
 function keystoneCloudSave(corners) {
   fetch(`${SUPABASE_URL}/rest/v1/hand_config`, {
     method: "POST",
     headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" },
     body: JSON.stringify([{ id: KEYSTONE_ID, data: { corners }, updated_at: new Date().toISOString() }]),
-  }).catch(() => { /* offline: fica só aplicado localmente */ });
+  }).then(r => {
+    if (!r.ok) console.warn(`mapping: gravação cloud do keystone rejeitada (id=${KEYSTONE_ID}, status=${r.status})`);
+  }).catch(() => {
+    console.warn(`mapping: gravação cloud do keystone falhou por rede (id=${KEYSTONE_ID})`); // offline: fica só aplicado localmente
+  });
 }
 
 /* ================= protocolo de sync (BroadcastChannel + Supabase Realtime) ================= */
 const SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
-const ROOM = (new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "") || "default";
+// cap de 40 — ver nota em magicdraw.html: o ROOM entra nos ids do hand_config
+// (check <=64) e o cap TEM de ser idêntico nos 4 ficheiros, senão os ecrãs
+// derivam nomes de canal diferentes e deixam de se ver.
+const ROOM = ((new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "").slice(0, 40)) || "default";
 // rows por instalação (room 'default' mantém as rows históricas) — ver review PR #35
 const KEYSTONE_ID = ROOM === "default" ? "mapping-keystone" : "mapping-keystone:" + ROOM;
 const ZONES_ROW_ID = ROOM === "default" ? "magicdraw-zones" : "magicdraw-zones:" + ROOM;
@@ -247,6 +287,11 @@ function send(kind, extra = {}) {
 const lastSeqCmd = new Map();
 function onCmdMsg(payload) {
   if (!payload || payload.v !== 1 || payload.src === CLIENT_ID) return;
+  // FIX F5: valida a FORMA antes do dedup (mesma regra de magicdraw.html/
+  // magicdraw-display.html) — com `seq` undefined, `payload.seq <= last`
+  // nunca é true e lastSeqCmd.set(src, undefined) desligava o dedup desse
+  // src pelo resto da sessão do projetor. Canal público: descarta em silêncio.
+  if (typeof payload.src !== "string" || !payload.src || !Number.isFinite(payload.seq)) return;
   const last = lastSeqCmd.get(payload.src) ?? -1;
   if (payload.seq <= last) return;
   lastSeqCmd.set(payload.src, payload.seq);
@@ -255,6 +300,8 @@ function onCmdMsg(payload) {
 const lastSeqZones = new Map();
 function onZonesMsg(payload) {
   if (!payload || payload.v !== 1 || payload.src === CLIENT_ID) return;
+  // FIX F5: idem onCmdMsg — mesma validação de forma no recetor de zonas.
+  if (typeof payload.src !== "string" || !payload.src || !Number.isFinite(payload.seq)) return;
   const last = lastSeqZones.get(payload.src) ?? -1;
   if (payload.seq <= last) return;
   lastSeqZones.set(payload.src, payload.seq);
@@ -286,15 +333,20 @@ send("hello");
 const HOME_APP = "magicdraw";
 let currentApp = null;
 let iframeReady = false;
-let pendingCampreview = null; // último {on} enviado antes do 'ready' (para re-enviar)
-let pendingScene = null;      // último {i} enviado antes do 'ready'
+// campreview é estado GLOBAL da sessão de projeção (não da app): persiste
+// entre trocas de app e é reenviado ao 'ready' seguinte — senão o operador
+// desliga o preview na Butterfly, muda para a Enxame, e ela abre com o
+// preview no default (ligado) enquanto o painel continua a dizer "desligado"
+// (review). pendingScene É específico da app — esse sim limpa-se na troca.
+let pendingCampreview = null; // último {on} conhecido (para re-enviar ao 'ready')
+let pendingScene = null;      // último {i} enviado antes do 'ready', só da app atual
 
 function openApp(app) {
   const file = APP_FILES[app];
   if (!file || app === currentApp) return; // idempotente
   currentApp = app;
   iframeReady = false;
-  pendingCampreview = null; pendingScene = null;
+  pendingScene = null; // específico da app anterior — a nova começa sem cena pendente
   // propaga o room à experiência: o magicdraw-display resolve os canais dele
   // por ?room= — sem isto, num room não-default ele ouviria o room 'default'
   // e o tablet da instalação certa não o controlava (review PR #36)
@@ -328,7 +380,18 @@ function handleCmd(payload) {
       toIframe({ cmd: "scene", i: pendingScene.i });
       break;
     case "keystone":
-      keystoneCorners = Array.isArray(payload.corners) ? payload.corners : null;
+      // FIX V3 (review): `== null` também apanhava `undefined` — uma mensagem
+      // 'keystone' SEM o campo `corners` (formato inválido/versão diferente)
+      // repunha o keystone para identidade em vez de ser ignorada. Só `null`
+      // EXPLÍCITO é reset intencional; campo ausente cai no ramo inválido abaixo.
+      if (payload.corners === null) {
+        keystoneCorners = null; // reset explícito para identidade
+      } else if (isValidCorners(payload.corners)) {
+        keystoneCorners = payload.corners;
+      } else {
+        console.warn("mapping: keystone malformado ignorado", payload.corners);
+        break; // não aceita/atribui — mantém o estado anterior intacto
+      }
       applyKeystone();
       keystoneCloudSave(keystoneCorners);
       break;
@@ -339,7 +402,9 @@ function handleCmd(payload) {
 }
 function handleZonesMsg(payload) {
   if (payload.kind !== "zones") return;
-  zones = (Array.isArray(payload.zones) ? payload.zones : []).map(normalizeZone);
+  // filtra elementos nulos/undefined ANTES do normalize — um elemento nulo
+  // no array (mensagem malformada) não pode chegar a renderZones (review).
+  zones = (Array.isArray(payload.zones) ? payload.zones : []).filter(Boolean).map(normalizeZone);
   zoneEditing = !!payload.editing;
   renderZones();
 }
@@ -348,6 +413,10 @@ function handleZonesMsg(payload) {
 // campreview/scene enviados antes de a app lá dentro estar pronta a ouvir)
 window.addEventListener("message", e => {
   if (e.origin !== location.origin) return;
+  // ao trocar de app, um 'ready' tardio do iframe ANTERIOR (ainda a
+  // descarregar/desmontar) não pode marcar iframeReady=true prematuramente
+  // para o novo — só aceita mensagens do iframe atual (review).
+  if (e.source !== stage.contentWindow) return;
   const d = e.data;
   if (!d || d.mapping !== 1) return;
   if (d.evt === "ready") {
@@ -365,7 +434,10 @@ async function loadZonesFromCloud() {
     });
     if (!r.ok) return;
     const cfg = (await r.json())[0]?.data;
-    if (cfg?.zones) { zones = cfg.zones.map(normalizeZone); zoneEditing = false; renderZones(); }
+    // FIX V4 (review): cfg.zones podia ser qualquer JSON guardado (um {} ou
+    // uma string) — `cfg?.zones` truthy não garante array, e `.filter` nesses
+    // valores rebenta (TypeError) antes de renderZones sequer correr.
+    if (Array.isArray(cfg?.zones)) { zones = cfg.zones.filter(Boolean).map(normalizeZone); zoneEditing = false; renderZones(); }
   } catch { /* offline: fica sem zonas até chegar uma mensagem 'zones' ao vivo */ }
 }
 resize();
