@@ -970,7 +970,9 @@ const ROOM = ((new URLSearchParams(location.search).get("room") || "default").re
 const MAP_SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
 const MAP_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
 const MAP_CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
-let mapSeq = 0, mapBc = null, mapSbChannel = null, mapSbReady = false, mapSyncStarted = false;
+// mapSbClient: guardado para poder FECHAR o socket no teardown — sem ele cada
+// ciclo entrar/sair deixava um WebSocket aberto (2 sockets após um ciclo).
+let mapSeq = 0, mapBc = null, mapSbChannel = null, mapSbClient = null, mapSbReady = false, mapSyncStarted = false;
 // incrementado a cada início/fim de ciclo — invalida o import()/subscribe()
 // assíncrono de um ciclo anterior que só resolva depois de já se ter saído
 // do mapping mode (ver teardownMappingSync/initMappingSync).
@@ -1036,10 +1038,15 @@ function initMappingSync() {
       const sb = createClient(MAP_SUPABASE_URL, MAP_SUPABASE_ANON_KEY);
       const ch = sb.channel("mapping:" + ROOM);
       ch.on("broadcast", { event: "msg" }, ({ payload }) => mapOnMsg(payload)).subscribe(status => {
-        if (token !== mapSyncToken) { try { ch.unsubscribe(); } catch (e) { /* ignora */ } return; }
+        // token velho = este ciclo já fechou; limita-te a ignorar. NÃO chamar
+        // unsubscribe() aqui: o teardown já o faz, e a chamada re-dispara este
+        // mesmo callback com o token na mesma desatualizado — recursão até
+        // "Maximum call stack size exceeded" (18 erros por saída, verificação).
+        if (token !== mapSyncToken) return;
         if (status === "SUBSCRIBED") { mapSbReady = true; updateMapIndicator(); mapSend("hello"); }
       });
       mapSbChannel = ch;
+      mapSbClient = sb;
     } catch (e) { /* offline/CDN em baixo: fica só o canal local */ }
   })();
   updateMapIndicator();
@@ -1053,6 +1060,13 @@ function teardownMappingSync() {
   mapSyncToken++; // invalida qualquer import/subscribe assíncrono ainda pendente
   if (mapBc) { mapBc.onmessage = null; mapBc.close(); mapBc = null; }
   if (mapSbChannel) { try { mapSbChannel.unsubscribe(); } catch (e) { /* ignora */ } mapSbChannel = null; }
+  // e fecha mesmo o socket: só remover o canal deixava o WebSocket vivo e cada
+  // ciclo criava um cliente novo (2 sockets após entrar/sair uma vez).
+  if (mapSbClient) {
+    try { mapSbClient.removeAllChannels(); } catch (e) { /* ignora */ }
+    try { mapSbClient.realtime?.disconnect(); } catch (e) { /* ignora */ }
+    mapSbClient = null;
+  }
   mapSbReady = false;
   mapSyncStarted = false;
   updateMapIndicator();
