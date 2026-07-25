@@ -72,9 +72,9 @@ npx serve -l 8777
 
 ## Ficheiros
 - `index.html` — a **home** da instalação: ecrã de atração (attract) com o
-  nome da experiência a rodar + mão fantasma, seguido do seletor de 5
+  nome da experiência a rodar + mão fantasma, seguido do seletor de 6
   cartões (🦋 Butterfly Effect · 🌑 Sala de Sombras · ✍️ Pinch Draw ·
-  🌬️ Enxame · 🪄 Magic Draw). Toca, clica, tecla ou aproxima a mão para passar do attract
+  🌬️ Enxame · 🪄 Magic Draw · 🎞️ Motion Lab). Toca, clica, tecla ou aproxima a mão para passar do attract
   ao seletor; os cartões respondem a clique, hover-dwell do rato e dwell
   por gesto (👍 700ms).
 - `scrub.html` — 🦋 Butterfly Effect, a app original (self-contained, sem
@@ -159,7 +159,7 @@ npx serve -l 8777
   - **`display.html`** é O ECRÃ DE PROJEÇÃO real (o shell de mapping: iframe +
     máscara de zonas + keystone) — arranca já com o Magic Draw carregado por
     omissão (`magicdraw-display.html` dentro do iframe) e `home` volta a ele;
-    as outras 4 experiências (🦋🌑✍️🌬️) só entram por comando `open` explícito
+    as outras 5 experiências (🦋🌑✍️🌬️🎞️) só entram por comando `open` explícito
     do mapping mode. É o URL a apontar ao projetor/LED.
   - **`magicdraw-display.html`** é o MOTOR interno do Magic Draw — corre
     dentro do iframe do `display.html` (produção) OU sozinho (standalone, só
@@ -262,5 +262,7 @@ npx serve -l 8777
     logo como hidratação) — sem isto, um `hello` chegado a meio do carregamento
     podia reenviar zonas vazias/warp identidade por cima da calibração
     persistida do display.
+- `lab.html` — 🎞️ Motion Lab: molda uma caixa com as mãos e o vídeo lá dentro
+  ganha efeito — abre e fecha os dedos para mudar o tamanho.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).
