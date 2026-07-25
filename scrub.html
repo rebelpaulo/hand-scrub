@@ -488,6 +488,12 @@ function applyChrome() {
   if (chromeOn) { wakeUI(); return; }
   clearTimeout(idleT);
   document.body.classList.add("ui-hidden");
+  // Fecha também os popovers abertos (review PR #49): 'ui-hidden' esconde o
+  // #bar, mas #settings.open/#trimPanel.open têm display:flex próprio e
+  // ficavam projetados no edifício — visíveis e clicáveis — logo a seguir a o
+  // operador ter desligado os controlos e a acreditar que estavam escondidos.
+  $("settings")?.classList.remove("open");
+  $("trimPanel")?.classList.remove("open");
 }
 ["pointermove", "pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, wakeUI));
 applyChrome();
