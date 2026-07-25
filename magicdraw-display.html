@@ -228,9 +228,15 @@ function traceZonePath(ctx, z, w, h) {
 // com o que é projetado aqui. Aproxima poly 'smooth' pelos pontos de
 // controlo (a curva Catmull-Rom fica perto o suficiente para enquadrar uma
 // foto — ao contrário da máscara de tinta, que precisa do contorno exato).
+// TEM de aceitar exatamente as mesmas zonas que isUsableZone() em
+// magicdraw.html — se os dois predicados divergirem, a bbox do eco do tablet
+// deixa de bater com a projetada e a foto aparece desenquadrada num dos lados.
+// O `!!z` também é preciso: um null na lista rebentava aqui e não lá.
+function isUsableZone(z) {
+  return !!z && !(z.type === "poly" && (!Array.isArray(z.pts) || z.pts.length < 3));
+}
 function includeZonesBBox(zoneList, w, h) {
-  const usable = zoneList.filter(z => !(z.type === "poly" && (!Array.isArray(z.pts) || z.pts.length < 3)));
-  const includeZones = usable.filter(z => (z.mode || "occlude") === "include");
+  const includeZones = zoneList.filter(isUsableZone).filter(z => (z.mode || "occlude") === "include");
   if (!includeZones.length) return null;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const z of includeZones) {
@@ -282,7 +288,7 @@ function renderZones() {
   // FIX 6: valida Array.isArray ANTES de .length — um pts malformado com
   // .length numérico (mas não-array) passava no guard antigo e rebentava a
   // meio do loop de render (TypeError em pts.map), deixando zonas por desenhar
-  const usable = zones.filter(z => !(z.type === "poly" && (!Array.isArray(z.pts) || z.pts.length < 3)));
+  const usable = zones.filter(isUsableZone); // mesmo predicado de magicdraw.html (ver isUsableZone acima)
 
   if (zoneEditing) {
     for (const z of usable) {
@@ -606,8 +612,15 @@ function handleMsg(payload) {
       const px = Math.min(drawCanvas.width - 1, Math.round(x * drawCanvas.width));
       const py = Math.min(drawCanvas.height - 1, Math.round(y * drawCanvas.height));
       const before = snapshotDrawCanvas();
-      const count = floodFillCanvas(dctx, usableMaskCtx(drawCanvas.width, drawCanvas.height), px, py, color);
-      if (count > 0) pushUndo(before); // participa do MESMO undo/redo (FIX E) dos traços/clear — critério 4
+      floodFillCanvas(dctx, usableMaskCtx(drawCanvas.width, drawCanvas.height), px, py, color);
+      // FIX review P1: empilha SEMPRE, mesmo com 0 píxeis preenchidos. O tablet
+      // só envia 'fill' quando o SEU preenchimento pegou, e nesse caso já
+      // empilhou um passo local. Se aqui a conta desse 0 (o display tem tinta
+      // que o eco do tablet não tem — traços das mãos, outro comando) e não
+      // empilhássemos, o próximo undo do tablet passava na verificação local,
+      // enviava 'undo', e o display desfazia uma operação ANTERIOR sem relação.
+      // Um passo igual ao estado atual é inofensivo; a dessincronização não é.
+      pushUndo(before);
       break;
     }
     case "warp": { // FEATURE "📐 Warp": deformar a projeção (aditivo, kind novo)
@@ -745,11 +758,17 @@ async function startPhotoSequence() {
 const PHOTODATA_MAX_SIDE = 640, PHOTODATA_MAX_BYTES = 60 * 1024;
 function sendPhotoData(rect) {
   try {
-    const dpr = window.devicePixelRatio || 1;
+    // FIX review: escala tirada do PRÓPRIO canvas, não do devicePixelRatio ao
+    // vivo. photoCanvas.width foi fixado quando o canvas foi dimensionado; o
+    // devicePixelRatio muda com o zoom do browser ou ao arrastar a janela para
+    // outro ecrã — coisa que acontece a sério aqui, é uma app de projeção que
+    // vai parar a um projetor. Com o DPR ao vivo o recorte descolava do rect
+    // realmente desenhado e o eco do tablet chegava desalinhado.
     const r = rect || { x: 0, y: 0, w: W, h: H };
-    const sx = Math.max(0, Math.round(r.x * dpr)), sy = Math.max(0, Math.round(r.y * dpr));
-    const sw = Math.max(1, Math.min(Math.round(r.w * dpr), photoCanvas.width - sx));
-    const sh = Math.max(1, Math.min(Math.round(r.h * dpr), photoCanvas.height - sy));
+    const kx = photoCanvas.width / W, ky = photoCanvas.height / H;
+    const sx = Math.max(0, Math.round(r.x * kx)), sy = Math.max(0, Math.round(r.y * ky));
+    const sw = Math.max(1, Math.min(Math.round(r.w * kx), photoCanvas.width - sx));
+    const sh = Math.max(1, Math.min(Math.round(r.h * ky), photoCanvas.height - sy));
     const scale = Math.min(1, PHOTODATA_MAX_SIDE / Math.max(sw, sh));
     const ow = Math.max(1, Math.round(sw * scale)), oh = Math.max(1, Math.round(sh * scale));
     const oc = document.createElement("canvas");
@@ -1007,7 +1026,7 @@ function usableMaskCtx(w, h) {
   const c = document.createElement("canvas");
   c.width = w; c.height = h;
   const mctx = c.getContext("2d");
-  const usable = zones.filter(z => !(z.type === "poly" && (!Array.isArray(z.pts) || z.pts.length < 3)));
+  const usable = zones.filter(isUsableZone); // mesmo predicado de magicdraw.html (ver isUsableZone acima)
   const includeZones = usable.filter(z => (z.mode || "occlude") === "include");
   const occludeZones = usable.filter(z => (z.mode || "occlude") !== "include");
   mctx.fillStyle = "#000";

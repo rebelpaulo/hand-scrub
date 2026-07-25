@@ -1114,10 +1114,7 @@ function onMsg(msg) {
   // o 'dstate' do display decidem o estado da foto.
   if (msg.kind === "clear" && (!msg.scope || msg.scope === "all")) {
     hasPhoto = false;
-    // FEATURE B2: 'clear' scope 'all' apaga a foto dos dois lados — sem isto o
-    // eco continuava a mostrar uma foto que já não existe no display
-    photoImg = null;
-    if (drawScreenOpen) compositeEcho();
+    clearLocalPhoto();
   }
   if (msg.kind === "dstate") hasPhoto = !!msg.hasPhoto; // resposta do display ao 'hello' OU ao 'photo' (aceite/recusado) — única fonte de verdade
   // FEATURE B2: o display envia a foto tirada (dataURL JPEG reduzido) para o
@@ -1489,6 +1486,7 @@ clearBtn.onclick = () => {
     if (!hasPhoto) { // modo sem foto: o 2º toque já é a confirmação
       clearTimeout(clearTimer);
       resetClear();
+      clearLocalPhoto(); // ver clearLocalPhoto: o próprio 'clear' não volta por onMsg
       send({ kind: "clear", scope: "all" });
     }
     return;
@@ -1514,7 +1512,7 @@ function resetClear() {
   clearAllBtn.hidden = true;
 }
 clearDrawBtn.onclick = () => { resetClear(); send({ kind: "clear", scope: "draw" }); };
-clearAllBtn.onclick = () => { resetClear(); hasPhoto = false; send({ kind: "clear", scope: "all" }); };
+clearAllBtn.onclick = () => { resetClear(); hasPhoto = false; clearLocalPhoto(); send({ kind: "clear", scope: "all" }); };
 
 /* ================= desfazer/refazer do desenho (FIX E, aditivo ao protocolo, sem payload) ================= */
 $("undoBtn").onclick = () => send({ kind: "undo" });
@@ -3016,6 +3014,16 @@ for (const s of SIZES) {
 // a desenhar. NUNCA enviada por este painel (só o display fotografa); um
 // 'clear' scope 'all' apaga-a nos dois lados (ver onMsg).
 let photoImg = null;
+// FIX review P2: um 'clear all' emitido POR ESTE painel nunca voltava por
+// onMsg (as mensagens do próprio src são descartadas), e os handlers dos
+// botões só mexiam em hasPhoto. Resultado: tirar foto, fechar o modo desenhar,
+// "Limpar tudo", reabrir — e o eco ainda mostrava a foto que a projeção já
+// tinha apagado. Um só sítio a limpar, chamado pelos dois caminhos (local e
+// recebido), para não voltar a divergir.
+function clearLocalPhoto() {
+  photoImg = null;
+  if (drawScreenOpen) compositeEcho();
+}
 
 // fundo preto + foto (se existir, enquadrada na área desenhável) + imagem de
 // referência (alpha ~0.5, se existir) por cima — eco local, os traços entram
