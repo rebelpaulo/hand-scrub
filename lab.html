@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Motion Lab — caixa nas mãos</title>
 <style>
-  :root { --panel: #0f1219cc; --line: #2a3245; --text: #eef2f8; --muted: #98a2b6; --hot: #fb7185; }
+  :root { --panel: #0f1219cc; --line: #2a3245; --text: #eef2f8; --muted: #98a2b6; --hot: #fb7185; --accent: #5eead4; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: var(--text); }
@@ -50,11 +50,84 @@
     position: fixed; left: 14px; top: 14px; font-size: 11px; color: var(--muted);
     z-index: 10; opacity: .6; pointer-events: none;
   }
+
+  /* ---------- draggable tracking preview (PiP) — ver o que o MediaPipe vê,
+     mesmo padrão do scrub.html (#pip/.pip-h/.view/.hud/.pill) ---------- */
+  #pip {
+    position: fixed; right: 18px; bottom: 22px; width: 280px; z-index: 50;
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    box-shadow: 0 20px 50px -18px #000; cursor: grab; user-select: none;
+    touch-action: none;
+  }
+  #pip[hidden] { display: none; }
+  #pip.dragging { cursor: grabbing; opacity: .92; }
+  #pip .pip-h {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 7px 11px; font-size: 12px; font-weight: 600;
+    border-bottom: 1px solid var(--line);
+  }
+  .pip-x {
+    appearance: none; border: none; background: none; color: var(--muted);
+    font-size: 13px; cursor: pointer; padding: 2px 4px; line-height: 1;
+  }
+  .pip-x:hover { color: var(--hot); }
+  #pipResize {
+    position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; z-index: 3;
+    cursor: nwse-resize; touch-action: none;
+    background: linear-gradient(135deg, transparent 50%, #8b95a8aa 50%);
+    border-bottom-right-radius: 4px;
+  }
+  #pipReopen {
+    position: fixed; right: 18px; bottom: 22px; z-index: 50;
+    width: 48px; height: 48px; border-radius: 50%; font-size: 22px;
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); color: var(--text); cursor: pointer;
+    box-shadow: 0 12px 30px -12px #000; transition: .15s;
+  }
+  #pipReopen:hover { border-color: var(--accent); transform: scale(1.06); }
+  #pipReopen[hidden] { display: none; }
+  #pip .view { position: relative; aspect-ratio: 4/3; background: #05070a; }
+  #pip .view canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #pip .hud {
+    position: absolute; left: 8px; top: 8px; display: flex; flex-wrap: wrap;
+    gap: 6px; z-index: 2; max-width: calc(100% - 16px);
+  }
+  .pill {
+    background: #0a0d14cc; border: 1px solid var(--line); border-radius: 99px;
+    padding: 3px 9px; font-size: 11px; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .pill b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .pill .led { width: 7px; height: 7px; border-radius: 50%; background: #3a4256; }
+  .pill.on .led { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .pill.hot .led { background: var(--hot); box-shadow: 0 0 8px var(--hot); }
 </style>
 </head>
 <body>
   <video id="cam" autoplay playsinline muted></video>
   <canvas id="gl"></canvas>
+
+  <!-- preview de tracking (P / comando "campreview") — ver o que o MediaPipe
+       está a ver e porque é que a caixa parou de seguir -->
+  <div id="pip" hidden>
+    <div class="pip-h">
+      <span>✋ Preview de tracking</span>
+      <button class="pip-x" id="pipClose" title="Fechar preview">✕</button>
+    </div>
+    <div class="view">
+      <canvas id="pipCam"></canvas>
+      <canvas id="pipOverlay"></canvas>
+      <div class="hud">
+        <span class="pill" id="pillHands"><span class="led"></span><b id="handsVal">—</b></span>
+        <span class="pill" id="pillBox"><span class="led"></span><b id="boxVal">—</b></span>
+        <span class="pill" id="pillFps"><span class="led"></span><b id="fpsVal">—</b></span>
+        <span class="pill" id="pillRej"><span class="led"></span><b id="rejVal">—</b></span>
+      </div>
+      <div id="pipResize" title="Redimensionar"></div>
+    </div>
+  </div>
+  <button id="pipReopen" title="Mostrar preview de tracking" hidden>✋</button>
 
   <div id="notice" hidden></div>
 
@@ -196,6 +269,21 @@
   const buttonsEl = document.getElementById("buttons");
   const cornerEl = document.getElementById("corner");
   cornerEl.textContent = "room: " + ROOM;
+
+  // preview de tracking (PiP) — ver secção "CAIXA" mais abaixo (usa boxCorners/
+  // handState, que só existem depois de declarados)
+  const pipEl = document.getElementById("pip");
+  const pipReopenEl = document.getElementById("pipReopen");
+  const pipCloseEl = document.getElementById("pipClose");
+  const pipResizeEl = document.getElementById("pipResize");
+  const pipCamCanvas = document.getElementById("pipCam");
+  const pipOverlayCanvas = document.getElementById("pipOverlay");
+  const pipCamCtx = pipCamCanvas.getContext("2d");
+  const pipCtx = pipOverlayCanvas.getContext("2d");
+  const pillHandsEl = document.getElementById("pillHands"), handsValEl = document.getElementById("handsVal");
+  const pillBoxEl = document.getElementById("pillBox"), boxValEl = document.getElementById("boxVal");
+  const fpsValEl = document.getElementById("fpsVal");
+  const pillRejEl = document.getElementById("pillRej"), rejValEl = document.getElementById("rejVal");
 
   const srcCanvas = document.createElement("canvas"); // staging 2D: cover+espelho do vídeo, por frame
   const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true });
@@ -518,8 +606,12 @@ void main() {
   // congelava com as duas mãos no ar, que é precisamente o que acontece a
   // alguém a mexer as mãos num evento. A etiqueta nunca fez falta: o updateBox
   // já deriva a aresta esquerda/direita do x de ecrã.
+  let lastHandsRaw = [];   // NEW (instrumentação): landmarks completos das mãos deste frame, para o preview
+  let lastHandsCount = 0;  // NEW (instrumentação): nº de mãos detetadas, para o pill "mãos"
   function processHands(res) {
     const hands = (res.landmarks || []).slice(0, 2);
+    lastHandsRaw = hands;
+    lastHandsCount = hands.length;
     const maos = hands.map(lm => ({
       thumb: camToScreen(lm[4].x, lm[4].y),
       index: camToScreen(lm[8].x, lm[8].y),
@@ -549,6 +641,16 @@ void main() {
   let boxCorners = null, hasBox = false;
   let boxCleared = false; // tecla 0/Esc: esconde a caixa até uma mão sumir e as duas voltarem (re-arma como um "largar")
   let manualBoxActive = false, manualBox = null; // gancho de teste — ver window.__lab
+
+  // ---- instrumentação apenas (P1): PORQUE é que updateBox saiu sem atualizar
+  // a caixa. Não decide nada — só relata a decisão que a lógica acima já tomou. ----
+  let boxReason = "sem mãos";        // motivo do estado atual, ver updateBox()
+  let rejectedQuad = null;           // candidato de isValidQuad rejeitado NESTE frame (preview: tracejado)
+  let rejectTimes = [];              // timestamps (ms) das rejeições, para o contador "N rejeições/2s"
+  function rejectionsInWindow(now) {
+    while (rejectTimes.length && now - rejectTimes[0] > 2000) rejectTimes.shift();
+    return rejectTimes.length;
+  }
 
   function orientation(a, b, c) { return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); }
   function segmentsCross(p1, p2, p3, p4) {
@@ -594,10 +696,15 @@ void main() {
   }
 
   function updateBox(now) {
-    if (manualBoxActive) { boxCorners = manualBox; hasBox = true; return; }
+    if (manualBoxActive) { boxCorners = manualBox; hasBox = true; boxReason = "a seguir"; rejectedQuad = null; return; }
     const L = handState.Left, R = handState.Right;
-    if (!(L.visible && R.visible)) { boxCleared = false; return; } // solto: caixa congela onde estava
-    if (boxCleared) return; // apagada por tecla — espera uma mão sumir para re-armar
+    if (!(L.visible && R.visible)) {
+      boxCleared = false; // solto: caixa congela onde estava
+      boxReason = (L.visible || R.visible) ? "só 1 mão" : "sem mãos"; // NEW: instrumentação
+      rejectedQuad = null;
+      return;
+    }
+    if (boxCleared) { boxReason = "apagada"; rejectedQuad = null; return; } // apagada por tecla — espera uma mão sumir para re-armar
 
     // a mão mais à esquerda no ecrã dá a aresta esquerda, a outra a direita;
     // dentro de cada mão, o ponto mais acima (y menor) é o canto de cima —
@@ -616,10 +723,217 @@ void main() {
       BR: { x: oe.BRx.filter(rBot.x, t), y: oe.BRy.filter(rBot.y, t) },
       BL: { x: oe.BLx.filter(lBot.x, t), y: oe.BLy.filter(lBot.y, t) },
     };
-    if (!isValidQuad(next)) return; // quad em gravata/degenerado: descarta este frame, mantém a última caixa válida
+    if (!isValidQuad(next)) {
+      // quad em gravata/degenerado: descarta este frame, mantém a última caixa válida
+      boxReason = "quad inválido";       // NEW: instrumentação
+      rejectedQuad = next;               // NEW: candidato rejeitado, para o preview desenhar a tracejado
+      rejectTimes.push(now);             // NEW: alimenta o contador "N rejeições/2s"
+      return;
+    }
     boxCorners = next;
     hasBox = true;
+    boxReason = "a seguir";  // NEW: instrumentação
+    rejectedQuad = null;     // NEW: instrumentação
   }
+
+  /* ==========================================================================
+   * PREVIEW DE TRACKING (PiP) — mesmo padrão do scrub.html: mostra o feed da
+   * câmara com os landmarks das mãos e o contorno da caixa por cima, para se
+   * ver O QUE o MediaPipe está a ver e PORQUE é que a caixa parou de seguir
+   * (mão em falta / quad inválido / apagada / congelada), em vez de a caixa
+   * simplesmente parar em silêncio.
+   * ========================================================================== */
+
+  const PIP_CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+    [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+  function pipViewEl() { return pipEl.querySelector(".view"); }
+  function syncPipCanvasSize() {
+    const v = pipViewEl();
+    const cw = v.clientWidth, ch = v.clientHeight;
+    if (pipCamCanvas.width !== cw || pipCamCanvas.height !== ch) {
+      pipCamCanvas.width = cw; pipCamCanvas.height = ch;
+      pipOverlayCanvas.width = cw; pipOverlayCanvas.height = ch;
+    }
+  }
+  // câmara normalizada (0..1, não espelhada) -> pixel do canvas do preview,
+  // mesma matemática "cover + espelho" de camToScreen(), mas para o retângulo
+  // (potencialmente com outro aspect ratio) do PiP em vez do ecrã inteiro.
+  function pipMap(nx, ny, cw, ch, vw, vh) {
+    const s = Math.max(cw / vw, ch / vh);
+    const offX = (cw - vw * s) / 2, offY = (ch - vh * s) / 2;
+    return { x: cw - (offX + nx * vw * s), y: offY + ny * vh * s };
+  }
+  // inverso de camToScreen(): pixel do ecrã principal -> câmara normalizada,
+  // para poder reprojetar os cantos da caixa (calculados em espaço do ecrã
+  // principal) no espaço do PiP através de pipMap(). Reutiliza coverTransform.
+  function mainScreenToNorm(pt, vw, vh) {
+    const { s, offX, offY } = coverTransform(vw, vh);
+    return { x: (W - pt.x - offX) / (vw * s), y: (pt.y - offY) / (vh * s) };
+  }
+
+  function drawPipFrame() {
+    syncPipCanvasSize();
+    const cw = pipCamCanvas.width, ch = pipCamCanvas.height;
+    if (!cw || !ch) return;
+    pipCamCtx.clearRect(0, 0, cw, ch);
+    const vw = camEl.videoWidth, vh = camEl.videoHeight;
+    if (!vw || !vh) return; // sem frame de câmara real (ex.: verificação sem câmara) — só o overlay desenha
+    const s = Math.max(cw / vw, ch / vh);
+    const dw = vw * s, dh = vh * s, offX = (cw - dw) / 2, offY = (ch - dh) / 2;
+    pipCamCtx.save();
+    pipCamCtx.translate(cw, 0); pipCamCtx.scale(-1, 1);
+    pipCamCtx.drawImage(camEl, 0, 0, vw, vh, offX, offY, dw, dh);
+    pipCamCtx.restore();
+  }
+
+  function drawPipOverlay() {
+    const cw = pipOverlayCanvas.width, ch = pipOverlayCanvas.height;
+    pipCtx.clearRect(0, 0, cw, ch);
+    if (!cw || !ch) return;
+    const vw = camEl.videoWidth || 1280, vh = camEl.videoHeight || 720;
+    const map = (nx, ny) => pipMap(nx, ny, cw, ch, vw, vh);
+
+    // esqueleto completo em tom discreto; polegar(4)/indicador(8) — os dois
+    // únicos pontos que a caixa usa — destacados + aresta vertical entre eles.
+    for (const lm of lastHandsRaw) {
+      pipCtx.lineWidth = 2; pipCtx.strokeStyle = "rgba(152,162,182,.45)";
+      for (const [a, b] of PIP_CONNECTIONS) {
+        const pa = map(lm[a].x, lm[a].y), pb = map(lm[b].x, lm[b].y);
+        pipCtx.beginPath(); pipCtx.moveTo(pa.x, pa.y); pipCtx.lineTo(pb.x, pb.y); pipCtx.stroke();
+      }
+      for (let i = 0; i < lm.length; i++) {
+        const p = map(lm[i].x, lm[i].y);
+        const key = i === 4 || i === 8;
+        pipCtx.beginPath(); pipCtx.arc(p.x, p.y, key ? 7 : 3, 0, Math.PI * 2);
+        pipCtx.fillStyle = key ? "#5eead4" : "rgba(230,233,242,.55)";
+        pipCtx.fill();
+      }
+      const t = map(lm[4].x, lm[4].y), ix = map(lm[8].x, lm[8].y);
+      pipCtx.beginPath(); pipCtx.moveTo(t.x, t.y); pipCtx.lineTo(ix.x, ix.y);
+      pipCtx.lineWidth = 3; pipCtx.strokeStyle = "#5eead4"; pipCtx.stroke();
+    }
+
+    // contorno da caixa: última válida a cheio; se HOUVER um candidato
+    // rejeitado neste frame, desenha-o por cima a tracejado numa cor de aviso
+    // — é isto que torna visível "a guarda acabou de recusar um frame".
+    function drawQuad(q, dashed, color) {
+      const pts = [q.TL, q.TR, q.BR, q.BL].map(p => map(mainScreenToNorm(p, vw, vh).x, mainScreenToNorm(p, vw, vh).y));
+      pipCtx.beginPath();
+      pipCtx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) pipCtx.lineTo(pts[i].x, pts[i].y);
+      pipCtx.closePath();
+      pipCtx.setLineDash(dashed ? [6, 5] : []);
+      pipCtx.lineWidth = dashed ? 2 : 3;
+      pipCtx.strokeStyle = color;
+      pipCtx.stroke();
+      pipCtx.setLineDash([]);
+    }
+    if (boxCorners) drawQuad(boxCorners, false, "rgba(94,234,212,.9)");
+    if (rejectedQuad) drawQuad(rejectedQuad, true, "rgba(251,113,133,.95)");
+  }
+
+  let pipFpsEMA = 0;
+  function updatePipHud(now) {
+    // diagnóstico apenas: câmara/pipeline sem novos frames há >1s mas ainda há
+    // caixa válida = congelada por falta de frame (não por gesto) — motivo
+    // distinto de "só 1 mão"/"quad inválido"/"apagada", que updateBox já cobre.
+    const stale = hasBox && (now - lastFrameAdvanceAt > 1000);
+    const reason = stale ? "congelada" : boxReason;
+    const rejCount = rejectionsInWindow(now);
+    if (pipEl.hidden) return;
+    handsValEl.textContent = String(lastHandsCount);
+    pillHandsEl.className = "pill" + (lastHandsCount === 2 ? " on" : lastHandsCount === 1 ? " hot" : "");
+    boxValEl.textContent = reason;
+    pillBoxEl.className = "pill" + (reason === "a seguir" ? " on" : " hot");
+    fpsValEl.textContent = pipFpsEMA ? pipFpsEMA.toFixed(0) : "—";
+    rejValEl.textContent = rejCount + " rejeições/2s";
+    pillRejEl.className = "pill" + (rejCount > 0 ? " hot" : "");
+  }
+
+  /* ---- abrir/fechar: tecla P, comando "campreview", botão ✕ / reabrir ---- */
+  // definido dentro do IIFE de arrastar/redimensionar (fitPip), chamado daqui
+  let clampPip = () => {};
+  function setPipVisible(on) {
+    pipEl.hidden = !on;
+    pipReopenEl.hidden = !!on;
+    // Reenquadra ao reabrir (review PR #47): o listener de resize sai cedo
+    // enquanto o preview está escondido, por isso um redimensionamento ou
+    // rotação nesse intervalo deixava-o com left/top de um ecrã que já não
+    // existe — reaparecia fora do ecrã e sem forma de o arrastar de volta.
+    if (on) clampPip();
+  }
+  function togglePip() { setPipVisible(pipEl.hidden); }
+  pipCloseEl.addEventListener("click", e => { e.stopPropagation(); setPipVisible(false); });
+  pipReopenEl.addEventListener("click", () => setPipVisible(true));
+
+  /* ---- arrastar / redimensionar — mesmo padrão do scrub.html (placePip) ---- */
+  (() => {
+    function placePip(x, y) {
+      const w = pipEl.offsetWidth || 280, h = pipEl.offsetHeight || 240;
+      x = Math.min(Math.max(0, x), Math.max(0, window.innerWidth - w));
+      y = Math.min(Math.max(0, y), Math.max(0, window.innerHeight - h));
+      pipEl.style.left = x + "px"; pipEl.style.top = y + "px";
+      pipEl.style.right = "auto"; pipEl.style.bottom = "auto";
+    }
+    let sx, sy, ox, oy, dragging = false;
+    pipEl.addEventListener("pointerdown", e => {
+      if (e.target.closest(".pip-x, #pipResize")) return;
+      dragging = true; pipEl.classList.add("dragging");
+      try { pipEl.setPointerCapture(e.pointerId); } catch { /* ponteiro já inativo */ }
+      const r = pipEl.getBoundingClientRect();
+      sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+    });
+    pipEl.addEventListener("pointermove", e => {
+      if (!dragging) return;
+      placePip(ox + e.clientX - sx, oy + e.clientY - sy);
+    });
+    const endDrag = e => {
+      if (!dragging) return;
+      dragging = false; pipEl.classList.remove("dragging");
+      if (pipEl.hasPointerCapture?.(e.pointerId)) pipEl.releasePointerCapture(e.pointerId);
+    };
+    pipEl.addEventListener("pointerup", endDrag);
+    pipEl.addEventListener("pointercancel", endDrag);
+    pipEl.addEventListener("lostpointercapture", endDrag);
+
+    let rsx, rw, resizing = false;
+    pipResizeEl.addEventListener("pointerdown", e => {
+      e.stopPropagation();
+      resizing = true; rsx = e.clientX; rw = pipEl.offsetWidth;
+      try { pipResizeEl.setPointerCapture(e.pointerId); } catch { /* ponteiro já inativo */ }
+    });
+    pipResizeEl.addEventListener("pointermove", e => {
+      if (!resizing) return;
+      const w = Math.min(Math.max(200, rw + e.clientX - rsx), window.innerWidth - 24);
+      pipEl.style.width = w + "px";
+    });
+    const endResize = e => {
+      if (!resizing) return;
+      resizing = false;
+      if (pipResizeEl.hasPointerCapture?.(e.pointerId)) pipResizeEl.releasePointerCapture(e.pointerId);
+      const r = pipEl.getBoundingClientRect();
+      placePip(r.left, r.top); // garante que continua dentro do ecrã
+    };
+    pipResizeEl.addEventListener("pointerup", endResize);
+    pipResizeEl.addEventListener("pointercancel", endResize);
+    pipResizeEl.addEventListener("lostpointercapture", endResize);
+
+    // encolhe se já não couber e volta a prender dentro do ecrã — usado no
+    // resize E ao reabrir o preview (ver setPipVisible/clampPip)
+    function fitPip() {
+      if (pipEl.offsetWidth > window.innerWidth - 24) {
+        pipEl.style.width = Math.max(200, window.innerWidth - 24) + "px";
+      }
+      const r = pipEl.getBoundingClientRect();
+      placePip(r.left, r.top);
+    }
+    clampPip = fitPip;
+    window.addEventListener("resize", () => {
+      if (pipEl.hidden) return; // escondido: fica para o reabrir, que chama fitPip
+      fitPip();
+    });
+  })();
 
   /* ==========================================================================
    * LOOP
@@ -627,6 +941,7 @@ void main() {
 
   let testSourceEl = null; // gancho de teste: substitui a câmara por um canvas sintético
   let syntheticLandmarks = null; // gancho de teste: substitui landmarker.detectForVideo() — ver window.__lab.setLandmarks
+  let lastFrameAdvanceAt = performance.now(); // NEW (instrumentação): último tick que processou mãos/caixa — ver updatePipHud() / "congelada"
 
   // corpo de 1 frame, isolado de requestAnimationFrame — a verificação desta
   // ticket corre num browser automatizado onde separadores em segundo plano
@@ -634,19 +949,26 @@ void main() {
   // de teste forceFrame() chama isto diretamente, sem depender do rAF.
   function tick(now) {
     try {
+      let frameAdvanced = false; // NEW (instrumentação): houve mãos/caixa processadas neste tick?
       if (manualBoxActive) {
         updateBox(now);
+        frameAdvanced = true;
       } else if (syntheticLandmarks) {
         // caminho real de processHands()+updateBox(), sem câmara nem modelo —
         // é a única forma de exercitar F1/F2 num browser automatizado sem câmara.
         processHands(syntheticLandmarks);
         updateBox(now);
+        frameAdvanced = true;
       } else if (landmarker && cameraReady && camEl.currentTime !== lastVideoTime) {
         lastVideoTime = camEl.currentTime;
         const res = landmarker.detectForVideo(camEl, now);
         processHands(res);
         updateBox(now);
+        frameAdvanced = true;
       }
+      if (frameAdvanced) lastFrameAdvanceAt = now; // NEW (instrumentação)
+      updatePipHud(now);                            // NEW: preview de tracking (P / ?debug=1)
+      if (!pipEl.hidden) { drawPipFrame(); drawPipOverlay(); } // NEW
       const el = testSourceEl || camEl;
       const vw = testSourceEl ? (el.width || 0) : (el.videoWidth || 0);
       const vh = testSourceEl ? (el.height || 0) : (el.videoHeight || 0);
@@ -659,8 +981,11 @@ void main() {
       console.error("lab.html: erro no frame (loop continua)", err);
     }
   }
+  let lastFpsAt = performance.now();
   function frame(now) {
     tick(now);
+    const dt = now - lastFpsAt; lastFpsAt = now; // NEW (instrumentação): fps do pill do preview
+    if (dt > 0) pipFpsEMA = pipFpsEMA ? pipFpsEMA * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
     requestAnimationFrame(frame);
   }
 
@@ -691,6 +1016,14 @@ void main() {
     else if (e.key === "0" || e.key === "Escape") {
       // apaga a caixa; re-arma quando uma mão sumir e as duas voltarem (updateBox)
       hasBox = false; boxCorners = null; boxCleared = true;
+      // Regista já o motivo (review PR #47): com a câmara estagnada, o
+      // updateBox não volta a correr sem um frame novo, e o painel ficava a
+      // mostrar indefinidamente o último motivo — quase sempre "a seguir" —
+      // com a caixa apagada. Diagnóstico a mentir é pior do que não ter.
+      boxReason = "apagada"; rejectedQuad = null;
+      updatePipHud(performance.now()); // repinta já: sem frame novo o tick() não corre e o pill ficava a mentir
+    } else if (e.key === "p" || e.key === "P") {
+      togglePip(); // NEW: preview de tracking
     }
   });
 
@@ -713,6 +1046,16 @@ void main() {
     requestAnimationFrame(frame);
     startCamera();
   }
+
+  /* ================= ponte postMessage (shell de projeção) =================
+     lab.html corre dentro do iframe do display.html; o "ready" avisa o shell
+     de que já há alguém a ouvir, para ele reenviar o último "campreview"
+     pendente (mesmo padrão do scrub.html). ================= */
+  if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
+  window.addEventListener("message", e => {
+    if (e.origin !== location.origin || e.data?.mapping !== 1) return;
+    if (e.data.cmd === "campreview") setPipVisible(!!e.data.on);
+  });
 
   // window.__lab: getters sempre disponíveis (inofensivos, só leitura). Os
   // mutadores (trocar fonte de vídeo, forçar caixa/landmarks sem mãos reais,
