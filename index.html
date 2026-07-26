@@ -359,6 +359,9 @@
   }
   .map-btn:hover { border-color: var(--accent-2); }
   .map-btn.primary { background: var(--accent); color: #04211c; border-color: var(--accent); }
+  /* saída: destacada do resto da fila, mas sem gritar — pede confirmação na mesma */
+  .map-btn-exit { border-color: #fb718555; color: #fda4af; }
+  .map-btn-exit:hover { border-color: var(--hot); background: #2a1218; }
   .map-btn.primary:hover { filter: brightness(1.08); }
   .map-btn.on { background: var(--hot); color: #2a0410; border-color: var(--hot); }
 
@@ -555,6 +558,12 @@
           <button type="button" class="map-btn" id="mapCamBtn">👁 Preview câmara</button>
           <button type="button" class="map-btn" id="mapChromeBtn" title="Mostra/esconde os botões da experiência (cenas, play/pausa, trim, ecrã inteiro) na projeção">🎛️ Controlos na projeção</button>
           <button type="button" class="map-btn" id="mapHomeBtn">⬛ Ecrã preto</button>
+          <!-- Saída VISÍVEL. O hotspot de 10s no canto continua a existir e a
+               funcionar, mas serve para PROTEGER A ENTRADA (um convidado não
+               entra na configuração por acidente). Esconder a saída não protege
+               nada — só prende o operador num painel onde todos os outros
+               botões são visíveis e nenhum é "sair". -->
+          <button type="button" class="map-btn map-btn-exit" id="mapExitBtn">✕ Sair do mapping</button>
         </div>
       </div>
 
@@ -976,6 +985,7 @@ const mapConfirm = $("mapConfirm"), mapConfirmText = $("mapConfirmText");
 const mapConfirmOk = $("mapConfirmOk"), mapConfirmCancel = $("mapConfirmCancel");
 const mapSetup = $("mapSetup"), mapSetupClose = $("mapSetupClose"), mapCopyUrlBtn = $("mapCopyUrlBtn");
 const mapSetupBtn = $("mapSetupBtn"), mapCamBtn = $("mapCamBtn"), mapChromeBtn = $("mapChromeBtn"), mapHomeBtn = $("mapHomeBtn");
+const mapExitBtn = $("mapExitBtn");
 const mapRoomLabel = $("mapRoomLabel"), mapIndicator = $("mapIndicator");
 const mapAppsEl = $("mapApps"), mapDetailPlaceholder = $("mapDetailPlaceholder"), mapDetailContent = $("mapDetailContent");
 const mapDetailTitle = $("mapDetailTitle"), mapDetailDesc = $("mapDetailDesc");
@@ -1215,6 +1225,11 @@ function wireMapUI() {
   mapChromeBtn.classList.toggle("on", mapChromeOn); // estado visual inicial coerente
   mapHomeBtn.addEventListener("click", mapGoHome);
   mapSetupBtn.addEventListener("click", openMapSetup);
+  // mesmo diálogo e mesma ação do hotspot de 10s — uma só forma de sair, dois
+  // caminhos para lá chegar; não duplica a lógica de saída
+  mapExitBtn.addEventListener("click", () => {
+    showMapConfirm("Sair do mapping mode?", "Sair", "Cancelar", exitMapping);
+  });
   mapSetupClose.addEventListener("click", () => { mapSetup.hidden = true; });
   mapCopyUrlBtn.addEventListener("click", copyDisplayUrl);
 }
