@@ -338,9 +338,12 @@ function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
    vídeo da foto) é deformada. Quando INATIVO (grelha identidade e sem teste): zero
    custo WebGL — bypass total, warpCanvas escondido, camadas normais visíveis. */
 let warp = null, warpAvailable = false;
-let warpActive = false;       // !isIdentity() OU testPattern — cache, recalculado só ao aplicar config
+let warpActive = false;       // !isIdentity() OU testPattern OU imagem de teste — cache, recalculado só ao aplicar config
 let warpIsIdentityCache = true;
-let warpTestOn = false;
+let warpTestOn = false;       // grelha de teste
+let warpImageTestOn = false;  // imagem de teste (ticket W1) — mutuamente exclusiva com warpTestOn, ver refreshWarpTestVisual
+let warpImageTestRequested = false; // último 'imageTest' recebido, independente de a imagem já ter chegado da cloud (ver onRefTestImageLoaded)
+let warpImageMissingNoticeShown = false; // evita spam do aviso a cada mensagem 'warp' (throttle ~80ms durante arrasto)
 let warpN = 5;
 let warpLive = false;         // já chegou uma mensagem 'warp' ao vivo? o cloudLoad atrasado não a pode esmagar
 try {
@@ -356,16 +359,49 @@ const warpOffscreen = document.createElement("canvas");
 const warpOffCtx = warpOffscreen.getContext("2d");
 
 // aplica uma config completa (mensagem 'warp' OU carregamento da cloud) — protocolo
-// NÃO usa deltas, tal como 'state'/'zones': vem sempre { n, points, testPattern }
-function applyWarpConfig(n, points, testPattern) {
+// NÃO usa deltas, tal como 'state'/'zones': vem sempre { n, points, testPattern,
+// imageTest }. imageTest é aditivo (ticket W1): testPattern vem SEMPRE true em
+// ambos os modos de teste (grelha ou imagem) para um código antigo que só
+// conheça testPattern degradar para a grelha em vez de ficar num estado
+// inválido — só este ficheiro (pós-W1) sabe distinguir os dois via imageTest.
+function applyWarpConfig(n, points, testPattern, imageTest) {
   if (!warpAvailable) return;
   if (n && n !== warpN) { warp.setGrid(n); warpN = n; }
   if (points === null || points === undefined) warp.identity();
   else warp.setPoints(Float32Array.from(points));
-  warp.showTestPattern(!!testPattern);
+  const passouALigar = !!imageTest && !warpImageTestRequested;
+  warpImageTestRequested = !!imageTest;
+  refreshWarpTestVisual(testPattern);
+  // Ao LIGAR a imagem de teste, vai buscar a versão atual à cloud (review PR
+  // #51): o display pode estar aberto há horas enquanto o operador trocou a
+  // imagem no painel. Quando chegar, onRefTestImageLoaded() reaplica sozinho.
+  // Só no flanco de subida — reenviar a cada arrasto de ponto do warp seria um
+  // fetch por frame.
+  if (passouALigar) loadRefTestImageFromCloud();
+}
+
+// separado de applyWarpConfig para poder ser re-executado quando refTestImage
+// chega DEPOIS de uma mensagem 'warp' com imageTest:true (ver onRefTestImageLoaded)
+// — sem isto, uma imagem de teste pedida antes do fetch da cloud resolver ficava
+// presa na grelha até à próxima mensagem 'warp' (próximo arrasto/toggle no editor).
+function refreshWarpTestVisual(testPattern) {
+  const wantImage = warpImageTestRequested;
+  warpImageTestOn = wantImage && !!refTestImage; // grelha/imagem mutuamente exclusivas — ver warp.showTestPattern abaixo
+  if (wantImage && !refTestImage) {
+    if (!warpImageMissingNoticeShown) {
+      warpImageMissingNoticeShown = true;
+      showNotice("⚠️ imagem de teste pedida, mas não há imagem de referência guardada — a mostrar a grelha");
+    }
+  } else {
+    warpImageMissingNoticeShown = false;
+  }
+  // showTestPattern(true) faz o warp.js desenhar a grelha SINTÉTICA (ignora a
+  // fonte por completo, ver warp.js fragmentSrc) — por isso só pode estar ligado
+  // quando a imagem NÃO está ativa, senão a imagem nunca apareceria.
+  warp.showTestPattern(!!testPattern && !warpImageTestOn);
   warpTestOn = !!testPattern;
   warpIsIdentityCache = warp.isIdentity();
-  setWarpActiveVisual(warpTestOn || !warpIsIdentityCache);
+  setWarpActiveVisual(warpTestOn || warpImageTestOn || !warpIsIdentityCache);
   // um warp carregado da cloud pode ativar ANTES do 1º rAF (prompt de câmara
   // pendente): compõe já um frame para não ficar tudo preto até o loop andar (T31)
   if (warpActive) composeAndWarp();
@@ -389,14 +425,23 @@ function setWarpActiveVisual(active) {
 // pelo rAF existente (loop/muralLoop) só quando warpActive.
 function composeAndWarp() {
   warpOffCtx.clearRect(0, 0, W, H);
-  warpOffCtx.drawImage(photoCanvas, 0, 0, W, H);
-  warpOffCtx.drawImage(drawCanvas, 0, 0, W, H);
-  warpOffCtx.drawImage(strokeCanvas, 0, 0, W, H);
-  warpOffCtx.drawImage(cursorCanvas, 0, 0, W, H);
-  // vídeo da sequência de foto (contagem/flash), mesma geometria cover+espelho
-  // E mesma bbox (B1) da foto que vai ser capturada — sem isto a pré-visualização
-  // aparecia ecrã inteiro e só cortava para a zona pequena no instante da captura
-  if (cam.classList.contains("show")) drawVideoCover(warpOffCtx, cam, includeZonesBBox(zones, W, H));
+  if (warpImageTestOn && refTestImage) {
+    // imagem de teste (ticket W1): mesmo caminho de composição/warp de sempre,
+    // só troca o que entra no offscreen — reaproveita o warp.render() de baixo
+    // em vez de um caminho paralelo. Mesmo stretch não-aspect-correct do editor
+    // (renderWarpCanvas em magicdraw.html: drawImage(refImg,0,0,w,h)) — os pontos
+    // são normalizados ao retângulo do canvas, não à imagem, em ambos os lados.
+    warpOffCtx.drawImage(refTestImage, 0, 0, W, H);
+  } else {
+    warpOffCtx.drawImage(photoCanvas, 0, 0, W, H);
+    warpOffCtx.drawImage(drawCanvas, 0, 0, W, H);
+    warpOffCtx.drawImage(strokeCanvas, 0, 0, W, H);
+    warpOffCtx.drawImage(cursorCanvas, 0, 0, W, H);
+    // vídeo da sequência de foto (contagem/flash), mesma geometria cover+espelho
+    // E mesma bbox (B1) da foto que vai ser capturada — sem isto a pré-visualização
+    // aparecia ecrã inteiro e só cortava para a zona pequena no instante da captura
+    if (cam.classList.contains("show")) drawVideoCover(warpOffCtx, cam, includeZonesBBox(zones, W, H));
+  }
   warp.render(warpOffscreen);
 }
 
@@ -409,6 +454,8 @@ window.__warpDebug = {
   get active() { return warpActive; },
   get n() { return warpN; },
   get testPattern() { return warpTestOn; },
+  get imageTest() { return warpImageTestOn; },
+  get refTestImage() { return refTestImage; },
 };
 
 /* ================= canvas sizing (DPR-aware) ================= */
@@ -643,10 +690,14 @@ function handleMsg(payload) {
       // partindo a projeção sem lançar exceção nenhuma para o try/catch abaixo
       // apanhar. Number.isFinite rejeita NaN/±Infinity/strings.
       const pointsOk = points == null || (Array.isArray(points) && points.length === effN * effN * 2 && points.every(Number.isFinite));
-      if (!nOk || !pointsOk) break; // forma inválida: ignora em silêncio (canal público)
+      // imageTest (ticket W1): aditivo ao protocolo, mesma validação de forma que
+      // os outros campos deste kind — ausente/undefined é válido (código antigo
+      // do editor nunca o envia), qualquer coisa que não seja boolean é ignorada.
+      const imageTestOk = payload.imageTest === undefined || typeof payload.imageTest === "boolean";
+      if (!nOk || !pointsOk || !imageTestOk) break; // forma inválida: ignora em silêncio (canal público)
       try {
         warpLive = true;
-        applyWarpConfig(n, points, payload.testPattern);
+        applyWarpConfig(n, points, payload.testPattern, payload.imageTest);
       } catch { /* falha inesperada dentro do warp.js — ignora a mensagem, não parte o handler */ }
       break;
     }
@@ -682,10 +733,52 @@ async function loadWarpFromCloud() {
     });
     if (!r.ok) return;
     const cfg = (await r.json())[0]?.data;
-    if (cfg && !warpLive) applyWarpConfig(cfg.n, cfg.points, false);
+    // imageTest SEMPRE false aqui, mesma regra do testPattern acima (nunca persiste ligado).
+    if (cfg && !warpLive) applyWarpConfig(cfg.n, cfg.points, false, false);
   } catch { /* offline: fica em identidade até chegar uma mensagem 'warp' ao vivo */ }
 }
 loadWarpFromCloud();
+
+/* ================= imagem de teste do warp (Supabase · hand_config, ticket W1) =================
+   Só é usada quando chega 'warp' com imageTest:true — a imagem em si nunca viaja
+   pelo BroadcastChannel/Realtime (só o pedido para a mostrar), por isso é buscada
+   diretamente por REST à MESMA row que o editor grava (REFIMG_ID, ver magicdraw.html),
+   mesmo padrão/id de loadZonesFromCloud/loadWarpFromCloud acima. Carregada uma vez
+   no arranque — se ainda não chegou quando o 1º 'warp' com imageTest:true aparecer,
+   refreshWarpTestVisual mostra a grelha (fallback) e um aviso até este load resolver. */
+let refTestImage = null;
+function onRefTestImageLoaded() {
+  if (warpImageTestRequested) refreshWarpTestVisual(warpTestOn); // reaplica agora que a imagem já existe
+}
+// Re-carregável de propósito (review PR #51). Carregar uma só vez no arranque
+// falha no fluxo NORMAL de setup: o display fica aberto na parede enquanto o
+// operador ainda anda a carregar/trocar a imagem no painel — e depois pedia
+// "imagem de teste" e via a imagem antiga, ou a grelha, sem perceber porquê.
+// Uma chamada em curso não é duplicada; o pedido mais recente ganha.
+let refTestImageLoading = null;
+async function loadRefTestImageFromCloud() {
+  if (!warpAvailable) return;
+  if (refTestImageLoading) return refTestImageLoading;
+  refTestImageLoading = (async () => {
+  try {
+    const refImgId = ROOM === "default" ? "magicdraw-refimg" : "magicdraw-refimg:" + ROOM;
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.${encodeURIComponent(refImgId)}&select=data`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
+    });
+    if (!r.ok) return;
+    const cfg = (await r.json())[0]?.data;
+    if (!cfg?.img) return;
+    await new Promise(res => {
+      const im = new Image();
+      im.onload = () => { refTestImage = im; onRefTestImageLoaded(); res(); };
+      im.onerror = res; // dataURL corrompido: fica sem imagem, cai na grelha
+      im.src = cfg.img;
+    });
+  } catch { /* offline: fica sem imagem de teste até ao próximo pedido */ }
+  })();
+  try { await refTestImageLoading; } finally { refTestImageLoading = null; }
+}
+loadRefTestImageFromCloud();
 
 /* ================= transformação cover (mesma matemática de enxame.html) ================= */
 function coverTransform(fw, fh) {

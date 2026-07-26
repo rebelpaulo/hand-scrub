@@ -300,20 +300,20 @@
 
   /* ---------- botão admin: discreto, num canto, só reage a long-press ---------- */
   /* sobe acima da tab bar no telemóvel para não ficar tapado */
+  /* Marca do hotspot de admin. Vive na faixa vazia do cabeçalho das Cores (ao
+     centro do ecrã, por cima das bolas) em vez do canto — no canto disputava o
+     espaço com a barra de páginas e ninguém a encontrava.
+     É só um CÍRCULO neutro, sem ícone e SEM anel de progresso: o progresso era
+     precisamente o que ensinava um curioso a continuar a carregar ("está a
+     acontecer alguma coisa, vou segurar mais"). Assim o operador sabe onde é,
+     e para quem não sabe o toque não devolve pista nenhuma. */
   #adminGearBtn {
-    position: fixed; right: 12px; bottom: calc(var(--tabbar-h) + 16px); z-index: 96;
-    width: 44px; height: 44px; min-height: 0; border-radius: 50%;
-    background: #1a1e2a99; border: 1px solid var(--line); opacity: .45;
-    font-size: 18px; padding: 0; touch-action: none;
+    margin-left: auto; flex: 0 0 auto;
+    width: 26px; height: 26px; min-height: 0; border-radius: 50%;
+    background: #1a1e2a99; border: 1px solid var(--line); opacity: .38;
+    padding: 0; touch-action: none;
   }
-  #adminGearBtn .ic { width: 20px; height: 20px; }
-  #adminGearBtn::before {
-    content: ""; position: absolute; inset: -2px; border-radius: 50%;
-    background: conic-gradient(var(--neon) calc(var(--p, 0) * 1%), transparent 0);
-    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-    pointer-events: none;
-  }
+  #adminGearBtn .ic { display: none; } /* sem ícone: um ⚙️ anuncia "definições" a quem não devia procurar */
 
   /* ==================================================================
      Landscape / 16:9 — TABLET, MODO PRINCIPAL: tudo num ecrã sem
@@ -329,7 +329,6 @@
     #status { left: auto; top: 8px; right: 8px; }
     #tabBar { display: none; } /* sem paginação: tudo visível ao mesmo tempo */
     footer { display: block; }
-    #adminGearBtn { bottom: 12px; }
 
     /* grelha de 3 colunas × 8 linhas — usa grid-column/grid-row (linhas), NÃO
        grid-template-areas: com áreas nomeadas as 3 colunas partilhariam a MESMA
@@ -484,7 +483,7 @@
   #warpActions { display: flex; flex-wrap: wrap; gap: 10px; }
   #warpActions button { flex: 1; min-width: 90px; min-height: 60px; font-size: 12px; font-weight: 800; }
   #warpActions button .ic { width: 22px; height: 22px; }
-  #warpTestBtn.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
+  #warpTestBtn.on, #warpImageTestBtn.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
   #warpDoneBtn { border-color: #00ffcc; background: #0f2b26; flex-basis: 100%; color: var(--neon); }
   #buildingsOpenBtn { border-color: #00ffcc55; }
 
@@ -720,6 +719,14 @@
         <path d="M3 3h18v18H3z"/>
         <path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>
       </symbol>
+      <!-- imagem de teste do warp: cantos de enquadramento (viewfinder) + mira central —
+           distinto de ic-grid (grelha reta) e de ic-image (retângulo+sol+montanha) —
+           simboliza "alinhar/confirmar" em vez de "ficheiro de imagem" -->
+      <symbol id="ic-imgtest" viewBox="0 0 24 24">
+        <path d="M3 8V4h4M17 4h4v4M21 16v4h-4M7 20H3v-4"/>
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M12 6.5v2M12 15.5v2M6.5 12h2M15.5 12h2"/>
+      </symbol>
       <!-- reset: seta circular anti-horária -->
       <symbol id="ic-reset" viewBox="0 0 24 24">
         <path d="M3 12a9 9 0 1 0 2.6-6.4"/>
@@ -797,7 +804,7 @@
     </div>
     <div class="page" id="pageColors" data-page="colors">
       <section class="grp" id="grpColors">
-        <h2 class="section"><svg class="ic"><use href="#ic-palette"></use></svg><span>Cores</span></h2>
+        <h2 class="section"><svg class="ic"><use href="#ic-palette"></use></svg><span>Cores</span><button id="adminGearBtn" aria-label="Modo admin (mantém premido 3s)"><svg class="ic"><use href="#ic-gear"></use></svg></button></h2>
         <div class="card"><div id="colors"></div></div>
       </section>
       <section class="grp" id="grpMirrors">
@@ -843,7 +850,6 @@
   </div>
 
   <footer>Magic Draw · painel touch</footer>
-  <button id="adminGearBtn" aria-label="Modo admin: zonas de oclusão (mantém premido 3s)"><svg class="ic"><use href="#ic-gear"></use></svg></button>
 
   <!-- ================= overlay admin: zonas (áreas de desenho + oclusão) ================= -->
   <div id="adminOverlay" hidden>
@@ -898,16 +904,20 @@
       <p class="hint">arrasta um ponto (linha 0 = topo) · zoom com rato/trackpad ou 2 dedos para afinar · N muda a densidade da grelha, preservando os 4 cantos</p>
       <div id="warpActions">
         <button id="warpTestBtn"><svg class="ic"><use href="#ic-grid"></use></svg><br>Grelha de teste</button>
+        <button id="warpImageTestBtn" disabled><svg class="ic"><use href="#ic-imgtest"></use></svg><br>Imagem de teste</button>
         <button id="warpResetBtn"><svg class="ic"><use href="#ic-reset"></use></svg><br>Reset</button>
         <button id="warpBackBtn"><svg class="ic"><use href="#ic-back"></use></svg><br>Zonas</button>
         <button id="warpDoneBtn"><svg class="ic"><use href="#ic-check"></use></svg><br>Concluir</button>
       </div>
     </div>
   </div>
-  <!-- canvas 1x1 nunca anexado visualmente: só serve para uma instância real de
-       warp.js (createWarp) fazer a gestão dos pontos (setGrid/setPoints/identity/
-       isIdentity) — reaproveita a MESMA lógica testada do módulo em vez de duplicar
-       a interpolação que preserva os 4 cantos ao mudar N. Nunca chama .render(). -->
+  <!-- canvas nunca anexado visualmente: instância real de warp.js (createWarp) que
+       faz a gestão dos pontos (setGrid/setPoints/identity/isIdentity) — reaproveita
+       a MESMA lógica testada do módulo em vez de duplicar a interpolação que
+       preserva os 4 cantos ao mudar N. Desde o ticket W1 TAMBÉM é o output real de
+       .render(): a pré-visualização do editor deforma a imagem de referência pelo
+       MESMO warp.js que o display usa (ver renderWarpCanvas), por isso é
+       redimensionado à resolução da imagem carregada em vez de ficar 300×150. -->
   <canvas id="warpStateCanvas" style="display:none"></canvas>
 
   <!-- ================= overlay admin: 💾 Edifícios (presets nomeados de setup
@@ -1698,10 +1708,14 @@ function zonesCloudSave() {
   zonesCloudSaveT = setTimeout(() => { cloudPost(ZONES_ID, { zones }); }, 1000);
 }
 
-/* ---- imagem de referência (contorno da casa, só editor/tablet) ----
-   NUNCA é enviada por BroadcastChannel/Supabase Realtime nem aparece no display —
-   só serve de guia visual no admin. Persiste à parte das zonas (row própria) e
-   fica FORA do undo/redo da Parte 1 (não entra nos snapshots de `zones`). */
+/* ---- imagem de referência (contorno da casa, editor/tablet + "Imagem de teste"
+   no display, ticket W1) ----
+   A imagem em si NUNCA viaja pelo BroadcastChannel/Supabase Realtime (só o
+   pedido para a mostrar, kind:'warp' com imageTest:true) — o display busca-a
+   diretamente desta MESMA row (REFIMG_ID) por REST, mesmo padrão de
+   loadZonesFromCloud/loadWarpFromCloud (ver magicdraw-display.html). Persiste
+   à parte das zonas (row própria) e fica FORA do undo/redo da Parte 1 (não
+   entra nos snapshots de `zones`). */
 const REFIMG_ID = ROOM === "default" ? "magicdraw-refimg" : "magicdraw-refimg:" + ROOM;
 let refImg = null; // Image() decodificada, pronta a desenhar
 let refImgDataUrl = null;
@@ -1732,7 +1746,10 @@ function setRefImg(dataUrl, save) {
     // o load é assíncrono: redesenha os DOIS canvases que usam a imagem — o
     // do admin e o do modo Desenhar (podia estar aberto antes do cloud-load
     // chegar e ficava preto até um resize; review PR #40)
-    im.onload = () => { refImg = im; renderAdminCanvas(); compositeEcho(); }; // compositeEcho preserva os traços do eco ao chegar a imagem
+    // compositeEcho preserva os traços do eco ao chegar a imagem; renderWarpCanvas
+    // (se o overlay de warp estiver aberto) evita ficar achatada até ao próximo
+    // arrasto — o load é assíncrono e pode terminar depois do overlay já aberto.
+    im.onload = () => { refImg = im; renderAdminCanvas(); compositeEcho(); if (!warpOverlay.hidden) renderWarpCanvas(); };
     im.src = dataUrl;
   }
   renderAdminCanvas();
@@ -1776,6 +1793,8 @@ function updateRefImgButton() {
   refImgBtn.innerHTML = refImgDataUrl ? `${icSvg("trash")}<br>Imagem` : `${icSvg("image")}<br>Imagem`;
   // "Detetar contorno" só faz sentido com imagem carregada (é dela que lê a silhueta)
   $("outlineDetectBtn").disabled = !refImgDataUrl;
+  // "Imagem de teste" (warp) idem — sem imagem não há o que projetar deformado
+  if (warpToolAvailable) warpImageTestBtn.disabled = !refImgDataUrl;
 }
 refImgBtn.onclick = () => {
   if (!refImgDataUrl) { refImgInput.click(); return; } // sem imagem: abre o seletor de ficheiro
@@ -2683,7 +2702,11 @@ function closeAdmin() {
   // Concluir, warp ✔ Concluir, Escape) — sem isto, ligar a grelha de teste no
   // ecrã de warp e fechar pelo editor de zonas ("← Zonas" + "✔ Concluir")
   // deixava-a projetada sem controlo visível nenhum.
-  if (warpTestPatternOn) { warpTestPatternOn = false; warpTestBtn.classList.remove("on"); sendWarp(); }
+  if (warpTestPatternOn || warpImageTestOn) {
+    warpTestPatternOn = false; warpImageTestOn = false;
+    warpTestBtn.classList.remove("on"); warpImageTestBtn.classList.remove("on");
+    sendWarp();
+  }
   sendZones(false); // sai do modo admin: zonas ficam pretas/invisíveis no display
 }
 
@@ -2691,19 +2714,18 @@ function closeAdmin() {
 const adminGearBtn = $("adminGearBtn");
 const LONG_PRESS_MS = 3000;
 let pressStart = 0, pressTimer = null;
+// Sem indicação de progresso durante o hold — decisão deliberada. O anel que
+// aqui existia era o que ensinava quem não devia: uma criança que carregue por
+// acaso via algo a encher e percebia que valia a pena continuar. Agora um toque
+// curto não devolve pista nenhuma, e quem sabe do modo admin sabe que são 3s.
+// Um único setTimeout basta (o intervalo de 50ms só existia para animar o anel).
 function startPress(e) {
   e.preventDefault();
   pressStart = Date.now();
-  adminGearBtn.style.setProperty("--p", "0");
-  pressTimer = setInterval(() => {
-    const pct = Math.min(100, ((Date.now() - pressStart) / LONG_PRESS_MS) * 100);
-    adminGearBtn.style.setProperty("--p", String(pct));
-    if (pct >= 100) { clearInterval(pressTimer); pressTimer = null; openAdmin(); }
-  }, 50);
+  pressTimer = setTimeout(() => { pressTimer = null; openAdmin(); }, LONG_PRESS_MS);
 }
 function cancelPress() {
-  if (pressTimer) { clearInterval(pressTimer); pressTimer = null; }
-  adminGearBtn.style.setProperty("--p", "0");
+  if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
 }
 adminGearBtn.addEventListener("pointerdown", startPress);
 adminGearBtn.addEventListener("pointerup", cancelPress);
@@ -2719,21 +2741,35 @@ zonesCloudLoad(); // hidrata zonas guardadas antes de o admin abrir pela 1ª vez
    das zonas (zones/undo/redo) — o undo/redo do editor de zonas NÃO cobre
    o warp (fora de scope deste ticket).
    ================================================================== */
-// warpTool: instância REAL de warp.js, só para bookkeeping dos pontos
-// (setGrid/setPoints/getPoints/identity/isIdentity) — nunca chama .render()
-// aqui (não há conteúdo local para pré-visualizar warped, só a grelha de
-// pontos sobre a imagem de referência). Reaproveita a MESMA interpolação
-// que preserva os 4 cantos ao mudar N em vez de duplicar o algoritmo.
+// warpTool: instância REAL de warp.js — bookkeeping dos pontos
+// (setGrid/setPoints/getPoints/identity/isIdentity) E, desde o ticket W1, o
+// MESMO render() que o display usa: renderWarpCanvas() passa a imagem de
+// referência por warpTool.render() para a pré-visualização deformar como o
+// display, em vez de uma malha/aproximação própria que divergiria da
+// projeção real. Reaproveita a MESMA interpolação que preserva os 4 cantos
+// ao mudar N em vez de duplicar o algoritmo.
+const warpStateCanvasEl = $("warpStateCanvas");
 let warpTool = null, warpToolAvailable = false;
 try {
-  warpTool = createWarp($("warpStateCanvas"), { n: 5 });
+  warpTool = createWarp(warpStateCanvasEl, { n: 5 });
   warpToolAvailable = true;
 } catch (e) {
   warpToolAvailable = false; // sem WebGL neste tablet: 📐 Warp fica desativado (ver abaixo)
 }
 let warpN = 5;
 let warpTestPatternOn = false;
+let warpImageTestOn = false; // "Imagem de teste": mutuamente exclusivo com warpTestPatternOn (ver os dois onclick)
 let warpDragIdx = -1;
+// exposto só para inspeção/depuração (mesmo padrão do __mdDebug/__zoomDebug acima
+// e do __warpDebug em magicdraw-display.html) — lê os pontos reais do warpTool na
+// consola sem editar este ficheiro (útil para provar que o editor e o display
+// aplicam o MESMO warp aos mesmos pontos).
+window.__warpEditorDebug = {
+  get instance() { return warpTool; },
+  get available() { return warpToolAvailable; },
+  get points() { return warpToolAvailable ? Array.from(warpTool.getPoints()) : null; },
+  get n() { return warpN; },
+};
 let warpDragStart = null; // [x,y] do ponto ANTES do arrasto atual — usado para repor no cancelEditing (FIX G2)
 const WARP_N_OPTIONS = [2, 3, 5, 9, 17];
 const WARP_HIT_R = 30; // px CSS, mesmo raio generoso do editor de zonas (VERTEX_HIT_R)
@@ -2802,20 +2838,30 @@ function warpCloudSave() {
   clearTimeout(warpCloudSaveT);
   // FIX F4: idem zonesCloudSave — cloudPost reporta falha no pill em vez de a engolir.
   warpCloudSaveT = setTimeout(() => {
-    cloudPost(WARP_ID, { n: warpN, points: warpPointsForProtocol(), testPattern: false });
+    // imageTest NUNCA persiste true, mesma regra do testPattern (ver comentário acima).
+    cloudPost(WARP_ID, { n: warpN, points: warpPointsForProtocol(), testPattern: false, imageTest: false });
   }, 1000);
 }
 
 /* ---- emissão em tempo real (protocolo kind:'warp', mesmo canal magicdraw:<room>) ----
    points null = identidade (mesma convenção do warp.js) — payload SEMPRE completo
-   (n + points + testPattern), nunca deltas, tal como 'state'/'zones'. */
+   (n + points + testPattern + imageTest), nunca deltas, tal como 'state'/'zones'.
+   testPattern vai true em AMBOS os modos de teste (grelha OU imagem): um display
+   antigo que só conheça o campo testPattern (sem saber de imageTest) degrada para
+   a grelha em vez de ficar num estado inválido — ver magicdraw-display.html. */
 function warpPointsForProtocol() {
   if (!warpToolAvailable || warpTool.isIdentity()) return null;
   return Array.from(warpTool.getPoints()).map(r4);
 }
 function sendWarp() {
   if (!warpToolAvailable) return;
-  send({ kind: "warp", n: warpN, points: warpPointsForProtocol(), testPattern: warpTestPatternOn });
+  send({
+    kind: "warp",
+    n: warpN,
+    points: warpPointsForProtocol(),
+    testPattern: warpTestPatternOn || warpImageTestOn,
+    imageTest: warpImageTestOn,
+  });
 }
 // throttle ~80ms durante drags (leading + trailing, mesmo padrão de sendZonesThrottled)
 let warpThrottleTimer = null, warpThrottlePending = false;
@@ -2839,6 +2885,24 @@ function sizeWarpCanvas() {
   warpZoom.clampPan();
   renderWarpCanvas();
 }
+// canvas-fonte para warpTool.render(): a refImg desenhada à resolução NATIVA
+// (a deformação por UV não depende da resolução da fonte, ver warp.js — sampling
+// bilinear em [0,1] independente de tamanho). Cache por referência de Image: só
+// redesenha quando a imagem MUDA (novo upload/load), nunca a cada frame de
+// arrasto — é o que mantém o arrasto fluido (a única chamada por frame passa a
+// ser warpTool.render(), 1 draw call WebGL, inerente a mostrar a deformação atual).
+let warpSourceCanvas = null, warpSourceCtx = null, warpSourceForImg = null;
+function ensureWarpSourceCanvas() {
+  if (!refImg) { warpSourceForImg = null; return null; }
+  if (warpSourceForImg === refImg) return warpSourceCanvas; // mesma imagem: nada a redesenhar
+  if (!warpSourceCanvas) { warpSourceCanvas = document.createElement("canvas"); warpSourceCtx = warpSourceCanvas.getContext("2d"); }
+  const sw = refImg.naturalWidth || refImg.width || 1, sh = refImg.naturalHeight || refImg.height || 1;
+  warpSourceCanvas.width = sw; warpSourceCanvas.height = sh;
+  warpSourceCtx.drawImage(refImg, 0, 0, sw, sh);
+  warpStateCanvasEl.width = sw; warpStateCanvasEl.height = sh; // output de warp.js na mesma resolução da fonte
+  warpSourceForImg = refImg;
+  return warpSourceCanvas;
+}
 function renderWarpCanvas() {
   const w = warpCanvasEl.clientWidth, h = warpCanvasEl.clientHeight;
   const dpr = window.devicePixelRatio || 1;
@@ -2846,7 +2910,20 @@ function renderWarpCanvas() {
   const s = warpZoom.view.scale; // divide raios/larguras por s: tamanho CONSTANTE em píxeis de ecrã, a qualquer zoom
   wctx.clearRect(0, 0, w, h);
   wctx.fillStyle = "#000"; wctx.fillRect(0, 0, w, h);
-  if (refImg) { wctx.globalAlpha = 0.55; wctx.drawImage(refImg, 0, 0, w, h); wctx.globalAlpha = 1; }
+  // imagem de referência DEFORMADA pelo warp atual (mesmo warp.js, mesmos pontos,
+  // mesmo render() que o display usa em applyWarpConfig/composeAndWarp) — sem isto
+  // a grelha mostra ONDE estão os pontos mas não O QUE o warp faz ao conteúdo, e o
+  // operador calibra às cegas (ticket W1). Sem WebGL (warpToolAvailable=false) cai
+  // para o desenho achatado de sempre, mais abaixo.
+  if (warpToolAvailable && refImg) {
+    const src = ensureWarpSourceCanvas();
+    if (src) {
+      warpTool.render(src);
+      wctx.globalAlpha = 0.55; wctx.drawImage(warpStateCanvasEl, 0, 0, w, h); wctx.globalAlpha = 1;
+    }
+  } else if (refImg) {
+    wctx.globalAlpha = 0.55; wctx.drawImage(refImg, 0, 0, w, h); wctx.globalAlpha = 1;
+  }
   // contorno das zonas por cima da imagem, por baixo da grelha — só visão (não
   // seleciona/arrasta nada aqui, ver getWarpPt/pointerdown: só testam pts da
   // grelha). A máscara de zonas vive em espaço-projetor e é DELIBERADAMENTE
@@ -2962,14 +3039,31 @@ function renderWarpNSelect() {
 }
 renderWarpNSelect();
 
-/* ---- grelha de teste / reset / navegação ---- */
+/* ---- grelha de teste / imagem de teste / reset / navegação ----
+   Grelha e imagem são mutuamente exclusivas (ligar uma desliga a outra) — o
+   display só sabe mostrar uma coisa de cada vez (ver applyWarpConfig em
+   magicdraw-display.html). */
 const warpTestBtn = $("warpTestBtn");
+const warpImageTestBtn = $("warpImageTestBtn");
+function syncWarpTestBtns() {
+  warpTestBtn.classList.toggle("on", warpTestPatternOn);
+  warpImageTestBtn.classList.toggle("on", warpImageTestOn);
+}
 warpTestBtn.disabled = !warpToolAvailable;
 warpTestBtn.onclick = () => {
   if (!warpToolAvailable) return;
   warpTestPatternOn = !warpTestPatternOn;
-  warpTestBtn.classList.toggle("on", warpTestPatternOn);
+  if (warpTestPatternOn) warpImageTestOn = false;
+  syncWarpTestBtns();
   sendWarp(); // imediata (toggle) — testPattern é ao vivo, nunca persiste true (ver warpCloudSave)
+};
+warpImageTestBtn.disabled = !warpToolAvailable || !refImgDataUrl;
+warpImageTestBtn.onclick = () => {
+  if (!warpToolAvailable || !refImgDataUrl) return; // sem imagem: botão já vem disabled, dupla guarda
+  warpImageTestOn = !warpImageTestOn;
+  if (warpImageTestOn) warpTestPatternOn = false;
+  syncWarpTestBtns();
+  sendWarp(); // imediata (toggle) — imageTest é ao vivo, nunca persiste true (ver warpCloudSave)
 };
 $("warpResetBtn").disabled = !warpToolAvailable;
 $("warpResetBtn").onclick = () => {
@@ -2982,7 +3076,7 @@ $("warpResetBtn").onclick = () => {
 $("warpBackBtn").onclick = () => { warpOverlay.hidden = true; adminOverlay.hidden = false; };
 $("warpDoneBtn").onclick = () => {
   warpOverlay.hidden = true;
-  closeAdmin(); // fecha o admin por completo — closeAdmin() desliga a grelha de teste se ficou ligada (FIX R2)
+  closeAdmin(); // fecha o admin por completo — closeAdmin() desliga a grelha/imagem de teste se ficaram ligadas (FIX R2)
 };
 $("warpOpenBtn").onclick = () => {
   if (!warpToolAvailable) return;
@@ -2990,7 +3084,7 @@ $("warpOpenBtn").onclick = () => {
   warpOverlay.hidden = false;
   requestAnimationFrame(sizeWarpCanvas);
   renderWarpNSelect();
-  warpTestBtn.classList.toggle("on", warpTestPatternOn);
+  syncWarpTestBtns();
 };
 
 warpCloudLoad(); // hidrata pontos guardados antes de o ecrã de warp abrir pela 1ª vez
