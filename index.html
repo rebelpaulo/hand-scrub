@@ -326,13 +326,27 @@
     position: fixed; left: 0; bottom: 0; width: 96px; height: 96px;
     z-index: 500; background: transparent; touch-action: none;
   }
-  /* hotspot invisível no canto SUPERIOR direito — máquina do projetor: 3s
-     mandam direto para display.html. Canto diferente do #mapHotspot (10s,
-     inferior) para nunca se sobreporem/conflituarem. */
+  /* hotspot no canto SUPERIOR direito — máquina do projetor: 3s mandam direto
+     para display.html. Canto diferente do #mapHotspot (10s, inferior) para
+     nunca se sobreporem/conflituarem. */
   #displayHotspot {
     position: fixed; right: 0; top: 0; width: 72px; height: 72px;
     z-index: 500; background: transparent; touch-action: none;
   }
+  /* MARCA dos hotspots: eram totalmente invisíveis e nem o operador os
+     encontrava — houve quem ficasse preso em mapping mode sem saber que a
+     saída existia. Um círculo discreto resolve isso.
+     Deliberadamente SEM qualquer indicação de progresso durante o hold: um
+     anel a encher é o que ensina um convidado curioso que vale a pena
+     continuar a segurar. Assim quem sabe encontra a marca, e a quem não sabe
+     o toque não devolve pista nenhuma — continuam a ser 10s (ou 3s) de dedo
+     parado, que já filtra o acidente. */
+  #mapHotspot::after, #displayHotspot::after {
+    content: ""; position: absolute; width: 10px; height: 10px;
+    border-radius: 50%; background: #98a2b6; opacity: .22; pointer-events: none;
+  }
+  #mapHotspot::after { left: 13px; bottom: 13px; }
+  #displayHotspot::after { right: 13px; top: 13px; }
 
   /* ============================================================ MAPPING MODE — diálogos/overlays */
   .map-overlay {
