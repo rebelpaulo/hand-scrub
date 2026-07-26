@@ -615,7 +615,10 @@
                  fora, precisam de gesto na própria máquina; ver M1). -->
             <div class="map-controls" id="mapScrubControls" hidden>
               <div class="map-row">
-                <button type="button" class="map-btn" id="mapScrubPlayBtn">▶️ Reproduzir</button>
+                <!-- rótulo fixo: é uma ação de alternar, não um indicador. O
+                     painel não consegue saber se o vídeo está a tocar (a app
+                     pausa-o sozinha ao detetar a mão) — ver toggleMapScrubPlay -->
+                <button type="button" class="map-btn" id="mapScrubPlayBtn">⏯️ Reproduzir/Pausar</button>
                 <select class="map-btn" id="mapScrubMode" title="Modo de controlo" aria-label="Modo de controlo">
                   <option value="aperture">✌️ Abrir/Fechar</option>
                   <option value="hands">🙏 Afastar as mãos</option>
@@ -1039,7 +1042,7 @@ let mapWired = false, mapActiveApp = null, mapCamPreviewOn = true, mapActiveScen
 // é a fonte da verdade para estes controlos (defaults têm de bater certo com o
 // que cada experiência assume ao abrir: lab.html nasce com effectIndex 0/gridN
 // 24, scrub.html nasce parado — ver lab.html/scrub.html).
-let mapLabEffect = 0, mapLabGridN = 24, mapScrubPlaying = false, mapScrubMode = "aperture";
+let mapLabEffect = 0, mapLabGridN = 24, mapScrubMode = "aperture";
 
 function mapSend(kind, extra = {}) {
   const payload = { v: 1, src: MAP_CLIENT_ID, seq: ++mapSeq, kind, ...extra };
@@ -1077,10 +1080,10 @@ function mapHandleMsg(payload) {
         mapSend("labEffect", { i: mapLabEffect });
         mapSend("labDensity", { n: mapLabGridN });
       }
-      if (mapActiveApp === "scrub") {
-        mapSend("scrubPlay", { on: mapScrubPlaying });
-        mapSend("scrubMode", { mode: mapScrubMode });
-      }
+      // scrubPlay NÃO é reenviado: passou a ser uma ação de alternar, sem
+      // estado do lado do painel (ver toggleMapScrubPlay). Reenviá-lo aqui
+      // inverteria a reprodução a cada reconexão do display.
+      if (mapActiveApp === "scrub") mapSend("scrubMode", { mode: mapScrubMode });
       break;
     case "status":
       setMapActiveApp(payload.app || null);
@@ -1205,9 +1208,23 @@ function toggleMapChrome() {
   mapSend("chrome", { on: mapChromeOn });
   mapChromeBtn.classList.toggle("on", mapChromeOn);
 }
+// Cenas que IMPÕEM um modo dentro do scrub.html (selectScene troca-o sozinho):
+// Origami exige o gesto de amassar, Moisés o de afastar as mãos. Sem isto o
+// painel ficava com o modo anterior e, na reconexão seguinte, o 'hello'
+// reenviava-o por cima — o Origami perdia o gesto próprio, e mandar 'aperture'
+// para o Moisés fazia o handler de mudança de modo saltar de volta à cena 0
+// (review PR #52).
+const MAP_SCENE_FORCED_MODE = { 4: "squeeze", 5: "hands" };
 function sendMapScene(i) {
   mapActiveScene = i;
   mapSend("scene", { i });
+  const forcado = MAP_SCENE_FORCED_MODE[i];
+  if (forcado) {
+    mapScrubMode = forcado;
+    // 'squeeze' não existe como opção visível no seletor do painel — deixa-o
+    // sem seleção em vez de mentir a dizer que está noutro modo qualquer
+    if (mapScrubModeEl) mapScrubModeEl.value = forcado;
+  }
   mapScenesEl.querySelectorAll(".map-chip").forEach(ch => ch.classList.toggle("active", Number(ch.dataset.i) === i));
 }
 
@@ -1229,11 +1246,13 @@ function sendMapLabClear() {
 }
 
 /* ---------- Butterfly Effect: reproduzir/pausar + modo ---------- */
+// Botão de ALTERNAR, não indicador de estado (review PR #52). O processHands()
+// da experiência pausa o vídeo sozinho mal a mão de controlo aparece, e o
+// painel não tem como saber — não existe relé de volta. Um booleano local ficava
+// a mentir: dizia "Pausar" com o vídeo já pausado, e o 1º clique do operador
+// não fazia nada de visível. Sem estado para divergir, o rótulo é honesto.
 function toggleMapScrubPlay() {
-  mapScrubPlaying = !mapScrubPlaying;
-  mapSend("scrubPlay", { on: mapScrubPlaying });
-  mapScrubPlayBtn.classList.toggle("on", mapScrubPlaying);
-  mapScrubPlayBtn.textContent = mapScrubPlaying ? "⏸️ Pausar" : "▶️ Reproduzir";
+  mapSend("scrubPlay");
 }
 function sendMapScrubMode(mode) {
   mapScrubMode = mode;
@@ -1254,11 +1273,7 @@ function renderMapDetail(appId) {
   if (appId === "lab") {
     mapLabEffectsEl.querySelectorAll(".map-chip").forEach(ch => ch.classList.toggle("active", Number(ch.dataset.i) === mapLabEffect));
   }
-  if (appId === "scrub") {
-    mapScrubModeEl.value = mapScrubMode;
-    mapScrubPlayBtn.classList.toggle("on", mapScrubPlaying);
-    mapScrubPlayBtn.textContent = mapScrubPlaying ? "⏸️ Pausar" : "▶️ Reproduzir";
-  }
+  if (appId === "scrub") mapScrubModeEl.value = mapScrubMode;
 }
 
 function buildMapScenes() {

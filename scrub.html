@@ -1190,9 +1190,14 @@ window.addEventListener("message", e => {
   else if (e.data.cmd === "chrome") { chromeOn = !!e.data.on; applyChrome(); }
   // M1: painel de mapping — reencaminha para os MESMOS handlers do botão/select
   // reais (playBtn.onclick, "change" do #mode), sem duplicar a lógica deles.
+  // ALTERNA sempre, em vez de perseguir um estado que o painel julga conhecer
+  // (review PR #49/#52): o processHands() pausa o vídeo mal a mão de controlo
+  // aparece, e o painel não tem como saber disso — não há relé de volta. Com um
+  // booleano do lado do painel, o 1º clique do operador limitava-se a mandar
+  // "pausa" a um vídeo já pausado e a trocar o rótulo, obrigando a um 2º clique
+  // para tocar. O player é a única fonte de verdade do seu próprio estado.
   else if (e.data.cmd === "scrubPlay") {
-    const wantPlaying = !!e.data.on;
-    if (wantPlaying === player.paused) $("playBtn").onclick(); // só alterna se estiver dessincronizado
+    $("playBtn").onclick();
   } else if (e.data.cmd === "scrubMode" && ["aperture", "hands", "drag"].includes(e.data.mode)) {
     $("mode").value = e.data.mode;
     $("mode").dispatchEvent(new Event("change"));
