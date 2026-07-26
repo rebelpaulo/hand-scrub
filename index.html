@@ -442,6 +442,9 @@
   .map-chip.active { border-color: var(--accent); box-shadow: 0 0 0 2px #5eead455; }
   .map-open-magicdraw { display: inline-block; text-decoration: none; margin-top: 6px; }
   .map-open-magicdraw[hidden] { display: none; }
+  .map-controls[hidden] { display: none; }
+  .map-controls-label { margin: 18px 0 8px; font-size: 12px; font-weight: 800; letter-spacing: .04em; color: var(--muted); text-transform: uppercase; }
+  .map-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 </style>
 </head>
 <body>
@@ -616,6 +619,36 @@
             <p class="expl" id="mapDetailDesc"></p>
             <div class="map-scenes" id="mapScenes" hidden></div>
             <a class="map-btn primary map-open-magicdraw" id="mapOpenMagicdraw" href="magicdraw.html" hidden>abrir painel de desenho →</a>
+
+            <!-- Motion Lab: efeito, densidade da grelha, apagar caixa — comandos que
+                 antes só existiam por teclado na máquina da projeção (ver M1). -->
+            <div class="map-controls" id="mapLabControls" hidden>
+              <p class="map-controls-label">Efeito</p>
+              <div class="map-scenes" id="mapLabEffects"></div>
+              <p class="map-controls-label">Densidade da grelha</p>
+              <div class="map-row">
+                <button type="button" class="map-btn" id="mapLabDensityMinus">− menos</button>
+                <button type="button" class="map-btn" id="mapLabDensityPlus">+ mais</button>
+                <button type="button" class="map-btn" id="mapLabClearBtn">🧹 Apagar caixa</button>
+              </div>
+            </div>
+
+            <!-- Butterfly Effect: reproduzir/pausar + modo de controlo — só os que
+                 fazem sentido à distância (ecrã inteiro e carregar vídeos ficam de
+                 fora, precisam de gesto na própria máquina; ver M1). -->
+            <div class="map-controls" id="mapScrubControls" hidden>
+              <div class="map-row">
+                <!-- rótulo fixo: é uma ação de alternar, não um indicador. O
+                     painel não consegue saber se o vídeo está a tocar (a app
+                     pausa-o sozinha ao detetar a mão) — ver toggleMapScrubPlay -->
+                <button type="button" class="map-btn" id="mapScrubPlayBtn">⏯️ Reproduzir/Pausar</button>
+                <select class="map-btn" id="mapScrubMode" title="Modo de controlo" aria-label="Modo de controlo">
+                  <option value="aperture">✌️ Abrir/Fechar</option>
+                  <option value="hands">🙏 Afastar as mãos</option>
+                  <option value="drag">🤏 Arrastar</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1004,6 +1037,9 @@ const mapRoomLabel = $("mapRoomLabel"), mapIndicator = $("mapIndicator");
 const mapAppsEl = $("mapApps"), mapDetailPlaceholder = $("mapDetailPlaceholder"), mapDetailContent = $("mapDetailContent");
 const mapDetailTitle = $("mapDetailTitle"), mapDetailDesc = $("mapDetailDesc");
 const mapScenesEl = $("mapScenes"), mapOpenMagicdraw = $("mapOpenMagicdraw");
+const mapLabControls = $("mapLabControls"), mapLabEffectsEl = $("mapLabEffects");
+const mapLabDensityMinus = $("mapLabDensityMinus"), mapLabDensityPlus = $("mapLabDensityPlus"), mapLabClearBtn = $("mapLabClearBtn");
+const mapScrubControls = $("mapScrubControls"), mapScrubPlayBtn = $("mapScrubPlayBtn"), mapScrubModeEl = $("mapScrubMode");
 
 /* ---------- contrato de sync (pinado — display.html implementa isto à letra) ---------- */
 // cap de 40 — ver nota em magicdraw.html: o ROOM entra nos ids do hand_config
@@ -1026,6 +1062,11 @@ let mapSyncToken = 0;
 // inteiro) começa OFF — quem comanda a experiência embebida é este painel,
 // não a barra dela própria projetada na fachada (ver princípio em display.html).
 let mapWired = false, mapActiveApp = null, mapCamPreviewOn = true, mapActiveScene = null, mapChromeOn = false;
+// Motion Lab + Butterfly: mesmo princípio do campreview/chrome acima — o painel
+// é a fonte da verdade para estes controlos (defaults têm de bater certo com o
+// que cada experiência assume ao abrir: lab.html nasce com effectIndex 0/gridN
+// 24, scrub.html nasce parado — ver lab.html/scrub.html).
+let mapLabEffect = 0, mapLabGridN = 24, mapScrubMode = "aperture";
 
 function mapSend(kind, extra = {}) {
   const payload = { v: 1, src: MAP_CLIENT_ID, seq: ++mapSeq, kind, ...extra };
@@ -1056,6 +1097,17 @@ function mapHandleMsg(payload) {
       mapSend("campreview", { on: mapCamPreviewOn });
       mapSend("chrome", { on: mapChromeOn });
       if (mapActiveApp === "scrub" && mapActiveScene != null) mapSend("scene", { i: mapActiveScene });
+      // idem para os controlos novos: um display que reinicie tem de herdar o
+      // efeito/densidade do Motion Lab e o play/modo do Butterfly, não só o
+      // que já existia antes desta ticket (review critério 5).
+      if (mapActiveApp === "lab") {
+        mapSend("labEffect", { i: mapLabEffect });
+        mapSend("labDensity", { n: mapLabGridN });
+      }
+      // scrubPlay NÃO é reenviado: passou a ser uma ação de alternar, sem
+      // estado do lado do painel (ver toggleMapScrubPlay). Reenviá-lo aqui
+      // inverteria a reprodução a cada reconexão do display.
+      if (mapActiveApp === "scrub") mapSend("scrubMode", { mode: mapScrubMode });
       break;
     case "status":
       setMapActiveApp(payload.app || null);
@@ -1180,10 +1232,55 @@ function toggleMapChrome() {
   mapSend("chrome", { on: mapChromeOn });
   mapChromeBtn.classList.toggle("on", mapChromeOn);
 }
+// Cenas que IMPÕEM um modo dentro do scrub.html (selectScene troca-o sozinho):
+// Origami exige o gesto de amassar, Moisés o de afastar as mãos. Sem isto o
+// painel ficava com o modo anterior e, na reconexão seguinte, o 'hello'
+// reenviava-o por cima — o Origami perdia o gesto próprio, e mandar 'aperture'
+// para o Moisés fazia o handler de mudança de modo saltar de volta à cena 0
+// (review PR #52).
+const MAP_SCENE_FORCED_MODE = { 4: "squeeze", 5: "hands" };
 function sendMapScene(i) {
   mapActiveScene = i;
   mapSend("scene", { i });
+  const forcado = MAP_SCENE_FORCED_MODE[i];
+  if (forcado) {
+    mapScrubMode = forcado;
+    // 'squeeze' não existe como opção visível no seletor do painel — deixa-o
+    // sem seleção em vez de mentir a dizer que está noutro modo qualquer
+    if (mapScrubModeEl) mapScrubModeEl.value = forcado;
+  }
   mapScenesEl.querySelectorAll(".map-chip").forEach(ch => ch.classList.toggle("active", Number(ch.dataset.i) === i));
+}
+
+/* ---------- Motion Lab: efeito / densidade / apagar caixa ---------- */
+function sendMapLabEffect(i) {
+  mapLabEffect = i;
+  mapSend("labEffect", { i });
+  mapLabEffectsEl.querySelectorAll(".map-chip").forEach(ch => ch.classList.toggle("active", Number(ch.dataset.i) === i));
+}
+function sendMapLabDensity(delta) {
+  // mesmos limites/passo das teclas [ e ] em lab.html — mantidos aqui só para
+  // o botão não ficar visualmente preso nos extremos; quem faz cumprir o
+  // limite a sério é o setGridN() do lado do lab.html (fonte da verdade).
+  mapLabGridN = Math.max(4, Math.min(48, mapLabGridN + delta));
+  mapSend("labDensity", { n: mapLabGridN });
+}
+function sendMapLabClear() {
+  mapSend("labClear"); // ação momentânea, sem estado para guardar/resincronizar
+}
+
+/* ---------- Butterfly Effect: reproduzir/pausar + modo ---------- */
+// Botão de ALTERNAR, não indicador de estado (review PR #52). O processHands()
+// da experiência pausa o vídeo sozinho mal a mão de controlo aparece, e o
+// painel não tem como saber — não existe relé de volta. Um booleano local ficava
+// a mentir: dizia "Pausar" com o vídeo já pausado, e o 1º clique do operador
+// não fazia nada de visível. Sem estado para divergir, o rótulo é honesto.
+function toggleMapScrubPlay() {
+  mapSend("scrubPlay");
+}
+function sendMapScrubMode(mode) {
+  mapScrubMode = mode;
+  mapSend("scrubMode", { mode });
 }
 
 function renderMapDetail(appId) {
@@ -1195,6 +1292,12 @@ function renderMapDetail(appId) {
   mapDetailDesc.textContent = info.desc;
   mapScenesEl.hidden = appId !== "scrub";
   mapOpenMagicdraw.hidden = appId !== "magicdraw";
+  mapLabControls.hidden = appId !== "lab";
+  mapScrubControls.hidden = appId !== "scrub";
+  if (appId === "lab") {
+    mapLabEffectsEl.querySelectorAll(".map-chip").forEach(ch => ch.classList.toggle("active", Number(ch.dataset.i) === mapLabEffect));
+  }
+  if (appId === "scrub") mapScrubModeEl.value = mapScrubMode;
 }
 
 function buildMapScenes() {
@@ -1205,6 +1308,18 @@ function buildMapScenes() {
     chip.textContent = name;
     chip.addEventListener("click", () => sendMapScene(i));
     mapScenesEl.appendChild(chip);
+  });
+}
+// ordem/índices batem certo com EFFECTS em lab.html (ascii/halftone/pixelate/glitch/none)
+const MAP_LAB_EFFECTS = ["Ascii", "Halftone", "Pixelate", "Glitch", "Nenhum"];
+function buildMapLabEffects() {
+  mapLabEffectsEl.innerHTML = "";
+  MAP_LAB_EFFECTS.forEach((label, i) => {
+    const chip = document.createElement("button");
+    chip.type = "button"; chip.className = "map-chip"; chip.dataset.i = i;
+    chip.textContent = label;
+    chip.addEventListener("click", () => sendMapLabEffect(i));
+    mapLabEffectsEl.appendChild(chip);
   });
 }
 
@@ -1230,6 +1345,12 @@ function wireMapUI() {
   if (mapWired) return;
   mapWired = true;
   buildMapScenes();
+  buildMapLabEffects();
+  mapLabDensityMinus.addEventListener("click", () => sendMapLabDensity(-2));
+  mapLabDensityPlus.addEventListener("click", () => sendMapLabDensity(2));
+  mapLabClearBtn.addEventListener("click", sendMapLabClear);
+  mapScrubPlayBtn.addEventListener("click", toggleMapScrubPlay);
+  mapScrubModeEl.addEventListener("change", () => sendMapScrubMode(mapScrubModeEl.value));
   mapAppsEl.querySelectorAll(".map-card").forEach(card => {
     card.addEventListener("click", () => openMapApp(card.dataset.app));
   });
