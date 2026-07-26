@@ -369,8 +369,15 @@ function applyWarpConfig(n, points, testPattern, imageTest) {
   if (n && n !== warpN) { warp.setGrid(n); warpN = n; }
   if (points === null || points === undefined) warp.identity();
   else warp.setPoints(Float32Array.from(points));
+  const passouALigar = !!imageTest && !warpImageTestRequested;
   warpImageTestRequested = !!imageTest;
   refreshWarpTestVisual(testPattern);
+  // Ao LIGAR a imagem de teste, vai buscar a versão atual à cloud (review PR
+  // #51): o display pode estar aberto há horas enquanto o operador trocou a
+  // imagem no painel. Quando chegar, onRefTestImageLoaded() reaplica sozinho.
+  // Só no flanco de subida — reenviar a cada arrasto de ponto do warp seria um
+  // fetch por frame.
+  if (passouALigar) loadRefTestImageFromCloud();
 }
 
 // separado de applyWarpConfig para poder ser re-executado quando refTestImage
@@ -743,8 +750,16 @@ let refTestImage = null;
 function onRefTestImageLoaded() {
   if (warpImageTestRequested) refreshWarpTestVisual(warpTestOn); // reaplica agora que a imagem já existe
 }
+// Re-carregável de propósito (review PR #51). Carregar uma só vez no arranque
+// falha no fluxo NORMAL de setup: o display fica aberto na parede enquanto o
+// operador ainda anda a carregar/trocar a imagem no painel — e depois pedia
+// "imagem de teste" e via a imagem antiga, ou a grelha, sem perceber porquê.
+// Uma chamada em curso não é duplicada; o pedido mais recente ganha.
+let refTestImageLoading = null;
 async function loadRefTestImageFromCloud() {
   if (!warpAvailable) return;
+  if (refTestImageLoading) return refTestImageLoading;
+  refTestImageLoading = (async () => {
   try {
     const refImgId = ROOM === "default" ? "magicdraw-refimg" : "magicdraw-refimg:" + ROOM;
     const r = await fetch(`${SUPABASE_URL}/rest/v1/hand_config?id=eq.${encodeURIComponent(refImgId)}&select=data`, {
@@ -753,10 +768,15 @@ async function loadRefTestImageFromCloud() {
     if (!r.ok) return;
     const cfg = (await r.json())[0]?.data;
     if (!cfg?.img) return;
-    const im = new Image();
-    im.onload = () => { refTestImage = im; onRefTestImageLoaded(); };
-    im.src = cfg.img;
-  } catch { /* offline: fica sem imagem de teste até reload */ }
+    await new Promise(res => {
+      const im = new Image();
+      im.onload = () => { refTestImage = im; onRefTestImageLoaded(); res(); };
+      im.onerror = res; // dataURL corrompido: fica sem imagem, cai na grelha
+      im.src = cfg.img;
+    });
+  } catch { /* offline: fica sem imagem de teste até ao próximo pedido */ }
+  })();
+  try { await refTestImageLoading; } finally { refTestImageLoading = null; }
 }
 loadRefTestImageFromCloud();
 
