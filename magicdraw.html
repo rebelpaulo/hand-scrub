@@ -300,20 +300,20 @@
 
   /* ---------- botão admin: discreto, num canto, só reage a long-press ---------- */
   /* sobe acima da tab bar no telemóvel para não ficar tapado */
+  /* Marca do hotspot de admin. Vive na faixa vazia do cabeçalho das Cores (ao
+     centro do ecrã, por cima das bolas) em vez do canto — no canto disputava o
+     espaço com a barra de páginas e ninguém a encontrava.
+     É só um CÍRCULO neutro, sem ícone e SEM anel de progresso: o progresso era
+     precisamente o que ensinava um curioso a continuar a carregar ("está a
+     acontecer alguma coisa, vou segurar mais"). Assim o operador sabe onde é,
+     e para quem não sabe o toque não devolve pista nenhuma. */
   #adminGearBtn {
-    position: fixed; right: 12px; bottom: calc(var(--tabbar-h) + 16px); z-index: 96;
-    width: 44px; height: 44px; min-height: 0; border-radius: 50%;
-    background: #1a1e2a99; border: 1px solid var(--line); opacity: .45;
-    font-size: 18px; padding: 0; touch-action: none;
+    margin-left: auto; flex: 0 0 auto;
+    width: 26px; height: 26px; min-height: 0; border-radius: 50%;
+    background: #1a1e2a99; border: 1px solid var(--line); opacity: .38;
+    padding: 0; touch-action: none;
   }
-  #adminGearBtn .ic { width: 20px; height: 20px; }
-  #adminGearBtn::before {
-    content: ""; position: absolute; inset: -2px; border-radius: 50%;
-    background: conic-gradient(var(--neon) calc(var(--p, 0) * 1%), transparent 0);
-    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-    pointer-events: none;
-  }
+  #adminGearBtn .ic { display: none; } /* sem ícone: um ⚙️ anuncia "definições" a quem não devia procurar */
 
   /* ==================================================================
      Landscape / 16:9 — TABLET, MODO PRINCIPAL: tudo num ecrã sem
@@ -329,7 +329,6 @@
     #status { left: auto; top: 8px; right: 8px; }
     #tabBar { display: none; } /* sem paginação: tudo visível ao mesmo tempo */
     footer { display: block; }
-    #adminGearBtn { bottom: 12px; }
 
     /* grelha de 3 colunas × 8 linhas — usa grid-column/grid-row (linhas), NÃO
        grid-template-areas: com áreas nomeadas as 3 colunas partilhariam a MESMA
@@ -805,7 +804,7 @@
     </div>
     <div class="page" id="pageColors" data-page="colors">
       <section class="grp" id="grpColors">
-        <h2 class="section"><svg class="ic"><use href="#ic-palette"></use></svg><span>Cores</span></h2>
+        <h2 class="section"><svg class="ic"><use href="#ic-palette"></use></svg><span>Cores</span><button id="adminGearBtn" aria-label="Modo admin (mantém premido 3s)"><svg class="ic"><use href="#ic-gear"></use></svg></button></h2>
         <div class="card"><div id="colors"></div></div>
       </section>
       <section class="grp" id="grpMirrors">
@@ -851,7 +850,6 @@
   </div>
 
   <footer>Magic Draw · painel touch</footer>
-  <button id="adminGearBtn" aria-label="Modo admin: zonas de oclusão (mantém premido 3s)"><svg class="ic"><use href="#ic-gear"></use></svg></button>
 
   <!-- ================= overlay admin: zonas (áreas de desenho + oclusão) ================= -->
   <div id="adminOverlay" hidden>
@@ -2716,19 +2714,18 @@ function closeAdmin() {
 const adminGearBtn = $("adminGearBtn");
 const LONG_PRESS_MS = 3000;
 let pressStart = 0, pressTimer = null;
+// Sem indicação de progresso durante o hold — decisão deliberada. O anel que
+// aqui existia era o que ensinava quem não devia: uma criança que carregue por
+// acaso via algo a encher e percebia que valia a pena continuar. Agora um toque
+// curto não devolve pista nenhuma, e quem sabe do modo admin sabe que são 3s.
+// Um único setTimeout basta (o intervalo de 50ms só existia para animar o anel).
 function startPress(e) {
   e.preventDefault();
   pressStart = Date.now();
-  adminGearBtn.style.setProperty("--p", "0");
-  pressTimer = setInterval(() => {
-    const pct = Math.min(100, ((Date.now() - pressStart) / LONG_PRESS_MS) * 100);
-    adminGearBtn.style.setProperty("--p", String(pct));
-    if (pct >= 100) { clearInterval(pressTimer); pressTimer = null; openAdmin(); }
-  }, 50);
+  pressTimer = setTimeout(() => { pressTimer = null; openAdmin(); }, LONG_PRESS_MS);
 }
 function cancelPress() {
-  if (pressTimer) { clearInterval(pressTimer); pressTimer = null; }
-  adminGearBtn.style.setProperty("--p", "0");
+  if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
 }
 adminGearBtn.addEventListener("pointerdown", startPress);
 adminGearBtn.addEventListener("pointerup", cancelPress);
