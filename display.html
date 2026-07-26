@@ -346,6 +346,10 @@ let pendingScene = null;      // último {i} enviado antes do 'ready', só da ap
 // null (nenhum comando ainda enviado); a própria app já nasce escondida por
 // omissão — só é preciso reenviar quando HOUVE um comando explícito.
 let pendingChrome = null; // último {on} conhecido (para re-enviar ao 'ready')
+// estado dos comandos por experiência — mesma razão dos de cima: um iframe que
+// (re)carrega tem de receber o que o painel já tinha escolhido, senão o painel
+// mostra um estado e a projeção outro
+let pendingLabEffect = null, pendingLabDensity = null, pendingScrubPlay = null, pendingScrubMode = null;
 
 function openApp(app) {
   const file = APP_FILES[app];
@@ -388,6 +392,30 @@ function handleCmd(payload) {
     case "scene":
       pendingScene = { i: payload.i };
       toIframe({ cmd: "scene", i: pendingScene.i });
+      break;
+    /* Comandos específicos de cada experiência, vindos do painel de mapping.
+       O shell não os interpreta — só os reencaminha; quem valida é a app que
+       os recebe. Mas TÊM de estar aqui: este switch não tem `default`, por isso
+       um kind sem case é silenciosamente deitado fora e o comando nunca chega
+       ao iframe (o painel parece funcionar e nada acontece na projeção).
+       labEffect/labDensity persistem como estado da sessão, tal como o
+       campreview/chrome, para o display os recuperar quando reinicia; labClear
+       é uma ação momentânea e não tem estado para guardar. */
+    case "labEffect":
+      if (Number.isInteger(payload.i)) { pendingLabEffect = { i: payload.i }; toIframe({ cmd: "labEffect", i: payload.i }); }
+      break;
+    case "labDensity":
+      if (Number.isFinite(payload.n)) { pendingLabDensity = { n: payload.n }; toIframe({ cmd: "labDensity", n: payload.n }); }
+      break;
+    case "labClear":
+      toIframe({ cmd: "labClear" });
+      break;
+    case "scrubPlay":
+      pendingScrubPlay = { on: !!payload.on };
+      toIframe({ cmd: "scrubPlay", on: pendingScrubPlay.on });
+      break;
+    case "scrubMode":
+      if (typeof payload.mode === "string") { pendingScrubMode = { mode: payload.mode }; toIframe({ cmd: "scrubMode", mode: payload.mode }); }
       break;
     case "keystone":
       // FIX V3 (review): `== null` também apanhava `undefined` — uma mensagem
@@ -438,6 +466,10 @@ window.addEventListener("message", e => {
     if (pendingCampreview) toIframe({ cmd: "campreview", on: pendingCampreview.on });
     if (pendingChrome) toIframe({ cmd: "chrome", on: pendingChrome.on });
     if (pendingScene) toIframe({ cmd: "scene", i: pendingScene.i });
+    if (pendingLabEffect) toIframe({ cmd: "labEffect", i: pendingLabEffect.i });
+    if (pendingLabDensity) toIframe({ cmd: "labDensity", n: pendingLabDensity.n });
+    if (pendingScrubPlay) toIframe({ cmd: "scrubPlay", on: pendingScrubPlay.on });
+    if (pendingScrubMode) toIframe({ cmd: "scrubMode", mode: pendingScrubMode.mode });
   }
 });
 

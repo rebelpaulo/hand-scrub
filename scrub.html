@@ -1188,6 +1188,15 @@ window.addEventListener("message", e => {
   if (e.data.cmd === "campreview") pip.setCamPreview(!!e.data.on);
   else if (e.data.cmd === "scene" && Number.isInteger(e.data.i) && SCENES[e.data.i]) selectScene(e.data.i);
   else if (e.data.cmd === "chrome") { chromeOn = !!e.data.on; applyChrome(); }
+  // M1: painel de mapping — reencaminha para os MESMOS handlers do botão/select
+  // reais (playBtn.onclick, "change" do #mode), sem duplicar a lógica deles.
+  else if (e.data.cmd === "scrubPlay") {
+    const wantPlaying = !!e.data.on;
+    if (wantPlaying === player.paused) $("playBtn").onclick(); // só alterna se estiver dessincronizado
+  } else if (e.data.cmd === "scrubMode" && ["aperture", "hands", "drag"].includes(e.data.mode)) {
+    $("mode").value = e.data.mode;
+    $("mode").dispatchEvent(new Event("change"));
+  }
 });
 </script>
 </body>

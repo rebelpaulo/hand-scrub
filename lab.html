@@ -1004,6 +1004,17 @@ void main() {
     const b = e.target.closest("button[data-i]");
     if (b) setEffect(Number(b.dataset.i));
   });
+  // extraídas do keydown abaixo (M1: painel de mapping manda os mesmos
+  // comandos por postMessage — um único sítio faz o clamp/reset, teclado e
+  // painel remoto não podem divergir).
+  function setGridN(n) { gridN = Math.max(4, Math.min(48, n)); }
+  function clearBox() {
+    hasBox = false; boxCorners = null; boxCleared = true;
+    // mesmo motivo do review PR #47 (ver keydown "0"/Escape): sem repintar já,
+    // o pill do HUD mentia o estado até ao próximo frame de câmara.
+    boxReason = "apagada"; rejectedQuad = null;
+    updatePipHud(performance.now());
+  }
 
   let lastActivity = Date.now();
   function bump() { lastActivity = Date.now(); panelEl.classList.remove("idle"); }
@@ -1013,17 +1024,10 @@ void main() {
 
   window.addEventListener("keydown", (e) => {
     if (e.key >= "1" && e.key <= "5") setEffect(e.key.charCodeAt(0) - "1".charCodeAt(0));
-    else if (e.key === "[") gridN = Math.max(4, gridN - 2);
-    else if (e.key === "]") gridN = Math.min(48, gridN + 2);
+    else if (e.key === "[") setGridN(gridN - 2);
+    else if (e.key === "]") setGridN(gridN + 2);
     else if (e.key === "0" || e.key === "Escape") {
-      // apaga a caixa; re-arma quando uma mão sumir e as duas voltarem (updateBox)
-      hasBox = false; boxCorners = null; boxCleared = true;
-      // Regista já o motivo (review PR #47): com a câmara estagnada, o
-      // updateBox não volta a correr sem um frame novo, e o painel ficava a
-      // mostrar indefinidamente o último motivo — quase sempre "a seguir" —
-      // com a caixa apagada. Diagnóstico a mentir é pior do que não ter.
-      boxReason = "apagada"; rejectedQuad = null;
-      updatePipHud(performance.now()); // repinta já: sem frame novo o tick() não corre e o pill ficava a mentir
+      clearBox(); // re-arma quando uma mão sumir e as duas voltarem (updateBox)
     } else if (e.key === "p" || e.key === "P") {
       togglePip(); // NEW: preview de tracking
     }
@@ -1058,6 +1062,11 @@ void main() {
     if (e.origin !== location.origin || e.data?.mapping !== 1) return;
     if (e.data.cmd === "campreview") setPipVisible(!!e.data.on);
     else if (e.data.cmd === "chrome") document.body.classList.toggle("chrome-off", !e.data.on);
+    // M1: painel de mapping — mesmas funções que o teclado usa (setEffect/
+    // setGridN/clearBox), sem duplicar clamp/reset nenhum.
+    else if (e.data.cmd === "labEffect" && Number.isInteger(e.data.i)) setEffect(e.data.i);
+    else if (e.data.cmd === "labDensity" && Number.isFinite(e.data.n)) setGridN(e.data.n);
+    else if (e.data.cmd === "labClear") clearBox();
   });
   // PRINCÍPIO (ver display.html/C1): dentro do shell de projeção quem comanda a
   // interface é o ecrã de controlo. Aqui o chrome próprio é a dica + os botões
