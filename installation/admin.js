@@ -80,7 +80,7 @@ function render() {
   galleryMode.setAttribute("aria-pressed", String(!isAr));
   arMode.setAttribute("aria-pressed", String(isAr));
   put(byId("mode-description"), isAr
-    ? "Em repouso, a projeção mostra a câmara com cartões à volta do corpo. A seleção tátil continua disponível."
+    ? "Em repouso, a projeção mostra a imagem da câmara com os cartões à volta do corpo. Move a mão para escolher ou usa o touchscreen."
     : "A projeção fica em espera e os visitantes escolhem a experiência no touchscreen.");
   put(publicToggle, state.enabled ? "Fechar ao público" : "Abrir ao público");
   put(blackout, state.blackout ? "Retomar projeção" : "Apagar projeção");

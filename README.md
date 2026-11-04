@@ -25,7 +25,7 @@ node installation/server.mjs
 3. Se precisares de calibrar, com a sala fechada escolhe **Projetar Magic Draw**
    e escolhe **Abrir calibração**. As zonas são do projetor, e a deformação
    de malha existente é aplicada no motor Magic Draw.
-4. Seleciona **Galeria tátil** ou **Espelho AR** e **Abrir ao público**. A
+4. Seleciona **Galeria tátil** ou **Espelho de gestos** e **Abrir ao público**. A
    galeria fica disponível nos dois modos. No espelho, move a mão lateralmente
    e mantém a palma aberta no cartão central durante dois segundos.
 5. **Terminar sessão** liberta a projeção. Uma sessão de visitante expira ao
@@ -60,8 +60,14 @@ cabeçalho Host, acrescenta ou substitui o endereço do cliente em
 processo fica acessível apenas ao proxy. Os modelos são carregados por CDN
 nesta imagem.
 
-A imagem do espelho e os landmarks são processados no dispositivo do
-projetor. O quiosque tátil não pede câmara. Sem câmara ou tracking, o Magic
+O Espelho de gestos sobrepõe os cartões ao vídeo da webcam. O MediaPipe deteta
+as mãos e os ombros no navegador do projetor para posicionar os cartões e
+interpretar os gestos. A página `/installation/ar.html` também funciona
+isoladamente num site estático servido por HTTPS e abre as experiências
+no mesmo navegador. O servidor Node liga o quiosque ao projetor e à Área
+da equipa, gere as sessões da sala e guarda a calibração.
+
+O quiosque tátil não pede câmara. Sem câmara ou tracking, o Magic
 Draw mantém o desenho por toque, o Butterfly mantém o controlo de tempo e
 o espelho mantém a navegação por setas e toque. A captura de fotografias
 está desativada neste modo de instalação.

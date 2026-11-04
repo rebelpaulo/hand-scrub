@@ -6,6 +6,7 @@ const mirror = get('mirror'), video = get('camera'), deck = get('deck'), cursor 
 const help = get('help').firstChild, subhelp = get('subhelp'), count = get('count'), signal = get('signal');
 const query = new URLSearchParams(location.search);
 const launch = query.get('launch');
+const embedded = window.parent !== window;
 const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 const updateHold = createPalmHold(), updateDrag = createHandDrag();
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -56,10 +57,10 @@ const cards = EXPERIENCES.map((experience, index) => {
 });
 
 function tellParent(data) {
-  if (window.parent !== window) parent.postMessage({ mapping: 1, launch, ...data }, location.origin);
+  if (embedded) parent.postMessage({ mapping: 1, launch, ...data }, location.origin);
 }
 
-function setHelp(primary, secondary = 'Também podes escolher pelo quiosque.') {
+function setHelp(primary, secondary = embedded ? 'Também podes escolher pelo quiosque.' : 'Também podes escolher com as setas ou por toque.') {
   if (help.nodeValue !== primary) help.nodeValue = primary;
   if (subhelp.textContent !== secondary) subhelp.textContent = secondary;
 }
@@ -73,7 +74,7 @@ function readyHelp() {
   if (pending || performance.now() < retryUntil) return;
   if (status === 'limited') {
     setSignal('limited', 'Controlo manual');
-    setHelp('Gestos indisponíveis.', 'Usa as setas, toca num cartão ou escolhe pelo quiosque.');
+    setHelp('Gestos indisponíveis.', embedded ? 'Usa as setas, toca num cartão ou escolhe pelo quiosque.' : 'Usa as setas ou toca num cartão.');
   } else if (status === 'ready') {
     if (!body) {
       setSignal('search', 'À tua espera');
@@ -97,8 +98,8 @@ function choose(experience) {
   waitForRelease = true;
   setSignal('opening', 'A abrir');
   setHelp('A abrir ' + experience.title + '…');
-  if (window.parent === window) {
-    const url = new URL('/' + experience.id + '.html', location.href);
+  if (!embedded) {
+    const url = new URL('/' + experience.file, location.href);
     if (query.has('room')) url.searchParams.set('room', query.get('room'));
     location.assign(url);
     return;
@@ -119,7 +120,7 @@ function selectionRejected() {
 }
 
 window.addEventListener('message', event => {
-  if (window.parent === window || event.origin !== location.origin || event.source !== parent) return;
+  if (!embedded || event.origin !== location.origin || event.source !== parent) return;
   const data = event.data;
   if (data?.mapping === 1 && data.launch === launch && data.cmd === 'selectionRejected') selectionRejected();
 });
@@ -397,5 +398,8 @@ window.addEventListener('pagehide', () => {
 }, { once: true });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) resetInput(performance.now());
+});
+if (!embedded && !window.Palco) window.addEventListener('pageshow', event => {
+  if (event.persisted) location.reload();
 });
 start();
