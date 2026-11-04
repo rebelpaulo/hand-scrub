@@ -485,7 +485,7 @@ window.addEventListener("resize", resize);
 resize();
 
 /* ================= protocolo de sync (BroadcastChannel + Supabase Realtime) ================= */
-const SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
+const SUPABASE_URL = window.Palco?.configURL || "https://rvcvyeodglovmptcuyiz.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
 /* ?room=X emparelha esta projeção com o tablet que abrir o mesmo room —
    sem isto, todas as instalações partilhariam um único stream de comandos. */
@@ -496,10 +496,10 @@ const ROOM = ((new URLSearchParams(location.search).get("room") || "default").re
 const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let seq = 0;
 
-const bc = new BroadcastChannel("magicdraw:" + ROOM);
+const bc = (window.Palco?.channel("magicdraw:" + ROOM) ?? new BroadcastChannel("magicdraw:" + ROOM));
 // canal GLOBAL de zonas do edifício (partilhado com o mapping mode): edições
 // feitas na landing/shell chegam aqui ao vivo — herança nos dois sentidos.
-const bcZones = new BroadcastChannel("mapping-zones:" + ROOM);
+const bcZones = (window.Palco?.channel("mapping-zones:" + ROOM) ?? new BroadcastChannel("mapping-zones:" + ROOM));
 bcZones.onmessage = e => onMsg(e.data);
 let sbChannel = null; // null se o CDN falhar — o BroadcastChannel local continua a funcionar
 let sbReady = false;
@@ -528,9 +528,10 @@ function onMsg(payload) {
   handleMsg(payload);
 }
 bc.onmessage = e => onMsg(e.data);
+if (window.Palco) bc.onopen = () => send("hello");
 // import dinâmico guardado (como magicdraw.html): uma falha do CDN não pode
 // matar a projeção — câmara, tracking e BroadcastChannel arrancam na mesma.
-(async () => {
+if (!window.Palco) (async () => {
   try {
     const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1408,6 +1409,7 @@ async function initModel() {
   });
 }
 
+let firstFrameReported = false;
 function loop() {
   if (!running) return;
   const now = performance.now();
@@ -1415,6 +1417,10 @@ function loop() {
     lastVideoTime = cam.currentTime;
     const res = landmarker.detectForVideo(cam, now);
     processHands(res, now);
+    if (!firstFrameReported) {
+      firstFrameReported = true;
+      window.Palco?.availability("ready");
+    }
     dismissOverlay();
   }
   renderActiveStrokes(); // FIX B: redesenha o traço em curso como path contínuo, todo frame
@@ -1434,6 +1440,7 @@ function muralLoop() {
 }
 function enterMuralMode(noticeMsg) {
   showNotice(noticeMsg);
+  window.Palco?.availability("limited", "Podes desenhar no touchscreen.");
   dismissOverlay();
   requestAnimationFrame(muralLoop);
 }
@@ -1470,32 +1477,10 @@ start();
 
 /* ================= teclas ================= */
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") location.href = "index.html";
+  if (e.key === "Escape" && (!window.Palco || window.parent === window)) location.href = "index.html";
   if (e.key === "f" || e.key === "F") {
     document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
   }
-});
-
-/* ================= hotspot fullscreen (mesmo padrão do display.html) =================
-   5 toques seguidos no canto inferior direito (≤1.2s entre cada) alternam o
-   fullscreen — 'click' e não pointerdown: em touch a ativação de utilizador
-   só é concedida no fim do toque. Também útil quando esta página corre
-   standalone (sem o shell display.html por cima). */
-const fsHotspot = document.createElement("div");
-fsHotspot.style.cssText = "position:fixed;right:0;bottom:0;width:72px;height:72px;z-index:120;";
-fsHotspot.setAttribute("aria-hidden", "true");
-document.body.appendChild(fsHotspot);
-let fsClicks = 0, fsClickTimer = 0;
-fsHotspot.addEventListener("click", () => {
-  clearTimeout(fsClickTimer);
-  fsClicks++;
-  if (fsClicks >= 5) {
-    fsClicks = 0;
-    const p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
-    p?.catch?.(() => { /* recusado (política do browser): fica como está */ });
-    return;
-  }
-  fsClickTimer = setTimeout(() => { fsClicks = 0; }, 1200);
 });
 
 /* ================= ponte postMessage (shell de projeção) =================
@@ -1506,7 +1491,7 @@ fsHotspot.addEventListener("click", () => {
    (ver display.html, mesmo padrão do campreview). */
 if (window.parent !== window) {
   document.body.classList.add("chrome-off"); // embebido: começa escondido
-  parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
+  parent.postMessage({ mapping: 1, evt: "ready", launch: new URLSearchParams(location.search).get("launch") }, location.origin);
 }
 window.addEventListener("message", e => {
   if (e.origin !== location.origin || e.data?.mapping !== 1) return;

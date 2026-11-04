@@ -1122,7 +1122,12 @@ function showNotice(msg) { notice.textContent = msg; notice.hidden = false; }
 function setLoadStatus(msg) { const s = $("loadStatus"); if (s) s.textContent = msg; }
 
 let overlayDismissed = false;
+let firstFrameReported = false;
 function dismissOverlay() {
+  if (!firstFrameReported) {
+    firstFrameReported = true;
+    window.Palco?.availability("ready");
+  }
   if (overlayDismissed) return;
   overlayDismissed = true;
   const ov = $("startOverlay");
@@ -1171,6 +1176,7 @@ async function start() {
   } catch (e) {
     showNotice("⚠️ não foi possível carregar os modelos — verifica a ligação e recarrega");
     setLoadStatus("falhou — recarrega a página para tentar de novo");
+    window.Palco?.availability("error", "Câmara ou motor indisponível.");
     return;
   }
   try {
@@ -1184,10 +1190,12 @@ async function start() {
     stream.getVideoTracks()[0]?.addEventListener("ended", () => {
       running = false;
       showNotice("📷 câmara indisponível — câmara desligada");
+      window.Palco?.availability("error", "A câmara desligou-se.");
     });
   } catch (e) {
     showNotice("📷 câmara indisponível — verifica as permissões");
     setLoadStatus("falhou — recarrega a página para tentar de novo");
+    window.Palco?.availability("error", "Câmara ou motor indisponível.");
   }
 }
 start();
@@ -1198,7 +1206,7 @@ start();
 // no scrub.html (sem play/pausa/trim/ecrã inteiro), só estes dois elementos.
 const embedded = window.parent !== window;
 if (embedded) document.body.classList.add("chrome-off"); // começa escondida
-if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
+if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready", launch: new URLSearchParams(location.search).get("launch") }, location.origin);
 window.addEventListener("message", e => {
   if (e.origin !== location.origin || e.data?.mapping !== 1) return;
   // esconde só o vídeo de fundo (fica preto) — tracking/segmentação/partículas continuam

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mãos Elementais · Palco de Luz</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; margin: 0; }
+  body { color-scheme: dark; color: #fffaf2; font: 1rem system-ui, sans-serif; background: #101016; }
+  #mirror { position: fixed; inset: 0; overflow: hidden; isolation: isolate; background: radial-gradient(ellipse at 36% 48%, #3b1c19, transparent 36%), radial-gradient(ellipse at 68% 44%, #132b49, transparent 43%), #0e1018; }
+  video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  video { object-fit: cover; transform: scaleX(-1); filter: brightness(.78) saturate(.85); }
+  video:not([data-live]) { visibility: hidden; }
+  header, footer { position: absolute; inset-inline: 0; padding: clamp(16px, 4vw, 52px); z-index: 1; }
+  header { top: 0; display: flex; justify-content: space-between; gap: 12px; align-items: start; background: linear-gradient(#080912b5, transparent); }
+  footer { bottom: 0; background: linear-gradient(transparent, #080912ee); }
+  h1 { margin: 4px 0 0; font-size: clamp(28px, 6vw, 86px); letter-spacing: -.07em; line-height: 1; }
+  .tag { color: #ffc487; text-transform: uppercase; letter-spacing: .12em; font: 750 .78rem system-ui; }
+  a { color: inherit; padding: 12px; white-space: nowrap; }
+  p { margin: 0; }
+  #status { font-size: clamp(1rem, 2.7vmin, 1.5rem); font-weight: 650; }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  button { min-height: 46px; padding: 0 16px; border: 1px solid #ffffff70; border-radius: 8px; background: #1b1923; color: inherit; font: inherit; cursor: pointer; }
+  button:focus-visible, a:focus-visible { outline: 3px solid #ffc487; outline-offset: 3px; }
+  button:active { background: #42313a; }
+  [hidden] { display: none !important; }
+  .embedded header, .embedded footer[data-ready] { display: none; }
+</style>
+<script type="module" src="/installation/elements.mjs"></script>
+</head>
+<body>
+<main id="mirror">
+  <video id="camera" playsinline muted aria-hidden="true"></video>
+  <canvas id="effects" aria-hidden="true"></canvas>
+  <header>
+    <div><span class="tag">Palco de Luz</span><h1>Mãos Elementais</h1></div>
+    <a href="index.html">← Voltar</a>
+  </header>
+  <footer id="guide">
+    <p id="status" role="status">A preparar a câmara e o tracking…</p>
+    <div class="controls" id="preview" hidden>
+      <button type="button" id="fire-preview">Experimentar fogo</button>
+      <button type="button" id="electric-preview">Experimentar eletricidade</button>
+    </div>
+  </footer>
+</main>
+</body>
+</html>

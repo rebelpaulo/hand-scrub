@@ -317,37 +317,6 @@
     #camPip { width: 110px; }
   }
 
-  /* ============================================================ MAPPING MODE — hotspot secreto */
-  /* hotspot invisível no canto inferior esquerdo — sem qualquer traço visual,
-     só existe para ser mantido premido 10s (ver script). */
-  #mapHotspot {
-    /* canto inferior ESQUERDO — o direito tem o camPip (preview da câmara)
-       a disputar os toques; 96px porque um hold de 10s precisa de área */
-    position: fixed; left: 0; bottom: 0; width: 96px; height: 96px;
-    z-index: 500; background: transparent; touch-action: none;
-  }
-  /* hotspot no canto SUPERIOR direito — máquina do projetor: 3s mandam direto
-     para display.html. Canto diferente do #mapHotspot (10s, inferior) para
-     nunca se sobreporem/conflituarem. */
-  #displayHotspot {
-    position: fixed; right: 0; top: 0; width: 72px; height: 72px;
-    z-index: 500; background: transparent; touch-action: none;
-  }
-  /* MARCA dos hotspots: eram totalmente invisíveis e nem o operador os
-     encontrava — houve quem ficasse preso em mapping mode sem saber que a
-     saída existia. Um círculo discreto resolve isso.
-     Deliberadamente SEM qualquer indicação de progresso durante o hold: um
-     anel a encher é o que ensina um convidado curioso que vale a pena
-     continuar a segurar. Assim quem sabe encontra a marca, e a quem não sabe
-     o toque não devolve pista nenhuma — continuam a ser 10s (ou 3s) de dedo
-     parado, que já filtra o acidente. */
-  #mapHotspot::after, #displayHotspot::after {
-    content: ""; position: absolute; width: 10px; height: 10px;
-    border-radius: 50%; background: #98a2b6; opacity: .22; pointer-events: none;
-  }
-  #mapHotspot::after { left: 13px; bottom: 13px; }
-  #displayHotspot::after { right: 13px; top: 13px; }
-
   /* ============================================================ MAPPING MODE — diálogos/overlays */
   .map-overlay {
     position: fixed; inset: 0; z-index: 600; display: flex;
@@ -560,6 +529,17 @@
           </div>
         </button>
 
+        <button class="card" type="button" data-accent="amber" data-href="elements.html">
+          <div class="preview"><span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-8 12h7l-1 8 8-12h-7z"/></svg></span></div>
+          <div class="dwell">
+            <svg aria-hidden="true" viewBox="0 0 46 46"><circle class="track" cx="23" cy="23" r="20"/><circle class="fill" cx="23" cy="23" r="20"/></svg>
+          </div>
+          <div class="body">
+            <h3 class="title">Mãos Elementais</h3>
+            <p class="desc">estala os dedos para acender fogo e aponta os indicadores para criar um raio</p>
+          </div>
+        </button>
+
       </div>
     </section>
 
@@ -610,6 +590,10 @@
             <span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V6a2 2 0 0 1 2-2h3"/><path d="M15 4h3a2 2 0 0 1 2 2v3"/><path d="M20 15v3a2 2 0 0 1-2 2h-3"/><path d="M9 20H6a2 2 0 0 1-2-2v-3"/><circle cx="12" cy="12" r="3"/></svg></span>
             <span class="txt"><span class="t">🎞️ Motion Lab</span><span class="d">toca para abrir no ecrã</span></span>
           </button>
+          <button type="button" class="map-card" data-accent="amber" data-app="elements">
+            <span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-8 12h7l-1 8 8-12h-7z"/></svg></span>
+            <span class="txt"><span class="t">Mãos Elementais</span><span class="d">toca para abrir no ecrã</span></span>
+          </button>
         </div>
 
         <div class="map-detail" id="mapDetail">
@@ -645,6 +629,7 @@
                 <select class="map-btn" id="mapScrubMode" title="Modo de controlo" aria-label="Modo de controlo">
                   <option value="aperture">✌️ Abrir/Fechar</option>
                   <option value="hands">🙏 Afastar as mãos</option>
+                  <option value="squeeze" hidden>Amassar · definido pela cena</option>
                   <option value="drag">🤏 Arrastar</option>
                 </select>
               </div>
@@ -666,29 +651,12 @@
 
   <div id="notice"></div>
 
-  <!-- hotspot invisível (canto superior direito): 3s manda para display.html —
-       é para a máquina do projetor, corner diferente do mapping mode abaixo -->
-  <div id="displayHotspot" aria-hidden="true"></div>
-
-  <!-- ================= MAPPING MODE — hotspot secreto + diálogos ================= -->
-  <div id="mapHotspot" aria-hidden="true"></div>
-
-  <div class="map-overlay" id="mapConfirm" hidden>
-    <div class="map-modal">
-      <p id="mapConfirmText"></p>
-      <div class="map-modal-actions">
-        <button type="button" class="map-btn" id="mapConfirmCancel"></button>
-        <button type="button" class="map-btn primary" id="mapConfirmOk"></button>
-      </div>
-    </div>
-  </div>
-
   <div class="map-overlay" id="mapSetup" hidden>
     <div class="map-modal">
-      <h3>⚙️ Setup do mapping mode</h3>
+      <h3>Preparar projeção</h3>
       <ol>
         <li>Abre <code>display.html</code> no computador do projetor (mesmo <code>?room=</code>).</li>
-        <li>Define as zonas do edifício no admin do Magic Draw (⚙️ 3s no painel de desenho).</li>
+        <li>Na Área da equipa, abre «Zonas, warp e edifícios» para calibrar.</li>
         <li>Volta aqui e escolhe a experiência.</li>
       </ol>
       <div class="map-modal-actions">
@@ -705,6 +673,9 @@ if (/^#cfg=/.test(location.hash)) {
   location.replace("scrub.html" + location.hash);
 }
 
+import { request, roomURL, watchState } from "./installation/client.mjs";
+
+const managed = Boolean(window.Palco);
 const $ = id => document.getElementById(id);
 const stage = $("stage");
 const viewAttract = $("viewAttract"), viewSelector = $("viewSelector"), viewMapping = $("viewMapping");
@@ -756,6 +727,7 @@ const EXPERIENCES = [
   { name: "🌬️ ENXAME",          accent: "#cbd5e1" },
   { name: "🪄 MAGIC DRAW",       accent: "#a78bfa" },
   { name: "🎞️ MOTION LAB",      accent: "#f59e0b" },
+  { name: "MÃOS ELEMENTAIS", accent: "#ffbd85" },
 ];
 let expIdx = 0;
 function paintExperience(i) {
@@ -841,7 +813,7 @@ async function startCamera() {
     notice("câmara indisponível — usa o rato ou toca no ecrã");
   }
 }
-startCamera();
+if (!managed) startCamera();
 
 function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
 
@@ -1021,15 +993,7 @@ function resetDwellState() {
   mouseMovedSinceModeSwitch = false;
 }
 
-/* ============================================================ MAPPING MODE
-   painel de controlo remoto: escolher um cartão deixa de navegar e passa a
-   mandar a experiência abrir no display.html remoto (BroadcastChannel +
-   Supabase Realtime). Tudo o que precisa de DOM/rede fica atrás do flag —
-   o modo normal da landing (attract/seletor) não muda em nada. */
-let mappingMode = localStorage.getItem("mappingMode") === "1";
-const mapHotspot = $("mapHotspot");
-const mapConfirm = $("mapConfirm"), mapConfirmText = $("mapConfirmText");
-const mapConfirmOk = $("mapConfirmOk"), mapConfirmCancel = $("mapConfirmCancel");
+/* ============================================================ CONTROLOS DA EQUIPA */
 const mapSetup = $("mapSetup"), mapSetupClose = $("mapSetupClose"), mapCopyUrlBtn = $("mapCopyUrlBtn");
 const mapSetupBtn = $("mapSetupBtn"), mapCamBtn = $("mapCamBtn"), mapChromeBtn = $("mapChromeBtn"), mapHomeBtn = $("mapHomeBtn");
 const mapExitBtn = $("mapExitBtn");
@@ -1041,27 +1005,10 @@ const mapLabControls = $("mapLabControls"), mapLabEffectsEl = $("mapLabEffects")
 const mapLabDensityMinus = $("mapLabDensityMinus"), mapLabDensityPlus = $("mapLabDensityPlus"), mapLabClearBtn = $("mapLabClearBtn");
 const mapScrubControls = $("mapScrubControls"), mapScrubPlayBtn = $("mapScrubPlayBtn"), mapScrubModeEl = $("mapScrubMode");
 
-/* ---------- contrato de sync (pinado — display.html implementa isto à letra) ---------- */
-// cap de 40 — ver nota em magicdraw.html: o ROOM entra nos ids do hand_config
-// (check <=64) e o cap TEM de ser idêntico nos 4 ficheiros, senão os ecrãs
-// derivam nomes de canal diferentes e deixam de se ver.
-const ROOM = ((new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "").slice(0, 40)) || "default";
-const MAP_SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
-const MAP_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
-const MAP_CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
-// mapSbClient: guardado para poder FECHAR o socket no teardown — sem ele cada
-// ciclo entrar/sair deixava um WebSocket aberto (2 sockets após um ciclo).
-let mapSeq = 0, mapBc = null, mapSbChannel = null, mapSbClient = null, mapSbReady = false, mapSyncStarted = false;
-// incrementado a cada início/fim de ciclo — invalida o import()/subscribe()
-// assíncrono de um ciclo anterior que só resolva depois de já se ter saído
-// do mapping mode (ver teardownMappingSync/initMappingSync).
-let mapSyncToken = 0;
-// campreview começa ON: é o default das experiências ao abrir — assim o botão
-// reflete a realidade e o 1º toque esconde de facto (T28b finding 3)
-// chrome (interface própria da experiência: cenas, play/pausa, trim, ecrã
-// inteiro) começa OFF — quem comanda a experiência embebida é este painel,
-// não a barra dela própria projetada na fachada (ver princípio em display.html).
-let mapWired = false, mapActiveApp = null, mapCamPreviewOn = true, mapActiveScene = null, mapChromeOn = false;
+const ROOM = window.Palco?.room || "default";
+let mapSeq = 0, mapBc;
+const MAP_CLIENT_ID = Math.random().toString(36).slice(2, 10);
+let mapWired = false, mapActiveApp = null, mapCamPreviewOn = false, mapActiveScene = null, mapChromeOn = false;
 // Motion Lab + Butterfly: mesmo princípio do campreview/chrome acima — o painel
 // é a fonte da verdade para estes controlos (defaults têm de bater certo com o
 // que cada experiência assume ao abrir: lab.html nasce com effectIndex 0/gridN
@@ -1070,112 +1017,18 @@ let mapLabEffect = 0, mapLabGridN = 24, mapScrubMode = "aperture";
 
 function mapSend(kind, extra = {}) {
   const payload = { v: 1, src: MAP_CLIENT_ID, seq: ++mapSeq, kind, ...extra };
-  try { mapBc && mapBc.postMessage(payload); } catch (e) { /* canal indisponível — ignora */ }
-  if (mapSbReady) {
-    try { mapSbChannel.send({ type: "broadcast", event: "msg", payload }); } catch (e) { /* ignora */ }
-  }
-}
-
-// dedup: as mensagens chegam pelos DOIS canais — ignora repetições e as próprias.
-const mapLastSeqBySrc = new Map();
-function mapOnMsg(payload) {
-  if (!payload || payload.v !== 1 || payload.src === MAP_CLIENT_ID) return;
-  const last = mapLastSeqBySrc.get(payload.src) ?? -1;
-  if (payload.seq <= last) return;
-  mapLastSeqBySrc.set(payload.src, payload.seq);
-  mapHandleMsg(payload);
-}
-
-function mapHandleMsg(payload) {
-  switch (payload.kind) {
-    case "hello":
-      // o display pediu o estado atual (ex.: reiniciou) — reenvia o que está
-      // selecionado agora, incluindo a cena ativa: sem isto o scrub assume
-      // cena 0 por omissão enquanto o painel continua a marcar outra como
-      // ativa (review).
-      if (mapActiveApp) mapSend("open", { app: mapActiveApp });
-      mapSend("campreview", { on: mapCamPreviewOn });
-      mapSend("chrome", { on: mapChromeOn });
-      if (mapActiveApp === "scrub" && mapActiveScene != null) mapSend("scene", { i: mapActiveScene });
-      // idem para os controlos novos: um display que reinicie tem de herdar o
-      // efeito/densidade do Motion Lab e o play/modo do Butterfly, não só o
-      // que já existia antes desta ticket (review critério 5).
-      if (mapActiveApp === "lab") {
-        mapSend("labEffect", { i: mapLabEffect });
-        mapSend("labDensity", { n: mapLabGridN });
-      }
-      // scrubPlay NÃO é reenviado: passou a ser uma ação de alternar, sem
-      // estado do lado do painel (ver toggleMapScrubPlay). Reenviá-lo aqui
-      // inverteria a reprodução a cada reconexão do display.
-      if (mapActiveApp === "scrub") mapSend("scrubMode", { mode: mapScrubMode });
-      break;
-    case "status":
-      setMapActiveApp(payload.app || null);
-      break;
-  }
-}
-
-function updateMapIndicator() {
-  mapIndicator.textContent = mapSbReady ? "🟢 ligado" : "🟡 só local";
+  mapBc?.postMessage(payload);
 }
 
 function initMappingSync() {
-  if (mapSyncStarted) return;
-  mapSyncStarted = true;
-  const token = ++mapSyncToken; // identifica este ciclo entrar/sair
-  mapBc = new BroadcastChannel("mapping:" + ROOM);
-  mapBc.onmessage = e => mapOnMsg(e.data);
-  // import dinâmico guardado (mesmo padrão de magicdraw-display.html): uma
-  // falha do CDN não pode impedir o painel de funcionar — o BroadcastChannel
-  // local continua a mandar 'open'/'home'/'campreview'/'scene'.
-  (async () => {
-    try {
-      const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
-      // saiu do mapping mode (ou voltou a entrar, novo ciclo) antes do import
-      // acabar — não abrir/deixar pendurado um canal de um ciclo já fechado.
-      if (token !== mapSyncToken) return;
-      const sb = createClient(MAP_SUPABASE_URL, MAP_SUPABASE_ANON_KEY);
-      const ch = sb.channel("mapping:" + ROOM);
-      ch.on("broadcast", { event: "msg" }, ({ payload }) => mapOnMsg(payload)).subscribe(status => {
-        // token velho = este ciclo já fechou; limita-te a ignorar. NÃO chamar
-        // unsubscribe() aqui: o teardown já o faz, e a chamada re-dispara este
-        // mesmo callback com o token na mesma desatualizado — recursão até
-        // "Maximum call stack size exceeded" (18 erros por saída, verificação).
-        if (token !== mapSyncToken) return;
-        if (status === "SUBSCRIBED") { mapSbReady = true; updateMapIndicator(); mapSend("hello"); }
-        // queda do canal (wifi a soluçar a meio de um evento): sem isto o pill
-        // continuava "🟢 ligado" e o mapSend insistia num canal morto — o
-        // operador só descobria que os comandos não chegavam ao display quando
-        // já nada respondia. Mesmo padrão que magicdraw.html já usava (review).
-        else if (status === "CLOSED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          mapSbReady = false; updateMapIndicator();
-        }
-      });
-      mapSbChannel = ch;
-      mapSbClient = sb;
-    } catch (e) { /* offline/CDN em baixo: fica só o canal local */ }
-  })();
-  updateMapIndicator();
-}
-
-// fecha BroadcastChannel + unsubscribe do canal Supabase e repõe
-// mapSyncStarted=false — sem isto, um ciclo entrar/sair em attract loop o
-// dia inteiro deixa um socket e um canal a processar mensagens para sempre
-// sem necessidade (review). Idempotente: chamar 2x não rebenta.
-function teardownMappingSync() {
-  mapSyncToken++; // invalida qualquer import/subscribe assíncrono ainda pendente
-  if (mapBc) { mapBc.onmessage = null; mapBc.close(); mapBc = null; }
-  if (mapSbChannel) { try { mapSbChannel.unsubscribe(); } catch (e) { /* ignora */ } mapSbChannel = null; }
-  // e fecha mesmo o socket: só remover o canal deixava o WebSocket vivo e cada
-  // ciclo criava um cliente novo (2 sockets após entrar/sair uma vez).
-  if (mapSbClient) {
-    try { mapSbClient.removeAllChannels(); } catch (e) { /* ignora */ }
-    try { mapSbClient.realtime?.disconnect(); } catch (e) { /* ignora */ }
-    mapSbClient = null;
-  }
-  mapSbReady = false;
-  mapSyncStarted = false;
-  updateMapIndicator();
+  mapBc = window.Palco.channel("mapping:" + ROOM);
+  watchState(state => {
+    mapIndicator.textContent = state.display === "offline" ? "Projetor sem ligação" :
+      state.session?.status === "loading" ? "A preparar" : state.session?.status === "error" ?
+        "Falha na experiência" : "Projetor ligado";
+    if (mapActiveApp !== (state.session?.app ?? null)) setMapActiveApp(state.session?.app ?? null);
+    mapOpenMagicdraw.href = state.session ? roomURL("/magicdraw.html?session=" + encodeURIComponent(state.session.id)) : roomURL("/");
+  });
 }
 
 /* ---------- explicações das experiências (PT-PT, tom festival) ---------- */
@@ -1200,6 +1053,10 @@ const MAP_APPS = {
     title: "🪄 Magic Draw",
     desc: "Desenha diretamente sobre a fachada do edifício, mapeada zona a zona. O controlo do desenho fica no tablet — abre o painel para escolher cores, apagar traços e gerir as zonas da projeção.",
   },
+  elements: {
+    title: "Mãos Elementais",
+    desc: "Estala com o polegar e o dedo médio para acender fogo. Aponta os indicadores um para o outro para criar um raio.",
+  },
   lab: {
     title: "🎞️ Motion Lab",
     desc: "Forma uma caixa com as mãos e o vídeo ganha um efeito só lá dentro. Abre os dedos para aumentar a caixa, fecha-os para encolher — a moldura acompanha o gesto em tempo real.",
@@ -1215,12 +1072,10 @@ function setMapActiveApp(appId) {
   renderMapDetail(appId);
 }
 function openMapApp(appId) {
-  setMapActiveApp(appId);
-  mapSend("open", { app: appId });
+  request("operator", { action: "open", app: appId }).catch(error => { mapIndicator.textContent = error.message; });
 }
 function mapGoHome() {
-  mapSend("home");
-  setMapActiveApp(null);
+  request("operator", { action: "reset" }).catch(error => { mapIndicator.textContent = error.message; });
 }
 function toggleMapCamPreview() {
   mapCamPreviewOn = !mapCamPreviewOn;
@@ -1243,12 +1098,9 @@ function sendMapScene(i) {
   mapActiveScene = i;
   mapSend("scene", { i });
   const forcado = MAP_SCENE_FORCED_MODE[i];
-  if (forcado) {
-    mapScrubMode = forcado;
-    // 'squeeze' não existe como opção visível no seletor do painel — deixa-o
-    // sem seleção em vez de mentir a dizer que está noutro modo qualquer
-    if (mapScrubModeEl) mapScrubModeEl.value = forcado;
-  }
+  mapScrubModeEl.disabled = Boolean(forcado);
+  if (forcado) mapScrubModeEl.value = forcado;
+  else mapScrubModeEl.value = mapScrubMode;
   mapScenesEl.querySelectorAll(".map-chip").forEach(ch => ch.classList.toggle("active", Number(ch.dataset.i) === i));
 }
 
@@ -1360,10 +1212,8 @@ function wireMapUI() {
   mapChromeBtn.classList.toggle("on", mapChromeOn); // estado visual inicial coerente
   mapHomeBtn.addEventListener("click", mapGoHome);
   mapSetupBtn.addEventListener("click", openMapSetup);
-  // mesmo diálogo e mesma ação do hotspot de 10s — uma só forma de sair, dois
-  // caminhos para lá chegar; não duplica a lógica de saída
   mapExitBtn.addEventListener("click", () => {
-    showMapConfirm("Sair do mapping mode?", "Sair", "Cancelar", exitMapping);
+    location.href = roomURL("/installation/admin.html");
   });
   mapSetupClose.addEventListener("click", () => { mapSetup.hidden = true; });
   mapCopyUrlBtn.addEventListener("click", copyDisplayUrl);
@@ -1375,84 +1225,14 @@ function activateMappingView() {
   // dwell ANTES de congelar, para não guardar um holdStart/thumbsSince a meio.
   resetDwellState();
   mapRoomLabel.textContent = ROOM;
+  mapHomeBtn.textContent = "Terminar sessão";
+  mapExitBtn.textContent = "Área da equipa";
   wireMapUI();
   setView("mapping");
   initMappingSync();
 }
-function enterMapping() {
-  localStorage.setItem("mappingMode", "1");
-  mappingMode = true;
-  activateMappingView();
-  openMapSetup(); // instruções de setup aparecem primeiro, como pedido
-}
-function exitMapping() {
-  localStorage.removeItem("mappingMode");
-  mappingMode = false;
-  teardownMappingSync();
-  // defesa em profundidade: o dwell já devia estar limpo desde a entrada
-  // (activateMappingView), mas repor outra vez aqui cobre qualquer caminho
-  // de saída futuro que não passe por lá — nunca sair "sujo".
-  resetDwellState();
-  setView("attract");
-}
-
-/* ---------- diálogo de confirmação genérico (entrar/sair) ---------- */
-function showMapConfirm(text, okLabel, cancelLabel, onOk) {
-  mapConfirmText.textContent = text;
-  mapConfirmOk.textContent = okLabel;
-  mapConfirmCancel.textContent = cancelLabel;
-  mapConfirm.hidden = false;
-  mapConfirmOk.onclick = () => { mapConfirm.hidden = true; onOk(); };
-  mapConfirmCancel.onclick = () => { mapConfirm.hidden = true; };
-}
-
-/* ---------- hotspot invisível genérico: manter premido N ms dispara onFire,
-   cancela se largar ou mover demais. Dois hotspots usam isto (cantos
-   diferentes, timers independentes — nunca conflituam). ---------- */
-function wireHoldHotspot(el, ms, onFire) {
-  // 48px: num hold de 10s o dedo derrapa sempre; 16px cancelava holds reais.
-  const TOL = 48;
-  let timer = 0, sx = 0, sy = 0, pid = null; // pid: só UM dedo comanda o hold
-  function onMove(e) { if (e.pointerId === pid && Math.hypot(e.clientX - sx, e.clientY - sy) > TOL) cancel(); }
-  function onUp(e) { if (e.pointerId === pid) cancel(); }
-  function cancel() {
-    clearTimeout(timer); timer = 0; pid = null;
-    document.removeEventListener("pointermove", onMove);
-    document.removeEventListener("pointerup", onUp);
-    document.removeEventListener("pointercancel", onUp);
-  }
-  el.addEventListener("pointerdown", e => {
-    if (pid !== null) return; // 2º dedo durante um hold: ignora, não reinicia
-    pid = e.pointerId; sx = e.clientX; sy = e.clientY;
-    // captura o ponteiro: sair da área do elemento deixa de matar o hold —
-    // só o levantar do dedo (pointerup/cancel) ou derrapar além de TOL.
-    try { el.setPointerCapture(e.pointerId); } catch { /* indisponível: segue sem captura */ }
-    // up/cancel no DOCUMENT: mesmo sem captura, largar fora do hotspot cancela
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
-    document.addEventListener("pointercancel", onUp);
-    timer = setTimeout(() => { cancel(); onFire(); }, ms);
-  });
-}
-
-/* canto inferior esquerdo, 10s: liga/desliga o mapping mode */
-const HOTSPOT_HOLD_MS = 10000;
-wireHoldHotspot(mapHotspot, HOTSPOT_HOLD_MS, () => {
-  if (mappingMode) {
-    showMapConfirm("Sair do mapping mode?", "Sair", "Cancelar", exitMapping);
-  } else {
-    showMapConfirm("MAPPING MODE — configurar esta instalação?", "OK", "Fechar", enterMapping);
-  }
-});
-
-/* canto superior direito, 3s: máquina do projetor — vai direto para o
-   display.html (preserva ?room= se existir), sem diálogo de confirmação */
-const DISPLAY_HOTSPOT_HOLD_MS = 3000;
-const displayHotspot = $("displayHotspot");
-wireHoldHotspot(displayHotspot, DISPLAY_HOTSPOT_HOLD_MS, () => { location.href = displayUrl(); });
-
 /* ---------- arranque: se o mapping mode já estava ativo, salta o attract ---------- */
-if (mappingMode) activateMappingView();
+if (managed) activateMappingView();
 </script>
 </body>
 </html>

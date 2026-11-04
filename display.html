@@ -24,21 +24,33 @@
     color: #7a8399; font-size: 15px; letter-spacing: .01em; text-align: center;
     z-index: 10; white-space: nowrap; pointer-events: none; opacity: .6;
   }
+  #stage-cue { position: fixed; z-index: 9; bottom: 10%; left: 50%; width: max-content; max-width: 84%; transform: translateX(-50%); padding: 12px 20px; color: #fff; background: #101014ed; border: 1px solid #ffffff48; border-radius: 10px; text-align: center; font-size: clamp(17px, 3vw, 30px); pointer-events: none; }
   #hint[hidden] { display: none; }
+  body.managed #hint { width: min(84vw, 900px); color: #fffaf0; opacity: 1; white-space: normal; font-size: clamp(18px, 3vw, 38px); }
+  #hint strong { display: block; color: #e3fc86; letter-spacing: -.06em; font-size: clamp(44px, 9vw, 126px); }
+  body.blackout #zoneCanvas, body.blackout #stage-fullscreen { display: none; }
+  #stage-fullscreen { position: fixed; z-index: 20; top: 18px; left: 50%; transform: translateX(-50%); min-height: 46px; padding: 0 16px; color: white; background: #24222b; border: 1px solid #81798a; border-radius: 8px; cursor: pointer; }
 </style>
 </head>
 <body>
-  <iframe id="stage" allow="camera; microphone; fullscreen; autoplay" allowfullscreen></iframe>
+  <iframe id="stage" title="Experiência na projeção" allow="camera; fullscreen; autoplay" allowfullscreen></iframe>
   <canvas id="zoneCanvas"></canvas>
+  <p id="stage-cue" hidden></p>
+  <button type="button" id="stage-fullscreen" hidden>Ecrã inteiro</button>
   <div id="hint" hidden>⚠️ falha ao carregar a experiência — recarrega a página</div>
 
 <script type="module">
+import { connectStage, stageURL } from "./installation/stage.mjs";
+import { EXPERIENCES } from "./installation/catalog.mjs";
+
+const managed = Boolean(window.Palco);
+if (managed) document.body.classList.add("managed");
 const $ = id => document.getElementById(id);
 const stage = $("stage");
 const hint = $("hint");
 const zoneCanvas = $("zoneCanvas"), zctx = zoneCanvas.getContext("2d");
 
-const APP_FILES = { scrub: "scrub.html", shadow: "shadow.html", draw: "draw.html", enxame: "enxame.html", magicdraw: "magicdraw-display.html", lab: "lab.html" };
+const APP_FILES = new Map(EXPERIENCES.map(({ id, file }) => [id, file]));
 
 /* ================= zonas de oclusão/inclusão (copiado de magicdraw-display.html) =================
    Duas formas, normalizadas 0–1 (resolução-independentes):
@@ -238,7 +250,7 @@ async function keystoneCloudLoad() {
     });
     if (!r.ok) return;
     const cfg = (await r.json())[0]?.data;
-    if (cfg?.corners) { keystoneCorners = cfg.corners; applyKeystone(); }
+    if (isValidCorners(cfg?.corners)) { keystoneCorners = cfg.corners; applyKeystone(); }
   } catch { /* offline: fica identidade até chegar um 'keystone' ao vivo */ }
 }
 // FIX F4: antes só se apanhava exceção de rede (.catch) — um 400 da BD (payload
@@ -259,7 +271,7 @@ function keystoneCloudSave(corners) {
 }
 
 /* ================= protocolo de sync (BroadcastChannel + Supabase Realtime) ================= */
-const SUPABASE_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
+const SUPABASE_URL = window.Palco?.configURL || "https://rvcvyeodglovmptcuyiz.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
 // cap de 40 — ver nota em magicdraw.html: o ROOM entra nos ids do hand_config
 // (check <=64) e o cap TEM de ser idêntico nos 4 ficheiros, senão os ecrãs
@@ -271,8 +283,8 @@ const ZONES_ROW_ID = ROOM === "default" ? "magicdraw-zones" : "magicdraw-zones:"
 const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let seq = 0;
 
-const bcCmd = new BroadcastChannel("mapping:" + ROOM);
-const bcZones = new BroadcastChannel("mapping-zones:" + ROOM);
+const bcCmd = (window.Palco?.channel("mapping:" + ROOM) ?? new BroadcastChannel("mapping:" + ROOM));
+const bcZones = (window.Palco?.channel("mapping-zones:" + ROOM) ?? new BroadcastChannel("mapping-zones:" + ROOM));
 let sbCmd = null, sbZones = null;
 let sbReady = false;
 
@@ -310,7 +322,7 @@ function onZonesMsg(payload) {
 bcCmd.onmessage = e => onCmdMsg(e.data);
 bcZones.onmessage = e => onZonesMsg(e.data);
 
-(async () => {
+if (!window.Palco) (async () => {
   try {
     const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -331,7 +343,7 @@ send("hello");
    outras 4 experiências só entram por comando 'open' explícito do mapping
    mode — continuam disponíveis, só deixam de ser o estado de repouso. */
 const HOME_APP = "magicdraw";
-let currentApp = null;
+let currentApp = null, currentLaunch = null, cueTimer;
 let iframeReady = false;
 // campreview é estado GLOBAL da sessão de projeção (não da app): persiste
 // entre trocas de app e é reenviado ao 'ready' seguinte — senão o operador
@@ -349,24 +361,44 @@ let pendingChrome = null; // último {on} conhecido (para re-enviar ao 'ready')
 // estado dos comandos por experiência — mesma razão dos de cima: um iframe que
 // (re)carrega tem de receber o que o painel já tinha escolhido, senão o painel
 // mostra um estado e a projeção outro
-let pendingLabEffect = null, pendingLabDensity = null, pendingScrubPlay = null, pendingScrubMode = null;
+let pendingLabEffect = null, pendingLabDensity = null, pendingScrubMode = null;
 
-function openApp(app) {
-  const file = APP_FILES[app];
-  if (!file || app === currentApp) return; // idempotente
+function openApp(app, launch = null) {
+  const file = app === "ar" ? "installation/ar.html" : APP_FILES.get(app);
+  if (!file || (app === currentApp && launch === currentLaunch)) return;
+  currentLaunch = launch;
   currentApp = app;
   iframeReady = false;
   pendingScene = null; // específico da app anterior — a nova começa sem cena pendente
   // propaga o room à experiência: o magicdraw-display resolve os canais dele
   // por ?room= — sem isto, num room não-default ele ouviria o room 'default'
   // e o tablet da instalação certa não o controlava (review PR #36)
-  stage.src = ROOM === "default" ? file : file + "?room=" + encodeURIComponent(ROOM);
+  if (managed) {
+    pendingCampreview = { on: false };
+    pendingChrome = { on: false };
+    pendingLabEffect = pendingLabDensity = pendingScrubMode = null;
+  }
+  stage.src = managed ? stageURL(file, launch) : ROOM === "default" ? file : file + "?room=" + encodeURIComponent(ROOM);
   stage.classList.add("on");
   hint.hidden = true;
-  send("status", { app: currentApp });
+  if (!managed) send("status", { app: currentApp });
 }
-function goHome() {
-  openApp(HOME_APP); // por omissão volta ao Magic Draw, não a um ecrã vazio (idempotente se já lá está)
+function selectTarget(app, launch) {
+  clearTimeout(cueTimer);
+  $("stage-cue").hidden = true;
+  if (app === "blank" || app === "idle") {
+    currentApp = currentLaunch = null;
+    iframeReady = false;
+    stage.removeAttribute("src");
+    stage.classList.remove("on");
+    hint.hidden = app === "blank";
+    document.body.classList.toggle("blackout", app === "blank");
+    $("stage-fullscreen").hidden = app === "blank" || Boolean(document.fullscreenElement);
+    return;
+  }
+  document.body.classList.remove("blackout");
+  $("stage-fullscreen").hidden = Boolean(document.fullscreenElement);
+  openApp(app, launch);
 }
 function toIframe(msg) {
   if (!currentApp || !stage.contentWindow) return;
@@ -376,10 +408,10 @@ function toIframe(msg) {
 function handleCmd(payload) {
   switch (payload.kind) {
     case "open":
-      openApp(payload.app);
+      if (!managed) openApp(payload.app);
       break;
     case "home":
-      goHome();
+      if (!managed) openApp(HOME_APP);
       break;
     case "campreview":
       pendingCampreview = { on: !!payload.on };
@@ -411,8 +443,12 @@ function handleCmd(payload) {
       toIframe({ cmd: "labClear" });
       break;
     case "scrubPlay":
-      pendingScrubPlay = { on: !!payload.on };
-      toIframe({ cmd: "scrubPlay", on: pendingScrubPlay.on });
+      if (currentApp === "scrub" && iframeReady) toIframe({ cmd: "scrubPlay" });
+      break;
+    case "scrubSeek":
+      if (managed && currentApp === "scrub" && currentLaunch === payload.launch && Number.isFinite(payload.position)) {
+        toIframe({ cmd: "scrubSeek", position: payload.position });
+      }
       break;
     case "scrubMode":
       if (typeof payload.mode === "string") { pendingScrubMode = { mode: payload.mode }; toIframe({ cmd: "scrubMode", mode: payload.mode }); }
@@ -462,13 +498,13 @@ window.addEventListener("message", e => {
   const d = e.data;
   if (!d || d.mapping !== 1) return;
   if (d.evt === "ready") {
+    if (managed && d.launch !== currentLaunch) return;
     iframeReady = true;
     if (pendingCampreview) toIframe({ cmd: "campreview", on: pendingCampreview.on });
     if (pendingChrome) toIframe({ cmd: "chrome", on: pendingChrome.on });
     if (pendingScene) toIframe({ cmd: "scene", i: pendingScene.i });
     if (pendingLabEffect) toIframe({ cmd: "labEffect", i: pendingLabEffect.i });
     if (pendingLabDensity) toIframe({ cmd: "labDensity", n: pendingLabDensity.n });
-    if (pendingScrubPlay) toIframe({ cmd: "scrubPlay", on: pendingScrubPlay.on });
     if (pendingScrubMode) toIframe({ cmd: "scrubMode", mode: pendingScrubMode.mode });
   }
 });
@@ -496,38 +532,35 @@ stage.addEventListener("error", () => {
   hint.textContent = "⚠️ falha ao carregar a experiência — recarrega a página";
   hint.hidden = false;
 });
-openApp(HOME_APP);
+if (managed) {
+  const title = document.createElement("strong");
+  title.textContent = "Palco de Luz";
+  const subtitle = document.createElement("span");
+  hint.replaceChildren(title, subtitle);
+  connectStage({
+    frame: stage,
+    selectTarget,
+    showMessage: message => { subtitle.textContent = message; hint.hidden = false; },
+    showCue(message) {
+      const cue = $("stage-cue");
+      cue.textContent = message;
+      cue.hidden = !message;
+      clearTimeout(cueTimer);
+      cueTimer = setTimeout(() => { cue.hidden = true; }, 8500);
+    },
+  });
+} else {
+  openApp(HOME_APP);
+}
 
 /* ================= teclas ================= */
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") location.href = "index.html";
+  if (e.key === "Escape" && !managed) location.href = "index.html";
   if (e.key === "f" || e.key === "F") {
-    document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
   }
 });
 
-/* ================= hotspot fullscreen (sem teclado no projetor) =================
-   5 cliques/toques seguidos no canto inferior direito (≤1.2s entre cada)
-   alternam o fullscreen — o F fica para quando há teclado. */
-const fsHotspot = document.createElement("div");
-fsHotspot.style.cssText = "position:fixed;right:0;bottom:0;width:72px;height:72px;z-index:120;";
-fsHotspot.setAttribute("aria-hidden", "true");
-document.body.appendChild(fsHotspot);
-let fsClicks = 0, fsClickTimer = 0;
-// 'click' (não pointerdown): em touch a ativação de utilizador que o
-// fullscreen exige só é concedida no fim do toque — com pointerdown o
-// requestFullscreen era rejeitado em tablet.
-fsHotspot.addEventListener("click", () => {
-  clearTimeout(fsClickTimer);
-  fsClicks++;
-  if (fsClicks >= 5) {
-    fsClicks = 0;
-    const p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
-    p?.catch?.(() => { /* recusado (política do browser): fica como está */ });
-    return;
-  }
-  fsClickTimer = setTimeout(() => { fsClicks = 0; }, 1200);
-});
 </script>
 </body>
 </html>
