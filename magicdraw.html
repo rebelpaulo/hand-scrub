@@ -3844,22 +3844,26 @@ if (window.Palco) {
   $("drawPhotoBtn").remove();
   const sessionId = new URLSearchParams(location.search).get("session");
   if (!calibration && sessionId) {
-    $("drawModeBtn").click();
-    request("state").then(({ session }) => {
-      if (session?.id !== sessionId || session.operator) return;
-      const finish = $("drawEndBtn");
-      finish.hidden = false;
-      finish.onclick = async () => {
-        finish.disabled = true;
-        try {
-          await request("visitor", { action: "end", id: sessionId });
-          location.href = roomURL("/");
-        } catch {
-          finish.disabled = false;
-          finish.textContent = "Tentar novamente";
-        }
-      };
-    }).catch(() => {});
+    const finish = $("drawEndBtn");
+    let opened = false;
+    const goToKiosk = () => location.replace(roomURL("/"));
+    const stopWatching = window.Palco.watchState(({ session }) => {
+      if (session?.id !== sessionId) { goToKiosk(); return; }
+      if (!opened) { opened = true; $("drawModeBtn").click(); }
+      finish.hidden = session.operator;
+    });
+    window.addEventListener("pagehide", stopWatching, { once: true });
+    finish.onclick = async () => {
+      finish.disabled = true;
+      try {
+        await request("visitor", { action: "end", id: sessionId });
+        goToKiosk();
+      } catch (error) {
+        if (error.status === 409) { goToKiosk(); return; }
+        finish.disabled = false;
+        finish.textContent = "Tentar novamente";
+      }
+    };
   }
   if (calibration) {
     openAdmin();

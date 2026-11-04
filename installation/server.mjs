@@ -103,12 +103,13 @@ function snapshot(room) {
     display: online(room) ? "online" : "offline", ar: room.ar, session: room.session, camera: room.camera,
   };
 }
-function sse(res, data) {
-  if (!res.write("data: " + JSON.stringify(data) + "\n\n")) res.end();
+function sse(res, data, event) {
+  if (!res.write((event ? "event: " + event + "\n" : "") + "data: " + JSON.stringify(data) + "\n\n")) res.end();
 }
 function publish(room) {
   const state = snapshot(room);
   for (const res of room.stateStreams) sse(res, state);
+  for (const peer of room.events) if (peer.state) sse(peer.res, state, "state");
   return state;
 }
 function subscribe(res, peers, entry = res) {
@@ -230,9 +231,13 @@ async function api(req, res, url) {
         if (!req.headers.accept?.includes("text/event-stream")) return json(res, 200, snapshot(room));
         if (subscribe(res, room.stateStreams) === true) sse(res, snapshot(room));
         return;
-      case "/api/events":
-        subscribe(res, room.events, { res, req, calibration: url.searchParams.has("calibrate") });
+      case "/api/events": {
+        const state = url.searchParams.has("state");
+        if (subscribe(res, room.events, { res, req, state, calibration: url.searchParams.has("calibrate") }) === true && state) {
+          sse(res, snapshot(room), "state");
+        }
         return;
+      }
       case "/api/operator":
         return json(res, 200, { authenticated: operator });
     }
@@ -333,16 +338,25 @@ async function api(req, res, url) {
       return json(res, 200, { ...target(room), state: snapshot(room) });
     }
     case "/api/channel": {
-      const { topic, payload, session } = input;
-      if (!canSend(room, topic, payload, operator, display, session)) return fail(res, 403, "Comando sem autorização.");
-      if (payload.kind === "zones" || payload.kind === "warp") {
-        const key = topic + "/" + payload.kind;
-        if (payload.editing || payload.testPattern || payload.imageTest) room.calibration.set(key, { topic, payload });
-        else room.calibration.delete(key);
+      const messages = input.messages ?? [input];
+      if (!Array.isArray(messages) || messages.length < 1 || messages.length > 64) return fail(res, 400, "Lote de comandos inválido.");
+      let delivered = 0;
+      for (const entry of messages) {
+        if (!entry || typeof entry !== "object") continue;
+        const { topic, payload: inputPayload } = entry;
+        if (!canSend(room, topic, inputPayload, operator, display, input.session)) continue;
+        const payload = operator ? inputPayload : { ...inputPayload, src: (display ? "display:" : "visitor:") + inputPayload.src };
+        if (payload.kind === "zones" || payload.kind === "warp") {
+          const key = topic + "/" + payload.kind;
+          if (payload.editing || payload.testPattern || payload.imageTest) room.calibration.set(key, { topic, payload });
+          else room.calibration.delete(key);
+        }
+        for (const peer of room.events) {
+          if ((topic.startsWith("magicdraw:") && !operatorKinds.has(payload.kind)) || isOperator(peer.req) || isDisplay(peer.req, room)) sse(peer.res, { topic, payload });
+        }
+        delivered++;
       }
-      for (const peer of room.events) {
-        if ((topic.startsWith("magicdraw:") && !operatorKinds.has(payload.kind)) || isOperator(peer.req) || isDisplay(peer.req, room)) sse(peer.res, { topic, payload });
-      }
+      if (!delivered) return fail(res, 403, "Comando sem autorização.");
       return json(res, 200, {});
     }
     default:
@@ -352,7 +366,7 @@ async function api(req, res, url) {
 
 function serveFile(req, res, url) {
   const path = url.pathname === "/" ? "installation/kiosk.html" : url.pathname.slice(1);
-  if (!staticFiles.has(path) && !/^(?:media\/[a-z-]+\.(?:mp4|mp3|jpg|webp)|installation\/(?:[a-z-]+\.(?:html|css|js|mjs)|art\/[a-z-]+\.(?:jpg|svg)|vendor\/(?:[a-z_]+\.(?:task|tflite)|[a-z_.]+\.(?:mjs|js)|wasm\/[a-z_]+\.(?:js|wasm))))$/.test(path)) {
+  if (!staticFiles.has(path) && !/^(?:media\/[a-z-]+\.(?:mp4|mp3|jpg|webp)|installation\/(?:[a-z-]+\.(?:html|css|js|mjs)|art\/[a-z-]+\.(?:jpg|svg)|vendor\/(?:[a-z0-9_]+\.(?:task|tflite)|[a-z_.]+\.(?:mjs|js)|wasm\/[a-z_]+\.(?:js|wasm))))$/.test(path)) {
     return fail(res, 404, "Ficheiro desconhecido.");
   }
   if (path === "installation/server.mjs") return fail(res, 404, "Ficheiro desconhecido.");
@@ -462,4 +476,4 @@ setInterval(() => {
 }, 1000).unref();
 
 const server = directTLS ? https({ key: readFileSync(tlsKey), cert: readFileSync(tlsCert) }, handler) : http(handler);
-server.listen(port, host, () => console.log(`Palco de Luz em ${publicOrigin?.origin ?? `${directTLS ? "https" : "http"}://${host}:${port}`}`));
+server.listen(port, host, () => console.log(`Palco de Luz em ${publicOrigin?.origin ?? `${directTLS ? "https" : "http"}://${host}:${server.address().port}`}`));
