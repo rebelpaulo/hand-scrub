@@ -33,10 +33,12 @@ function choose(entry) {
   if (selected?.id !== entry.id) {
     selected = entry;
     dialog.style.setProperty("--tile-color", entry.color);
-    const showsGestures = entry.id === "elements";
+    const showsGestures = entry.id === "elements" || entry.id === "electric";
     byId("experience-art").hidden = showsGestures;
     byId("gesture-lesson").hidden = !showsGestures;
-    byId("experience-instruction").hidden = showsGestures;
+    byId("experience-instruction").hidden = false;
+    document.querySelector(".gesture-fire").hidden = entry.id !== "elements";
+    document.querySelector(".gesture-electric").hidden = entry.id !== "electric";
     put(byId("experience-gesture"), entry.instruction);
     byId("preview").src = entry.image;
     put(byId("experience-name"), entry.name);

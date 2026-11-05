@@ -72,15 +72,27 @@ export const EXPERIENCES = [
     "file": "lab.html"
   },
   {
-    "title": "Domina fogo e raios",
-    "name": "Mãos Elementais",
+    "title": "Acende as tuas mãos",
+    "name": "Mãos de Fogo",
     "mode": "Com as mãos",
     "color": "#ffbd85",
-    "image": "/installation/art/elements.svg",
-    "instruction": "Estala com o polegar e o dedo médio para envolver a mão em fogo. Aponta os dois indicadores um para o outro para criar descargas em todos os dedos.",
-    "ready": "Estala os dedos para envolver a mão em fogo. Aponta os indicadores um para o outro para criar descargas em todos os dedos.",
+    "image": "/installation/art/fire.svg",
+    "instruction": "Abre a palma para acender o fogo. Fecha a mão para apagar. Também podes estalar os dedos.",
+    "ready": "Mostra uma mão à câmara e abre a palma para acender o fogo.",
     "id": "elements",
     "camera": true,
     "file": "elements.html"
+  },
+  {
+    "title": "Liga os teus dedos",
+    "name": "Raios nos Dedos",
+    "mode": "Com as mãos",
+    "color": "#b7d2ff",
+    "image": "/installation/art/electric.svg",
+    "instruction": "Mostra as duas mãos e afasta os dedos. Os raios ligam as pontas expostas e acompanham o movimento.",
+    "ready": "Mostra as duas mãos à câmara e afasta os dedos.",
+    "id": "electric",
+    "camera": true,
+    "file": "electric.html"
   }
 ];

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSnapDetector, electricEndpoints } from "../elements-gestures.mjs";
+import { createSnapDetector, visibleFingertips, electricConnections, createFireActivation } from "../elements-gestures.mjs";
 
 const point = (x, y, z = 0) => ({ x, y, z });
 const hand = () => {
@@ -43,14 +43,61 @@ test("ignores an ordinary pinch release and tracking gaps", () => {
   assert.equal(snap(released, 474), false);
 });
 
-test("connects index tips only while both hands point inward and are in range", () => {
-  const left = Object.assign(hand(), { 5: point(-.3, .08), 6: point(.2, 0), 8: point(.62, 0) });
-  const right = Object.assign(hand().map(p => point(p.x + 2, p.y)), {
-    5: point(2.3, .08), 6: point(1.8, 0), 8: point(1.38, 0),
-  });
-  assert.deepEqual(electricEndpoints([left, right]), [left[8], right[8]]);
-  assert.equal(electricEndpoints([left]), null);
-  assert.equal(electricEndpoints([left, right.map(p => point(p.x + 7, p.y))]), null);
-  right[6] = point(1.12, 0);
-  assert.equal(electricEndpoints([left, right]), null);
+
+const openHand = (side = 0) => [[0, 1.25], [-.24, .83], [-.55, .52], [-.69, .30], [-.78, .19],
+  [-.42, .22], [-.50, -.22], [-.54, -.55], [-.58, -.83],
+  [-.11, .10], [-.13, -.40], [-.15, -.76], [-.15, -1.04],
+  [.19, .17], [.22, -.29], [.24, -.61], [.27, -.86],
+  [.45, .32], [.57, -.04], [.63, -.29], [.67, -.50]]
+  .map(([x, y]) => point((side ? .7 : .3) + x * .12 * (side ? -1 : 1), .5 + y * .12));
+
+function fold(points, tip) {
+  points[tip] = point(points[0].x, points[0].y - .035);
+  points[tip - 1] = point(points[tip - 3].x, points[tip - 3].y + .035);
+  return points;
+}
+
+test("open palm activates fire without catching the instant of a snap", () => {
+  const fire = createFireActivation();
+  const open = openHand();
+  for (let t = 0; t < 320; t += 40) assert.equal(fire(open, undefined, t), false);
+  assert.equal(fire(open, undefined, 320), true);
+  assert.equal(fire(open, undefined, 5000), false, "a long tracking interruption must re-arm");
+  for (let t = 5040; t <= 5360; t += 40) fire(open, undefined, t);
+  assert.equal(fire(open, undefined, 5400), true);
+  const fist = [8, 12, 16, 20].reduce(fold, openHand());
+  for (let t = 5440; t < 6040; t += 40) fire(fist, undefined, t);
+  assert.equal(fire(fist, undefined, 6040), false);
+});
+
+test("a recognized snap ignites the corresponding hand", () => {
+  const fire = createFireActivation();
+  fire(loaded, undefined, 10);
+  fire(loaded, undefined, 43);
+  assert.equal(fire(released, undefined, 76), true);
+  assert.equal(fire(null, null, 900), false);
+});
+
+test("exposed finger filter excludes curled and covered fingertips", () => {
+  assert.deepEqual(visibleFingertips(openHand()), [4, 8, 12, 16, 20]);
+  const folded = fold(openHand(), 12);
+  assert.equal(visibleFingertips(folded).includes(12), false);
+  const covered = openHand();
+  covered[12] = { ...covered[8], z: .05 };
+  covered[11] = { ...covered[7], z: .05 };
+  covered[10] = { ...covered[6], z: .05 };
+  assert.equal(visibleFingertips(covered).includes(12), false);
+  assert.equal(visibleFingertips(covered).includes(8), true);
+});
+
+test("all exposed tips connect even with the opposite corresponding finger curled", () => {
+  const left = { id: "Left", points: openHand(), tips: [4, 8, 16, 20] };
+  const right = { id: "Right", points: openHand(1), tips: [4, 8, 12, 20] };
+  const pairs = electricConnections([left, right]);
+  assert.ok(pairs.length);
+  assert.deepEqual([...new Set(pairs.map(p => p.from))].sort((a, b) => a - b), left.tips);
+  assert.deepEqual([...new Set(pairs.map(p => p.to))].sort((a, b) => a - b), right.tips);
+  assert.ok(pairs.every(p => p.from !== 12 && p.to !== 16));
+  assert.deepEqual(electricConnections([left]), []);
+  assert.deepEqual(electricConnections([left, { ...right, tips: [] }]), []);
 });

@@ -142,7 +142,7 @@ requer loopback ou HTTPS.
 - `index.html` — a **home** da instalação: ecrã de atração (attract) com o
   nome da experiência a rodar + mão fantasma, seguido do seletor de 7
   cartões (🦋 Butterfly Effect · 🌑 Sala de Sombras · ✍️ Pinch Draw ·
-  🌬️ Enxame · 🪄 Magic Draw · 🎞️ Motion Lab · Mãos Elementais). Toca, clica, tecla ou aproxima a mão para passar do attract
+  🌬️ Enxame · 🪄 Magic Draw · 🎞️ Motion Lab · Mãos de Fogo · Raios nos Dedos). Toca, clica, tecla ou aproxima a mão para passar do attract
   ao seletor; os cartões respondem a clique, hover-dwell do rato e dwell
   por gesto (👍 700ms).
 - `scrub.html` — 🦋 Butterfly Effect, a app original (self-contained, sem
@@ -330,11 +330,14 @@ requer loopback ou HTTPS.
     persistida do display.
 - `lab.html` — 🎞️ Motion Lab: molda uma caixa com as mãos e o vídeo lá dentro
   ganha efeito — abre e fecha os dedos para mudar o tamanho.
-- `elements.html` — **Mãos Elementais**, espelho de câmara com dois efeitos.
-  Estala com o polegar e o dedo médio para envolver a palma e os dedos em
-  fogo. Aponta os indicadores um para o outro para criar descargas
-  ramificadas a partir das cinco pontas de cada mão.
-  A deteção usa os modelos de mãos já instalados e a câmara, sem microfone.
-  Os botões de demonstração ficam disponíveis se a câmara falhar.
+- `elements.html` — **Mãos de Fogo**. Abre a palma durante um instante para
+  acender o fogo ou estala com o polegar e o dedo médio. O fogo acompanha a
+  mão e apaga-se ao fechar a mão. A interface confirma quando está aceso.
+- `electric.html` — **Raios nos Dedos**. Mostra as duas mãos e afasta os dedos.
+  Os raios mantêm forma e brilho estáveis e ligam as pontas expostas.
+  A extensão dos dedos, a sobreposição e a profundidade estimada filtram
+  pontas dobradas ou tapadas. Os dois efeitos têm entradas independentes.
+  Ambos usam os modelos de mãos já instalados e a câmara, sem microfone.
+  A demonstração de cada efeito fica disponível se a câmara falhar.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).

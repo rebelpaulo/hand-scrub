@@ -97,18 +97,18 @@ export function createElementEffects(canvas, reduceMotion) {
     ctx.restore();
   }
 
-  function drawElectric({ hands, power }, time, reduced) {
-    const random = seededRandom((reduced ? 17 : Math.floor(time / 48)) + 901);
-    const unit = (distance(hands[0][0], hands[0][9]) + distance(hands[1][0], hands[1][9])) / 2;
+  function drawElectric({ connections, unit, power }) {
     const thickness = clamp(unit * .012, .65, 1.5);
     ctx.globalAlpha = power;
-    for (const [finger, tip] of TIPS.entries()) {
-      const a = hands[0][tip], b = hands[1][tip];
+    for (const { key, a, b } of connections) {
+      let seed = 901;
+      for (const letter of key) seed = Math.imul(seed, 31) + letter.charCodeAt(0);
+      const random = seededRandom(seed);
       const length = distance(a, b);
       if (length < 3) continue;
       const path = discharge(a, b, Math.min(length * .28, unit * .8), random);
-      const opacity = reduced ? .65 : .38 + random() * .54;
-      filament(path, thickness * (finger === 1 ? 1.1 : .8), opacity);
+      const opacity = .88;
+      filament(path, thickness, opacity);
       for (let branch = 0; branch < 3; branch++) {
         const rootIndex = 8 + Math.floor(random() * 42);
         const root = path[rootIndex];
@@ -133,6 +133,7 @@ export function createElementEffects(canvas, reduceMotion) {
   }
 
   function render(time, fires, electricity) {
+    if (electricity) { fires = []; embers.length = 0; }
     const delta = Math.max(0, Math.min((time - (previousTime ?? time)) / 1000, .05));
     previousTime = time;
     const reduced = reduceMotion.matches;
@@ -155,7 +156,7 @@ export function createElementEffects(canvas, reduceMotion) {
       ctx.fillStyle = "#ffc383";
       ctx.fillRect(ember.x, ember.y, ember.size, ember.size * fade);
     }
-    if (electricity) drawElectric(electricity, time, reduced);
+    if (electricity) drawElectric(electricity);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
   }

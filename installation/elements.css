@@ -1,0 +1,33 @@
+
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; margin: 0; }
+  body { color-scheme: dark; color: #fffaf2; font: 1rem system-ui, sans-serif; background: #101016; }
+  #mirror { position: fixed; inset: 0; overflow: hidden; isolation: isolate; background: radial-gradient(ellipse at 36% 48%, #3b1c19, transparent 36%), radial-gradient(ellipse at 68% 44%, #132b49, transparent 43%), #0e1018; }
+  video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  video { object-fit: cover; transform: scaleX(-1); filter: brightness(.78) saturate(.85); }
+  video:not([data-live]) { visibility: hidden; }
+  header, footer { position: absolute; inset-inline: 0; padding: clamp(16px, 4vw, 52px); z-index: 1; }
+  header { top: 0; display: flex; justify-content: space-between; gap: 12px; align-items: start; background: linear-gradient(#080912b5, transparent); }
+  footer { bottom: 0; background: linear-gradient(transparent, #080912ee); }
+  h1 { margin: 4px 0 0; font-size: clamp(28px, 6vw, 86px); letter-spacing: -.07em; line-height: 1; }
+  .tag { color: #ffc487; text-transform: uppercase; letter-spacing: .12em; font: 750 .78rem system-ui; }
+  a { color: inherit; padding: 12px; white-space: nowrap; }
+  p { margin: 0; }
+  #status { font-size: clamp(1rem, 2.7vmin, 1.5rem); font-weight: 650; }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  button { min-height: 46px; padding: 0 16px; border: 1px solid #ffffff70; border-radius: 8px; background: #1b1923; color: inherit; font: inherit; cursor: pointer; }
+  button:focus-visible, a:focus-visible { outline: 3px solid #ffc487; outline-offset: 3px; }
+  button:active { background: #42313a; }
+  [hidden] { display: none !important; }
+  .embedded header, .embedded footer[data-ready] { display: none; }
+
+  .effect-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .effect-nav a { text-decoration: none; border-radius: 8px; border: 1px solid #ffffff40; }
+  .effect-nav a[aria-current] { background: #ffffff20; border-color: #ffc487; }
+  #tracking-status { position: absolute; bottom: 18px; right: 24px; z-index: 1; font-size: .85rem; color: #fff5df; }
+  body:not(.embedded) #tracking-status { top: 195px; bottom: auto; }
+  @media (max-width: 700px) {
+    header { flex-direction: column; }
+    body:not(.embedded) #tracking-status { top: auto; bottom: 12px; left: 16px; right: 16px; }
+    footer { padding-bottom: 42px; }
+  }
