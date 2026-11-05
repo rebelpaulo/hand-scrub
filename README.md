@@ -6,6 +6,77 @@ Um foguetão descola na tua mão; fecha os dedos e ele volta à plataforma.
 
 Demo: https://hand-scrub.vercel.app
 
+## Palco de Luz · quiosque, projeção e equipa
+
+A instalação gerida corre num servidor Node.js (22+) sem dependências npm. No
+computador do projetor, a partir desta pasta, inicia o servidor com uma password
+de operador de pelo menos 12 caracteres. Exemplo para zsh:
+
+```zsh
+read -rs 'PALCO_PASSWORD?Password da equipa: '
+export PALCO_PASSWORD
+node installation/server.mjs
+```
+
+1. Abre **http://127.0.0.1:8777/** para o quiosque. Entra em **Área da equipa**.
+2. No navegador que está no projetor, entra com a password, escolhe
+   **Abrir projeção** e toca em **Ecrã inteiro**. O painel mostra quando o projetor
+   responde.
+3. Se precisares de calibrar, com a sala fechada escolhe **Projetar Magic Draw**
+   e escolhe **Abrir calibração**. As zonas são do projetor, e a deformação
+   de malha existente é aplicada no motor Magic Draw.
+4. Seleciona **Galeria tátil** ou **Espelho de gestos** e **Abrir ao público**. A
+   galeria fica disponível nos dois modos. No espelho, move a mão lateralmente
+   e mantém a palma aberta no cartão central durante dois segundos.
+5. **Terminar sessão** liberta a projeção. Uma sessão de visitante expira ao
+   fim de três minutos. **Apagar projeção**, na Área da equipa, suspende a
+   saída até **Retomar projeção**.
+
+O servidor ouve só em loopback por omissão. Para um touchscreen noutro
+equipamento, define `PALCO_HOST` (por exemplo `0.0.0.0`) e
+`PALCO_TLS_CERT` / `PALCO_TLS_KEY` com caminhos para um certificado e uma
+chave que os equipamentos aceitem. Usa o mesmo endereço HTTPS em ambos.
+`PALCO_PORT` altera a porta. `PALCO_ROOMS=fachada,sala` permite salas
+independentes, selecionadas com `?room=fachada` no quiosque, painel e
+projetor. Uma única password de operador administra as salas configuradas.
+A calibração fica em `.palco/config.json` (ou no caminho de `PALCO_DATA`).
+Faz cópia deste ficheiro para levar a configuração para outro computador.
+Ao reiniciar, a sala volta ao estado de preparação e o projetor tem de ser
+novamente emparelhado. As configurações da instalação gerida são locais.
+
+### Alojamento online
+
+O `Dockerfile` corre a instalação completa num único serviço Node sempre ativo.
+Configura `PALCO_PASSWORD` como segredo do alojamento, define
+`PALCO_PUBLIC_ORIGIN` com o endereço HTTPS público e monta um volume persistente
+e gravável pelo utilizador `node` em `/data`. O alojamento pode definir `PORT`
+para substituir a porta predefinida 8777. Configura o teste de saúde em
+`/healthz`.
+
+Usa um único serviço sem réplicas, porque o estado das sessões e as ligações
+de projeção são partilhados no processo. O proxy termina TLS, preserva o
+cabeçalho Host, acrescenta ou substitui o endereço do cliente em
+`X-Forwarded-For` e deixa passar eventos SSE sem buffering. A porta HTTP do
+processo fica acessível apenas ao proxy. Os modelos são carregados por CDN
+nesta imagem.
+
+O Espelho de gestos sobrepõe os cartões ao vídeo da webcam. O MediaPipe deteta
+as mãos e os ombros no navegador do projetor para posicionar os cartões e
+interpretar os gestos. A página `/installation/ar.html` também funciona
+isoladamente num site estático servido por HTTPS e abre as experiências
+no mesmo navegador. O servidor Node liga o quiosque ao projetor e à Área
+da equipa, gere as sessões da sala e guarda a calibração.
+
+O quiosque tátil não pede câmara. Sem câmara ou tracking, o Magic
+Draw mantém o desenho por toque, o Butterfly mantém o controlo de tempo e
+o espelho mantém a navegação por setas e toque. A captura de fotografias
+está desativada neste modo de instalação.
+
+Para preparar o palco para funcionar sem internet, executa uma vez
+`sh installation/download-assets.sh` com rede disponível e reinicia o
+servidor. A pasta `installation/vendor/` contém os motores, modelos e WASM
+usados pelo palco. Testa com a internet desligada antes do evento.
+
 ## Hand tracking
 **Google MediaPipe `HandLandmarker`** (Tasks Vision) — 21 landmarks 3D por mão,
 tempo real, 100% no browser (GPU/WASM), carregado por CDN. É o tracker
@@ -60,21 +131,18 @@ in-browser mais fiável/rápido e mais recomendado.
 - UI esconde-se após 4 s de inatividade · **F** = ecrã inteiro · **Espaço** =
   play/pause.
 
-## Correr localmente
-A câmara exige `localhost` ou HTTPS. Usa um servidor com suporte de **Range
-requests** (o `python3 -m http.server` NÃO tem — o Chrome marca os vídeos como
-não-seekable e o scrub fica preso em 0s):
+## Executar as experiências autónomas
 
-```bash
-npx serve -l 8777
-# abrir http://localhost:8777
-```
+As páginas HTML também podem ser abertas individualmente em modo autónomo.
+Para testar o palco completo, usa o servidor de instalação acima. O servidor
+preserva o parâmetro `room` e responde a pedidos Range dos vídeos. A câmara
+requer loopback ou HTTPS.
 
 ## Ficheiros
 - `index.html` — a **home** da instalação: ecrã de atração (attract) com o
-  nome da experiência a rodar + mão fantasma, seguido do seletor de 6
+  nome da experiência a rodar + mão fantasma, seguido do seletor de 7
   cartões (🦋 Butterfly Effect · 🌑 Sala de Sombras · ✍️ Pinch Draw ·
-  🌬️ Enxame · 🪄 Magic Draw · 🎞️ Motion Lab). Toca, clica, tecla ou aproxima a mão para passar do attract
+  🌬️ Enxame · 🪄 Magic Draw · 🎞️ Motion Lab · Mãos de Fogo · Raios nos Dedos). Toca, clica, tecla ou aproxima a mão para passar do attract
   ao seletor; os cartões respondem a clique, hover-dwell do rato e dwell
   por gesto (👍 700ms).
 - `scrub.html` — 🦋 Butterfly Effect, a app original (self-contained, sem
@@ -208,9 +276,7 @@ npx serve -l 8777
     3s como keepalive. Acrescenta `?room=<nome>` ao URL das DUAS páginas
     para emparelhar um tablet com a sua projeção (sem isto ambas usam o
     room `default` — instalações separadas devem usar rooms separados).
-  - **Zonas de oclusão** (janelas/portas do edifício): um modo **admin** no
-    controlo — long-press de 3s no ⚙️ discreto do rodapé (toque curto não faz
-    nada) — abre um editor 16:9 onde se criam quadriláteros/polígonos
+  - **Zonas de oclusão** (janelas/portas do edifício): a opção **Abrir calibração** na Área da equipa abre um editor 16:9 onde se criam quadriláteros/polígonos
     (**➕ Criar zona**, N pontos ≥3: toca num "+" no meio de uma aresta para
     inserir um vértice, **− Ponto** remove o selecionado) ou **⭕ círculos**
     (elipse com pegas de centro, raio-X e raio-Y — a do raio-X também roda a
@@ -264,5 +330,14 @@ npx serve -l 8777
     persistida do display.
 - `lab.html` — 🎞️ Motion Lab: molda uma caixa com as mãos e o vídeo lá dentro
   ganha efeito — abre e fecha os dedos para mudar o tamanho.
+- `elements.html` — **Mãos de Fogo**. Abre a palma durante um instante para
+  acender o fogo ou estala com o polegar e o dedo médio. O fogo acompanha a
+  mão e apaga-se ao fechar a mão. A interface confirma quando está aceso.
+- `electric.html` — **Raios nos Dedos**. Mostra as duas mãos e afasta os dedos.
+  Os raios mantêm forma e brilho estáveis e ligam as pontas expostas.
+  A extensão dos dedos, a sobreposição e a profundidade estimada filtram
+  pontas dobradas ou tapadas. Os dois efeitos têm entradas independentes.
+  Ambos usam os modelos de mãos já instalados e a câmara, sem microfone.
+  A demonstração de cada efeito fica disponível se a câmara falhar.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,
   domínio público).

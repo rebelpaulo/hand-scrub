@@ -379,7 +379,12 @@ function setLoadStatus(msg) {
 }
 
 let overlayDismissed = false;
+let firstFrameReported = false;
 function dismissOverlay() {
+  if (!firstFrameReported) {
+    firstFrameReported = true;
+    window.Palco?.availability("ready");
+  }
   if (overlayDismissed) return;
   overlayDismissed = true;
   const ov = $("startOverlay");
@@ -444,6 +449,7 @@ async function startExperience() {
     stream.getVideoTracks()[0]?.addEventListener("ended", () => {
       running = false;
       toast("⚠️ Câmara desligada — recarrega a página para retomar");
+      window.Palco?.availability("error", "A câmara desligou-se.");
     });
 
     lastSegT = performance.now();
@@ -452,6 +458,7 @@ async function startExperience() {
   } catch (e) {
     err.textContent = "Erro: " + (e?.message || String(e));
     setLoadStatus("falhou — recarrega a página para tentar de novo");
+    window.Palco?.availability("error", "Câmara ou motor indisponível.");
   }
 }
 startExperience();
@@ -863,7 +870,7 @@ function renderLoop() {
 }
 
 /* ================= ponte postMessage (shell de projeção) ================= */
-if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
+if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready", launch: new URLSearchParams(location.search).get("launch") }, location.origin);
 window.addEventListener("message", e => {
   if (e.origin !== location.origin || e.data?.mapping !== 1) return;
   // se o preview ainda não estiver pronto (câmara não arrancou), ignora em silêncio

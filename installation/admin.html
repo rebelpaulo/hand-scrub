@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0e1010">
+  <title>Palco de Luz · Área da equipa</title>
+  <link rel="stylesheet" href="/installation/surfaces.css">
+  <link rel="stylesheet" href="/installation/admin.css">
+  <script type="module" src="/installation/admin.js"></script>
+</head>
+<body class="team-page">
+  <div class="shell admin-shell">
+    <header class="team-masthead">
+      <div class="mark"><svg viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="M18 2v32M2 18h32M7 7l22 22m0-22L7 29" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="10" stroke="currentColor"/></svg>PALCO DE LUZ</div>
+      <p class="team-masthead-label">Área da equipa</p>
+      <button id="kiosk-link" class="utility-link" type="button"><span aria-hidden="true">↖</span> Voltar ao quiosque</button>
+    </header>
+    <main>
+      <section id="login-panel" class="team-gate">
+        <div class="team-gate-art" aria-hidden="true">
+          <svg viewBox="0 0 420 320" fill="none">
+            <defs>
+              <pattern id="team-grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M0 24V0h24" stroke="currentColor" stroke-opacity=".18"/></pattern>
+            </defs>
+            <rect width="420" height="320" fill="url(#team-grid)"/>
+            <path d="M15 31V15h16m358 0h16v16m0 258v16h-16m-358 0H15v-16M210 15v290M15 160h390" stroke="currentColor" stroke-opacity=".45"/>
+            <path d="M84 238V83l202-39 50 38v155l-202 40-50-39Z" fill="currentColor" fill-opacity=".065" stroke="currentColor" stroke-opacity=".6"/>
+            <path d="m84 83 50 37 202-38m-202 38v157m-18-168 202-38m-167 46v154m-31-52 202-39M84 238l202-40V44" stroke="currentColor" stroke-opacity=".3"/>
+            <path d="M134 120v157l202-40V82l-202 38Z" fill="currentColor" fill-opacity=".07" stroke="currentColor"/>
+            <path d="m159 222 48-78 19 22 23-42 59 60m-99-40-19-27m59 7 10-26" stroke="currentColor" stroke-width="2"/>
+            <circle cx="249" cy="124" r="4" fill="currentColor"/>
+            <circle cx="207" cy="144" r="4" fill="currentColor"/>
+          </svg>
+          <span>01 / Sala de projeção</span>
+        </div>
+        <div class="team-gate-content">
+          <p class="tag">Acesso de operador</p>
+          <h1>Área da equipa</h1>
+          <p>Entra para preparar a sala e controlar a projeção.</p>
+          <form id="login" method="post" action="/api/login">
+            <label for="password">Password de operador</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256">
+            <button class="action primary" type="submit" id="login-button">Entrar <span aria-hidden="true">↗</span></button>
+          </form>
+          <p id="login-error" role="alert" hidden></p>
+        </div>
+      </section>
+      <section id="operations" hidden>
+        <div class="team-hero">
+          <div>
+            <p class="tag" id="room-label"></p>
+            <h1 id="operations-title" tabindex="-1">Operação da sala</h1>
+            <p id="room-status" class="team-status" role="status" data-tone="pending">A consultar estado da sala…</p>
+          </div>
+          <button type="button" class="action team-logout" id="logout">Terminar sessão de operador</button>
+        </div>
+
+        <nav class="team-index" aria-label="Secções do painel">
+          <a href="#team-run"><span>01</span> Operar</a>
+          <a href="#team-pair"><span>02</span> Emparelhar</a>
+          <a href="#team-check"><span>03</span> Equipamento</a>
+          <a href="#team-calibrate"><span>04</span> Calibrar</a>
+        </nav>
+
+        <dl class="team-health" aria-label="Estado do equipamento">
+          <div><dt>Projetor</dt><dd id="display-health" data-tone="pending">A verificar…</dd></div>
+          <div><dt>Câmara</dt><dd id="camera-health" data-tone="pending">A verificar…</dd></div>
+          <div><dt>Espelho de gestos</dt><dd id="ar-health" data-tone="pending">A verificar…</dd></div>
+        </dl>
+
+        <p id="operation-error" class="notice" role="alert" hidden></p>
+        <section class="team-operate team-station" id="team-run" aria-labelledby="run-title">
+          <div class="team-station-heading">
+            <p class="tag">01 / Operação</p>
+            <h2 id="run-title">Gerir a instalação</h2>
+          </div>
+          <div class="team-modes">
+            <p class="team-field-label" id="mode-label">Modo da projeção em repouso</p>
+            <div class="choice team-choice" role="group" aria-labelledby="mode-label">
+              <button type="button" class="action" id="mode-gallery" aria-pressed="false" data-room-action>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><rect x="3" y="4" width="8" height="7"/><rect x="13" y="4" width="8" height="7"/><rect x="3" y="13" width="8" height="7"/><rect x="13" y="13" width="8" height="7"/></svg>
+                Galeria tátil
+              </button>
+              <button type="button" class="action" id="mode-ar" aria-pressed="false" data-room-action>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M3 9V4h5m8 0h5v5m0 6v5h-5m-8 0H3v-5"/><circle cx="12" cy="12" r="4"/></svg>
+                Espelho de gestos
+              </button>
+            </div>
+            <p id="mode-description" class="team-note"></p>
+          </div>
+          <div class="team-live-controls">
+            <button type="button" class="action primary" id="toggle-public" data-room-action>Abrir ao público</button>
+            <button type="button" class="action danger" id="blackout" data-room-action>Apagar projeção</button>
+            <div class="team-session-actions">
+              <button type="button" class="action" id="restart" data-room-action>Reiniciar experiência</button>
+              <button type="button" class="action" id="reset" data-room-action>Terminar experiência</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="team-setup">
+          <section class="team-station" id="team-pair" aria-labelledby="pair-title">
+            <div class="team-station-heading">
+              <p class="tag">02 / Ligação</p>
+              <h2 id="pair-title">Emparelhar ecrãs</h2>
+            </div>
+            <p>Abre este endereço no equipamento ligado ao projetor. Usa a mesma sala no quiosque.</p>
+            <label for="projector-address">Endereço do projetor</label>
+            <input type="url" id="projector-address" readonly>
+            <div class="actions">
+              <a id="projector-link" class="action" target="_blank" rel="noopener">Abrir projeção <span aria-hidden="true">↗</span></a>
+              <button id="copy-projector" type="button" class="action">Copiar endereço</button>
+            </div>
+            <p id="copy-status" role="status"></p>
+          </section>
+          <section class="team-station" id="team-check" aria-labelledby="check-title">
+            <div class="team-station-heading">
+              <p class="tag">03 / Equipamento</p>
+              <h2 id="check-title">Verificar o palco</h2>
+            </div>
+            <p>Consulta os indicadores acima. Ativa o ecrã inteiro no equipamento do projetor.</p>
+            <a id="controls-link" class="action">Controlos das experiências <span aria-hidden="true">↗</span></a>
+          </section>
+          <section class="team-station" id="team-calibrate" aria-labelledby="calibrate-title">
+            <div class="team-station-heading">
+              <p class="tag">04 / Imagem</p>
+              <h2 id="calibrate-title">Calibrar projeção</h2>
+            </div>
+            <p>Ajusta as áreas de desenho, oclusões e deformação. Confirma a grelha no projetor e guarda o preset da fachada.</p>
+            <div class="actions">
+              <button type="button" class="action" id="calibration-preview" data-room-action>Projetar Magic Draw</button>
+              <a id="calibrate-link" class="action">Abrir calibração <span aria-hidden="true">↗</span></a>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

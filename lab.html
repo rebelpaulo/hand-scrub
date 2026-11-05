@@ -563,13 +563,16 @@ void main() {
       if (modelOk) {
         clearNotice();
       } else {
+        window.Palco?.availability("error", "Modelo de mãos indisponível.");
         showNotice("⚠️ sem modelo de mãos (rede?) — vês a câmara em direto, sem caixa por gestos");
       }
       stream.getVideoTracks()[0]?.addEventListener("ended", () => {
         cameraReady = false;
+        window.Palco?.availability("error", "A câmara desligou-se.");
         showNotice("📷 câmara desligada");
       });
     } catch (e) {
+      window.Palco?.availability("error", "Câmara indisponível.");
       showNotice(modelOk
         ? "📷 câmara indisponível — liga uma câmara e recarrega a página"
         : "📷 câmara e modelo de mãos indisponíveis — liga uma câmara e recarrega a página");
@@ -942,6 +945,7 @@ void main() {
    * ========================================================================== */
 
   let testSourceEl = null; // gancho de teste: substitui a câmara por um canvas sintético
+  let firstFrameReported = false;
   let syntheticLandmarks = null; // gancho de teste: substitui landmarker.detectForVideo() — ver window.__lab.setLandmarks
   let lastFrameAdvanceAt = performance.now(); // NEW (instrumentação): último tick que processou mãos/caixa — ver updatePipHud() / "congelada"
 
@@ -964,6 +968,10 @@ void main() {
       } else if (landmarker && cameraReady && camEl.currentTime !== lastVideoTime) {
         lastVideoTime = camEl.currentTime;
         const res = landmarker.detectForVideo(camEl, now);
+        if (!firstFrameReported) {
+          firstFrameReported = true;
+          window.Palco?.availability("ready");
+        }
         processHands(res);
         updateBox(now);
         frameAdvanced = true;
@@ -1051,13 +1059,13 @@ void main() {
   if (gl) {
     requestAnimationFrame(frame);
     startCamera();
-  }
+  } else window.Palco?.availability("error", "WebGL indisponível.");
 
   /* ================= ponte postMessage (shell de projeção) =================
      lab.html corre dentro do iframe do display.html; o "ready" avisa o shell
      de que já há alguém a ouvir, para ele reenviar o último "campreview"
      pendente (mesmo padrão do scrub.html). ================= */
-  if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
+  if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready", launch: new URLSearchParams(location.search).get("launch") }, location.origin);
   window.addEventListener("message", e => {
     if (e.origin !== location.origin || e.data?.mapping !== 1) return;
     if (e.data.cmd === "campreview") setPipVisible(!!e.data.on);
