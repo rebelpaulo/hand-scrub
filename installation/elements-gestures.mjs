@@ -111,7 +111,10 @@ export function createFireActivation() {
         if (time - closedSince >= 550) active = false;
       } else closedSince = undefined;
     }
-    if (snap(world || points, time)) active = true;
+    if (snap(world || points, time)) {
+      active = true;
+      closedSince = undefined;
+    }
     return active;
   };
 }

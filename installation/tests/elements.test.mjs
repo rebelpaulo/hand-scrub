@@ -78,6 +78,14 @@ test("a recognized snap ignites the corresponding hand", () => {
   assert.equal(fire(null, null, 900), false);
 });
 
+test("a snap after a long charge does not immediately extinguish itself", () => {
+  const fire = createFireActivation();
+  for (let time = 0; time <= 1000; time += 40) fire(loaded, undefined, time);
+  assert.equal(fire(released, undefined, 1040), true);
+  assert.equal(fire(released, undefined, 1080), true);
+  assert.equal(fire(released, undefined, 1400), true);
+});
+
 test("exposed finger filter excludes curled and covered fingertips", () => {
   assert.deepEqual(visibleFingertips(openHand()), [4, 8, 12, 16, 20]);
   const folded = fold(openHand(), 12);
