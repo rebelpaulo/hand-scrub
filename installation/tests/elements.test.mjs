@@ -101,3 +101,10 @@ test("all exposed tips connect even with the opposite corresponding finger curle
   assert.deepEqual(electricConnections([left]), []);
   assert.deepEqual(electricConnections([left, { ...right, tips: [] }]), []);
 });
+
+test("connections persist when visible hands move far apart", () => {
+  const shrink = (points, center, target) => points.map(p => point(target + (p.x - center) * .35, p.y * .35 + .3, p.z));
+  const left = { id: "Left", points: shrink(openHand(), .3, .1), tips: [4, 8, 12, 16, 20] };
+  const right = { id: "Right", points: shrink(openHand(1), .7, .9), tips: [4, 8, 12, 16, 20] };
+  assert.equal(electricConnections([left, right]).length, 5);
+});

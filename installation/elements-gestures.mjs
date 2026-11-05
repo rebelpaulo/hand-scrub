@@ -121,10 +121,11 @@ export function electricConnections(hands) {
   const [a, b] = hands;
   if (!a.tips.length || !b.tips.length) return [];
   const scale = (palmScale(a.points) + palmScale(b.points)) / 2;
+  if (!Number.isFinite(scale) || scale <= 0) return [];
   const links = new Map();
   const canConnect = (from, to) => {
     const gap = screenDistance(a.points[from], b.points[to]) / scale;
-    return gap >= .12 && gap <= 6 && !insidePalm(a.points[from], b.points) && !insidePalm(b.points[to], a.points);
+    return gap >= .12 && !insidePalm(a.points[from], b.points) && !insidePalm(b.points[to], a.points);
   };
   const connect = (from, to) => {
     const key = a.id + ":" + from + "/" + b.id + ":" + to;
