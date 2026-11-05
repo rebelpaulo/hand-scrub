@@ -11,7 +11,7 @@ const reduced = matchMedia("(prefers-reduced-motion: reduce)");
 const embedded = parent !== window;
 const effects = createElementEffects(canvas, reduced);
 const hands = new Map();
-const advice = "Estala os dedos para acender fogo. Aponta os indicadores um para o outro para criar um raio.";
+const advice = "Estala os dedos para envolver a mão em fogo. Aponta os indicadores um para o outro para criar descargas em todos os dedos.";
 const local = window.Palco?.localVision;
 const vision = local ? "/installation/vendor" : "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 const handModel = local ? vision + "/hand_landmarker.task" :
@@ -82,20 +82,20 @@ function sample(result, time) {
   const endpoints = electricEndpoints(geometry.map(item => item.corrected), Boolean(bolt && time - bolt.seen < LOST_MS));
   if (endpoints) {
     pointingSince ??= time;
-    if (time - pointingSince >= 50) bolt = { seen: time, points: geometry.map(item => item.hand.points[8]) };
+    if (time - pointingSince >= 50) bolt = { seen: time, hands: geometry.map(item => item.hand.points) };
   } else pointingSince = undefined;
 }
 
-function demoHand() {
+function demoHand(side = 0) {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   const size = Math.min(w, h) * .115;
-  const x = w * .39, y = h * .60;
+  const x = w * (side ? .68 : .32), y = h * .65;
   const pose = [[0, 1.25], [-.24, .83], [-.55, .52], [-.69, .30], [-.78, .19],
     [-.42, .22], [-.50, -.22], [-.54, -.55], [-.58, -.83],
     [-.11, .10], [-.13, -.40], [-.15, -.76], [-.15, -1.04],
     [.19, .17], [.22, -.29], [.24, -.61], [.27, -.86],
     [.45, .32], [.57, -.04], [.63, -.29], [.67, -.50]];
-  return pose.map(([dx, dy]) => ({ x: x + dx * size, y: y + dy * size }));
+  return pose.map(([dx, dy]) => ({ x: x + dx * size * (side ? -1 : 1), y: y + dy * size }));
 }
 
 function render(time) {
@@ -119,22 +119,24 @@ function render(time) {
     }
   }
   const fires = [];
-  for (const hand of hands.values()) {
+  for (const [id, hand] of hands) {
     if (time >= hand.fireUntil || time - hand.seen >= LOST_MS) continue;
     fires.push({
+      id,
       points: hand.points.map(screen),
       power: Math.min(1, (hand.fireUntil - time) / 460, (LOST_MS - time + hand.seen) / 75),
     });
   }
-  if (time < demoFireUntil) fires.push({ points: demoHand(), power: Math.min(1, (demoFireUntil - time) / 460), demo: true });
+  if (time < demoFireUntil) for (const side of [0, 1]) fires.push({
+    id: "demo-" + side, points: demoHand(side), power: Math.min(1, (demoFireUntil - time) / 460),
+  });
   let electricity = bolt && time - bolt.seen < LOST_MS ? {
-    points: bolt.points.map(screen),
+    hands: bolt.hands.map(points => points.map(screen)),
     power: Math.min(1, (LOST_MS - time + bolt.seen) / 90),
   } : null;
   if (time < demoBoltUntil) {
-    const w = canvas.clientWidth, h = canvas.clientHeight;
     electricity = {
-      points: [{ x: w * .43, y: h * .52 }, { x: w * .77, y: h * .40 }],
+      hands: [demoHand(0), demoHand(1)],
       power: Math.min(1, (demoBoltUntil - time) / 300),
     };
   }

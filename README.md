@@ -331,8 +331,9 @@ requer loopback ou HTTPS.
 - `lab.html` — 🎞️ Motion Lab: molda uma caixa com as mãos e o vídeo lá dentro
   ganha efeito — abre e fecha os dedos para mudar o tamanho.
 - `elements.html` — **Mãos Elementais**, espelho de câmara com dois efeitos.
-  Estala com o polegar e o dedo médio para acender fogo nessa mão. Aponta
-  os indicadores um para o outro para ligar as pontas com um arco elétrico.
+  Estala com o polegar e o dedo médio para envolver a palma e os dedos em
+  fogo. Aponta os indicadores um para o outro para criar descargas
+  ramificadas a partir das cinco pontas de cada mão.
   A deteção usa os modelos de mãos já instalados e a câmara, sem microfone.
   Os botões de demonstração ficam disponíveis se a câmara falhar.
 - `media/` — presets re-codificados all-intra (fonte: Wikimedia Commons,

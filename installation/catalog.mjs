@@ -77,8 +77,8 @@ export const EXPERIENCES = [
     "mode": "Com as mãos",
     "color": "#ffbd85",
     "image": "/installation/art/elements.svg",
-    "instruction": "Estala com o polegar e o dedo médio para acender fogo. Aponta os dois indicadores um para o outro para criar um raio.",
-    "ready": "Estala os dedos para acender fogo. Aponta os indicadores um para o outro para criar um raio.",
+    "instruction": "Estala com o polegar e o dedo médio para envolver a mão em fogo. Aponta os dois indicadores um para o outro para criar descargas em todos os dedos.",
+    "ready": "Estala os dedos para envolver a mão em fogo. Aponta os indicadores um para o outro para criar descargas em todos os dedos.",
     "id": "elements",
     "camera": true,
     "file": "elements.html"

@@ -1,14 +1,45 @@
-const tips = [4, 8, 12, 16, 20];
-const FIRE_COLORS = ["#ff9942", "#ffd172", "#ffe9bd"];
+import { createHandFire } from "./elements-fire.mjs";
+
+const TIPS = [4, 8, 12, 16, 20];
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
-const ramp = (x, y) => ({ x, y });
+const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+// Midpoint displacement keeps the endpoints fixed while adding detail at
+// several scales, like a discharge finding a path through the air.
+function discharge(a, b, roughness, random) {
+  let points = [a, b];
+  for (let level = 0; level < 6; level++) {
+    const divided = [points[0]];
+    for (let i = 1; i < points.length; i++) {
+      const start = points[i - 1], end = points[i];
+      const length = Math.max(1, distance(start, end));
+      const offset = (random() - .5) * roughness;
+      divided.push({
+        x: (start.x + end.x) / 2 - (end.y - start.y) / length * offset,
+        y: (start.y + end.y) / 2 + (end.x - start.x) / length * offset,
+      }, end);
+    }
+    points = divided;
+    roughness *= .53;
+  }
+  return points;
+}
+
+function seededRandom(seed) {
+  let value = seed | 0;
+  return () => {
+    value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+    value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+    value ^= value >>> 16;
+    return (value >>> 0) / 4294967296;
+  };
+}
 
 export function createElementEffects(canvas, reduceMotion) {
   const ctx = canvas.getContext("2d");
-  let width = 0, height = 0, previousTime, nextEmber = 0;
+  const firesByHand = new Map();
   const embers = [];
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
+  let width = 0, height = 0, previousTime, nextEmber = 0;
 
   function resize() {
     width = canvas.clientWidth;
@@ -20,130 +51,111 @@ export function createElementEffects(canvas, reduceMotion) {
     ctx.lineCap = ctx.lineJoin = "round";
   }
 
-  function glow(x, y, radius, tint, opacity) {
+  function glow(x, y, radius, color, opacity) {
     const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
-    gradient.addColorStop(0, tint + opacity);
-    gradient.addColorStop(1, tint + "00");
+    gradient.addColorStop(0, color + opacity);
+    gradient.addColorStop(1, color + "00");
     ctx.fillStyle = gradient;
     ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
   }
 
-  function flame(x, y, size, height, sway) {
-    const gradient = ctx.createLinearGradient(x, y + size * .6, x, y - height);
-    gradient.addColorStop(0, "#ff792700");
-    gradient.addColorStop(.19, "#fff1beeb");
-    gradient.addColorStop(.43, "#ffb64bec");
-    gradient.addColorStop(.76, "#ff6026a0");
-    gradient.addColorStop(1, "#ef301200");
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.moveTo(x - size, y + size * .35);
-    ctx.bezierCurveTo(x - size * 1.3, y - height * .36, x + sway, y - height * .61, x + sway, y - height);
-    ctx.bezierCurveTo(x + sway * 1.15 + size, y - height * .63, x + size * 1.2, y - height * .32, x + size, y);
-    ctx.quadraticCurveTo(x + size * .65, y + size, x - size, y + size * .35);
-    ctx.fill();
-  }
-
-  function drawDemoHand(points, unit) {
-    const bones = [[0, 1, 2, 3, 4], [0, 5, 6, 7, 8], [0, 9, 10, 11, 12], [0, 13, 14, 15, 16], [0, 17, 18, 19, 20]];
-    for (const line of bones) stroke(line.map(i => points[i]), unit * .13, "#ad695c88");
-  }
-
-  function drawFire({ points, power, demo }, time, spawn, reduced) {
-    const palm = points[9];
-    const unit = clamp(Math.hypot(palm.x - points[0].x, palm.y - points[0].y), 17, height * .22);
-    if (demo) drawDemoHand(points, unit);
-    glow(palm.x, palm.y - unit * .4, unit * 2.6, "#f3652c", "71");
-    const phase = reduced ? .9 : time * .009;
-    for (const tip of [9, ...tips]) {
-      const { x, y } = points[tip];
-      const t = phase + tip * 1.13;
-      const sway = unit * (.35 * Math.sin(t) + .12 * Math.sin(t * 1.83));
-      const rise = unit * (tip === 9 ? 1.78 : 1.25) * (1 + .21 * Math.sin(t * .8));
-      flame(x, y, unit * (tip === 9 ? .30 : .20), rise, sway);
-      flame(x, y - unit * .1, unit * .095, rise * .62, sway * .67);
-      if (spawn && embers.length < 125) {
-        embers.push({ x, y, vx: (Math.random() - .5) * unit * 1.7, vy: -unit * (1.05 + Math.random() * 1.85),
-          size: 1 + Math.random() * unit * .045, age: 0, life: .28 + Math.random() * .48, power });
-      }
+  function drawFire(fire, time, spawn, reduced) {
+    const { points, power, id } = fire;
+    const unit = clamp(distance(points[9], points[0]), 17, height * .22);
+    if (!firesByHand.has(id)) firesByHand.set(id, createHandFire());
+    ctx.globalAlpha = power;
+    firesByHand.get(id).draw(ctx, points, unit, time, reduced);
+    if (!spawn) return;
+    for (const tip of TIPS) {
+      if (embers.length >= 100 || Math.random() > .35) continue;
+      embers.push({
+        x: points[tip].x, y: points[tip].y,
+        vx: (Math.random() - .5) * unit * .8, vy: -unit * (1.2 + Math.random() * 1.6),
+        size: .6 + Math.random() * 1.2, age: 0, life: .32 + Math.random() * .6, power,
+      });
     }
-  }
-
-  function arc(a, b, phase, amplitude) {
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const length = Math.hypot(dx, dy);
-    const steps = clamp(Math.round(length / 11), 7, 28);
-    const points = [a];
-    for (let i = 1; i < steps; i++) {
-      const t = i / steps;
-      const noise = Math.sin(i * 2.36 + phase) * .54 + Math.sin(i * 4.21 - phase * .72) * .46;
-      const offset = noise * amplitude * Math.sin(t * Math.PI);
-      points.push(ramp(a.x + dx * t - dy / length * offset, a.y + dy * t + dx / length * offset));
-    }
-    points.push(b);
-    return points;
   }
 
   function stroke(points, size, color) {
     ctx.beginPath();
     ctx.moveTo(points[0].x, points[0].y);
-    for (const point of points.slice(1)) ctx.lineTo(point.x, point.y);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
     ctx.lineWidth = size;
     ctx.strokeStyle = color;
     ctx.stroke();
   }
 
-  function drawElectric(a, b, time, reduced) {
-    const length = Math.hypot(b.x - a.x, b.y - a.y);
-    if (length < 2) return;
-    const phase = reduced ? 1 : time * .014;
-    const amplitude = clamp(length * .16, 6, 38);
-    const main = arc(a, b, phase, amplitude);
-    const branchRoot = main[Math.floor(main.length * .54)];
-    const branchTip = ramp(branchRoot.x + (b.x - a.x) * .18, branchRoot.y - amplitude * 1.65);
-    const branch = arc(branchRoot, branchTip, phase + 2, amplitude * .42);
-    const filament = arc(a, b, phase * .79 + 4, amplitude * .74);
-    glow(a.x, a.y, amplitude * 2.3, "#468aff", "b8");
-    glow(b.x, b.y, amplitude * 2.3, "#896aff", "b8");
-    stroke(main, 16, "#673bff27");
-    stroke(main, 9, "#497aff54");
-    stroke(filament, 5, "#5ea7ff46");
-    stroke(branch, 5, "#8270fa68");
-    stroke(branch, 1.4, "#c6bcffd8");
-    stroke(filament, 1.3, "#addbffbb");
-    stroke(main, 3.6, "#a3dcffea");
-    stroke(main, 1.65, "#f4fbff");
+  function filament(points, thickness, opacity, branch = false) {
+    ctx.save();
+    ctx.globalAlpha *= opacity;
+    ctx.shadowColor = "#509bff";
+    ctx.shadowBlur = branch ? 5 : 12;
+    stroke(points, thickness * 3.2, "#7baeff33");
+    stroke(points, thickness * 1.6, "#add8ff9c");
+    ctx.shadowBlur = 0;
+    stroke(points, thickness, "#f3f8ff");
+    ctx.restore();
+  }
+
+  function drawElectric({ hands, power }, time, reduced) {
+    const random = seededRandom((reduced ? 17 : Math.floor(time / 48)) + 901);
+    const unit = (distance(hands[0][0], hands[0][9]) + distance(hands[1][0], hands[1][9])) / 2;
+    const thickness = clamp(unit * .012, .65, 1.5);
+    ctx.globalAlpha = power;
+    for (const [finger, tip] of TIPS.entries()) {
+      const a = hands[0][tip], b = hands[1][tip];
+      const length = distance(a, b);
+      if (length < 3) continue;
+      const path = discharge(a, b, Math.min(length * .28, unit * .8), random);
+      const opacity = reduced ? .65 : .38 + random() * .54;
+      filament(path, thickness * (finger === 1 ? 1.1 : .8), opacity);
+      for (let branch = 0; branch < 3; branch++) {
+        const rootIndex = 8 + Math.floor(random() * 42);
+        const root = path[rootIndex];
+        const direction = branch % 2 ? -1 : 1;
+        const reach = length * (.07 + random() * .13);
+        const end = {
+          x: root.x + (b.x - a.x) / length * reach + direction * (b.y - a.y) / length * reach * .75,
+          y: root.y + (b.y - a.y) / length * reach - direction * (b.x - a.x) / length * reach * .75,
+        };
+        const twig = discharge(root, end, reach * .45, random);
+        // Fade branch sections toward the free end rather than drawing a tube.
+        for (let section = 0; section < 4; section++) {
+          const start = section * 16;
+          filament(twig.slice(start, start + 17), thickness * (.55 - section * .11), opacity * (.50 - section * .12), true);
+        }
+      }
+      for (const point of [a, b]) {
+        glow(point.x, point.y, unit * .26, "#6d9fff", "45");
+        glow(point.x, point.y, unit * .065, "#dfedff", "bd");
+      }
+    }
   }
 
   function render(time, fires, electricity) {
-    const delta = Math.min((time - (previousTime ?? time)) / 1000, .05);
+    const delta = Math.max(0, Math.min((time - (previousTime ?? time)) / 1000, .05));
     previousTime = time;
     const reduced = reduceMotion.matches;
     const spawn = !reduced && time >= nextEmber && fires.length;
-    if (spawn) nextEmber = time + 33;
+    if (spawn) nextEmber = time + 45;
     ctx.clearRect(0, 0, width, height);
+    ctx.globalCompositeOperation = "source-over";
+    const active = new Set(fires.map(fire => fire.id));
+    for (const id of firesByHand.keys()) if (!active.has(id)) firesByHand.delete(id);
+    for (const fire of fires) drawFire(fire, time, spawn, reduced);
     ctx.globalCompositeOperation = "lighter";
-    for (const fire of fires) {
-      ctx.globalAlpha = fire.power;
-      drawFire(fire, time, spawn, reduced);
-    }
     for (let i = embers.length - 1; i >= 0; i--) {
       const ember = embers[i];
       ember.age += delta;
       if (reduced || ember.age >= ember.life) { embers.splice(i, 1); continue; }
       const fade = 1 - ember.age / ember.life;
-      ember.x += ember.vx * delta + Math.sin(ember.age * 13) * delta * 12;
+      ember.x += ember.vx * delta;
       ember.y += ember.vy * delta;
       ctx.globalAlpha = fade * ember.power;
-      ctx.fillStyle = FIRE_COLORS[i % FIRE_COLORS.length];
-      ctx.beginPath();
-      ctx.ellipse(ember.x, ember.y, ember.size * .45, ember.size * fade + .5, 0, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillStyle = "#ffc383";
+      ctx.fillRect(ember.x, ember.y, ember.size, ember.size * fade);
     }
-    if (electricity) {
-      ctx.globalAlpha = electricity.power;
-      drawElectric(...electricity.points, time, reduced);
-    }
+    if (electricity) drawElectric(electricity, time, reduced);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
   }
