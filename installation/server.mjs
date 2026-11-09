@@ -371,7 +371,8 @@ function serveFile(req, res, url) {
   }
   if (path === "installation/server.mjs") return fail(res, 404, "Ficheiro desconhecido.");
   const room = rooms.get(url.searchParams.get("room") || "default");
-  const advanced = path === "index.html" || (path === "magicdraw.html" && url.searchParams.get("calibrate") === "1");
+  const advanced = path === "index.html" || path === "installation/manual.html" ||
+    (path === "magicdraw.html" && url.searchParams.get("calibrate") === "1");
   if (advanced && !isOperator(req)) {
     res.writeHead(303, { Location: "/installation/admin.html" + url.search });
     return res.end();
