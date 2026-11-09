@@ -1,0 +1,12 @@
+**
+!/*.html
+!/warp.js
+!/installation/
+!/installation/*.html
+!/installation/*.css
+!/installation/*.js
+!/installation/*.mjs
+!/installation/art/
+!/installation/art/**
+!/media/
+!/media/**

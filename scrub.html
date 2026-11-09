@@ -358,8 +358,7 @@
   <div id="toast"></div>
 
 <script type="module">
-import { FilesetResolver, HandLandmarker }
-  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
 
 const $ = id => document.getElementById(id);
 const player = $("player"), cam = $("cam"), overlay = $("overlay"), octx = overlay.getContext("2d");
@@ -586,7 +585,7 @@ player.addEventListener("loadedmetadata", applyTrimsToCurrentScene);
 /* ===== sincronização na cloud (Supabase · tabela hand_config) =====
    Os cortes + cena ativa persistem entre dispositivos. Prioridade no arranque:
    link #cfg > cloud > localStorage. Chave anon é pública por design (RLS). */
-const SB_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
+const SB_URL = window.Palco?.configURL || "https://rvcvyeodglovmptcuyiz.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
 const SB_HDRS = { apikey: SB_KEY, Authorization: "Bearer " + SB_KEY, "Content-Type": "application/json" };
 const CFG_ID = "default";
@@ -604,7 +603,7 @@ async function cloudLoad() {
       try { localStorage.setItem("scene-trims", JSON.stringify(trims)); } catch { /* opcional */ }
       applyTrimsToCurrentScene();
     }
-    if (typeof cfg.s === "number" && SCENES[cfg.s] && cfg.s !== activeScene) selectScene(cfg.s);
+    if (!window.Palco && typeof cfg.s === "number" && SCENES[cfg.s] && cfg.s !== activeScene) selectScene(cfg.s);
   } catch { /* offline: localStorage chega */ }
   finally {
     cloudReady = true;
@@ -612,6 +611,7 @@ async function cloudLoad() {
   }
 }
 function cloudSave() {
+  if (window.Palco) return; // escolha do visitante só vive durante a sessão
   if (!cloudReady) { cloudPendingSave = true; return; } // a hidratação ganha à gravação
   clearTimeout(cloudSaveT);
   cloudSaveT = setTimeout(async () => {
@@ -853,6 +853,8 @@ let grabbing = false, anchorX = 0, anchorTime = 0;   // drag mode
 let lastFrameTime = 0;
 
 async function initModel() {
+  const { FilesetResolver, HandLandmarker } =
+    await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
   const fileset = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
   landmarker = await HandLandmarker.createFromOptions(fileset, {
@@ -870,7 +872,14 @@ function setLoadStatus(msg) {
 }
 
 let overlayDismissed = false;
+let firstFrameReported = false, touchOnly = false, controlledByTouch = false, lastTouchSeek = -Infinity;
 function dismissOverlay() {
+  if (!firstFrameReported) {
+    firstFrameReported = true;
+    if (player.readyState >= 2 && player.seekable.length) {
+      if (!touchOnly) window.Palco?.availability("ready");
+    } else firstFrameReported = false;
+  }
   if (overlayDismissed) return;
   overlayDismissed = true;
   const ov = $("startOverlay");
@@ -912,6 +921,7 @@ async function startExperience() {
       handVisible = false; anyHand = false; grabbing = false; fistActive = false;
       running = false;
       music.pause();
+      if (window.Palco) enterTouchMode();
       toast("⚠️ Câmara desligada — recarrega a página para retomar");
     });
     document.addEventListener("visibilitychange", () => { lastFrameTime = performance.now(); });
@@ -919,7 +929,23 @@ async function startExperience() {
   } catch (e) {
     err.textContent = "Erro: " + e.message;
     setLoadStatus("falhou — recarrega a página para tentar de novo");
+    if (window.Palco) enterTouchMode();
   }
+}
+
+function enterTouchMode() {
+  touchOnly = true;
+  pip.setCamPreview(false);
+  const ready = () => {
+    if (player.readyState < 2 || !player.seekable.length) return;
+    dismissOverlay();
+    window.Palco.availability("limited", "Usa o controlo de tempo no touchscreen.");
+    player.removeEventListener("loadeddata", ready);
+    player.removeEventListener("progress", ready);
+  };
+  player.addEventListener("loadeddata", ready);
+  player.addEventListener("progress", ready);
+  ready();
 }
 
 function dist(a, b) { const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0); return Math.hypot(dx, dy, dz); }
@@ -930,14 +956,17 @@ function loop() {
   if (cam.currentTime !== lastVideoTime) {
     lastVideoTime = cam.currentTime;
     const res = landmarker.detectForVideo(cam, now);
-    processHands(res);
+    if (now - lastTouchSeek > 900) {
+      if (res.landmarks?.length) controlledByTouch = false;
+      processHands(res);
+    }
     dismissOverlay(); // primeiro frame processado: já há tracking a funcionar
     lastCamFrameAt = now;
   } else if (now - lastCamFrameAt > 1500 && (handVisible || anyHand)) {
     // câmara congelada/terminada: solta o gesto para não fazer scrub eterno
     handVisible = false; anyHand = false; grabbing = false; fistActive = false;
   }
-  applyTime(now);
+  if (!controlledByTouch) applyTime(now);
   const dt = now - lastT; lastT = now;
   fpsEMA = fpsEMA ? fpsEMA * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
   $("fps").textContent = fpsEMA.toFixed(0) + " fps";
@@ -1182,12 +1211,19 @@ cloudLoad();
 startExperience();
 
 /* ================= ponte postMessage (shell de projeção) ================= */
-if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
+if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready", launch: new URLSearchParams(location.search).get("launch") }, location.origin);
 window.addEventListener("message", e => {
   if (e.origin !== location.origin || e.data?.mapping !== 1) return;
   if (e.data.cmd === "campreview") pip.setCamPreview(!!e.data.on);
   else if (e.data.cmd === "scene" && Number.isInteger(e.data.i) && SCENES[e.data.i]) selectScene(e.data.i);
-  else if (e.data.cmd === "chrome") { chromeOn = !!e.data.on; applyChrome(); }
+  else if (e.data.cmd === "scrubSeek" && Number.isFinite(e.data.position) && player.seekable.length) {
+    const position = Math.max(0, Math.min(1, e.data.position));
+    lastTouchSeek = performance.now();
+    controlledByTouch = true;
+    player.pause();
+    displayedTime = targetTime = trimIn + position * ((trimOut || player.duration) - trimIn);
+    player.currentTime = displayedTime;
+  } else if (e.data.cmd === "chrome") { chromeOn = !!e.data.on; applyChrome(); }
   // M1: painel de mapping — reencaminha para os MESMOS handlers do botão/select
   // reais (playBtn.onclick, "change" do #mode), sem duplicar a lógica deles.
   // ALTERNA sempre, em vez de perseguir um estado que o painel julga conhecer

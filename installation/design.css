@@ -1,0 +1,11 @@
+:root {
+  color-scheme: dark;
+  --ink: #0e1010;
+  --panel: #181b19;
+  --text: #f4f3eb;
+  --muted: #b5b8ae;
+  --line: #ffffff26;
+  --accent: #e4fa89;
+  --alert: #ffbaa5;
+  --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+}

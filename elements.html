@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mãos de Fogo · Palco de Luz</title>
+<link rel="stylesheet" href="/installation/elements.css">
+<script type="module" src="/installation/elements.mjs"></script>
+</head>
+<body data-effect="fire">
+<main id="mirror">
+  <video id="camera" playsinline muted aria-hidden="true"></video>
+  <canvas id="effects" aria-hidden="true"></canvas>
+  <header>
+    <div><span class="tag">Palco de Luz</span><h1>Mãos de Fogo</h1></div>
+    <nav class="effect-nav" aria-label="Escolher efeito">
+      <a href="index.html" data-room-link>← Voltar</a>
+      <a href="elements.html" data-room-link aria-current="page">Fogo</a>
+      <a href="electric.html" data-room-link>Raios</a>
+    </nav>
+  </header>
+  <p id="tracking-status" role="status" aria-live="polite">A preparar…</p>
+  <footer id="guide">
+    <p id="status" role="status">A preparar a câmara e o tracking…</p>
+    <div class="controls" id="preview" hidden>
+      <button type="button" id="demo-preview">Ver demonstração de fogo</button>
+    </div>
+  </footer>
+</main>
+</body>
+</html>

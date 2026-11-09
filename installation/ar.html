@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0e1010">
+<title>Espelho de gestos · Palco de Luz</title>
+<link rel="stylesheet" href="./ar.css">
+<script type="module" src="./ar.js"></script>
+</head>
+<body>
+<main id="mirror" aria-labelledby="mirror-title">
+  <video id="camera" playsinline muted aria-hidden="true"></video>
+  <div class="shade" aria-hidden="true"></div>
+  <div class="stage-grid" aria-hidden="true"></div>
+  <div class="stage-frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <header class="stage-header">
+    <div class="stage-identity">
+      <div class="brand">
+        <svg viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="M18 2v32M2 18h32M7 7l22 22m0-22L7 29" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="10" stroke="currentColor"/></svg>
+        <span>Palco de Luz</span>
+      </div>
+      <div class="stage-title"><span class="tag">Modo de seleção</span><h1 id="mirror-title">Espelho de gestos<span aria-hidden="true">.</span></h1></div>
+    </div>
+    <div class="signal tag" id="signal" aria-hidden="true">A preparar</div>
+  </header>
+
+  <div class="stage-orbit" aria-hidden="true"></div>
+  <div id="deck" role="group" aria-label="Experiências"></div>
+  <div id="palm" hidden aria-hidden="true"></div>
+
+  <footer class="stage-footer">
+    <div class="guide">
+      <span class="tag guide-label" aria-hidden="true">Guia de interação</span>
+      <p class="help" id="help" role="status" aria-live="polite">A preparar o espelho…<span class="subhelp" id="subhelp">Também podes escolher com as setas ou por toque.</span></p>
+    </div>
+    <div class="carousel-control">
+      <span class="tag carousel-label" aria-hidden="true">Experiências</span>
+      <div class="nav" role="group" aria-label="Navegação do carrossel">
+        <button type="button" id="previous" aria-label="Experiência anterior"><span aria-hidden="true">←</span></button>
+        <span class="tag" id="count" aria-hidden="true"></span>
+        <button type="button" id="next" aria-label="Experiência seguinte"><span aria-hidden="true">→</span></button>
+      </div>
+    </div>
+  </footer>
+</main>
+</body>
+</html>

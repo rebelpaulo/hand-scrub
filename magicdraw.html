@@ -2,7 +2,7 @@
 <html lang="pt">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Magic Draw — painel de controlo</title>
 <!-- REDESIGN: Baloo 2 (display face lúdica) só para títulos/rótulos de ação
      grandes (ver --font-display) — o texto denso dos botões de ferramenta
@@ -300,21 +300,6 @@
 
   /* ---------- botão admin: discreto, num canto, só reage a long-press ---------- */
   /* sobe acima da tab bar no telemóvel para não ficar tapado */
-  /* Marca do hotspot de admin. Vive na faixa vazia do cabeçalho das Cores (ao
-     centro do ecrã, por cima das bolas) em vez do canto — no canto disputava o
-     espaço com a barra de páginas e ninguém a encontrava.
-     É só um CÍRCULO neutro, sem ícone e SEM anel de progresso: o progresso era
-     precisamente o que ensinava um curioso a continuar a carregar ("está a
-     acontecer alguma coisa, vou segurar mais"). Assim o operador sabe onde é,
-     e para quem não sabe o toque não devolve pista nenhuma. */
-  #adminGearBtn {
-    margin-left: auto; flex: 0 0 auto;
-    width: 26px; height: 26px; min-height: 0; border-radius: 50%;
-    background: #1a1e2a99; border: 1px solid var(--line); opacity: .38;
-    padding: 0; touch-action: none;
-  }
-  #adminGearBtn .ic { display: none; } /* sem ícone: um ⚙️ anuncia "definições" a quem não devia procurar */
-
   /* ==================================================================
      Landscape / 16:9 — TABLET, MODO PRINCIPAL: tudo num ecrã sem
      scroll, grelha fixa de 3 colunas (esquerda pincéis · centro
@@ -565,6 +550,7 @@
   /* barra de ações primária (desfazer/refazer/foto/limpar/fechar) do ecrã de
      desenho — alvo ≥72px como o resto do painel (linha subiu para 88px acima) */
   #drawBottom button { flex: 1; min-height: 72px; font-size: 12px; font-weight: 800; }
+  #drawBottom button[hidden] { display: none; }
   #drawBottom button .ic { width: 26px; height: 26px; }
   #drawCloseBtn { border-color: var(--hands); color: var(--hands); }
   /* balde/limpar do modo desenhar: mesmo vermelho de confirmação do resto do painel (ver #clearBtn.confirm) */
@@ -804,7 +790,7 @@
     </div>
     <div class="page" id="pageColors" data-page="colors">
       <section class="grp" id="grpColors">
-        <h2 class="section"><svg class="ic"><use href="#ic-palette"></use></svg><span>Cores</span><button id="adminGearBtn" aria-label="Modo admin (mantém premido 3s)"><svg class="ic"><use href="#ic-gear"></use></svg></button></h2>
+        <h2 class="section"><svg class="ic"><use href="#ic-palette"></use></svg><span>Cores</span></h2>
         <div class="card"><div id="colors"></div></div>
       </section>
       <section class="grp" id="grpMirrors">
@@ -952,19 +938,21 @@
     </div>
     <div id="drawCanvasWrap"><canvas id="drawCanvasT"></canvas></div>
     <div id="drawBottom">
-      <button id="drawUndoBtn"><svg class="ic"><use href="#ic-undo"></use></svg></button>
-      <button id="drawRedoBtn"><svg class="ic"><use href="#ic-redo"></use></svg></button>
+      <button id="drawUndoBtn" aria-label="Desfazer"><svg class="ic"><use href="#ic-undo"></use></svg></button>
+      <button id="drawRedoBtn" aria-label="Refazer"><svg class="ic"><use href="#ic-redo"></use></svg></button>
       <button id="drawPhotoBtn"><svg class="ic"><use href="#ic-camera"></use></svg></button>
       <button id="drawClearBtn"><svg class="ic"><use href="#ic-trash"></use></svg><span>Limpar</span></button>
       <!-- eco do indicador de modo (dentro do ecrã de desenho, que tapa o painel
            principal): deixa claro que tocar aqui devolve o controlo às mãos —
            mesmo onclick/comportamento de sempre, só o rótulo mudou -->
+      <button id="drawEndBtn" type="button" hidden>Terminar sessão</button>
       <button id="drawCloseBtn"><svg class="ic"><use href="#ic-hand"></use></svg><span>Mãos</span></button>
     </div>
   </div>
 
 <script type="module">
 import { createWarp } from "./warp.js";
+import { request, roomURL } from "./installation/client.mjs";
 
 /* ==================================================================
    Magic Draw — painel de controlo (touch-only, sem câmara)
@@ -987,19 +975,26 @@ const icSvg = name => `<svg class="ic"><use href="#ic-${name}"></use></svg>`;
 // fazia TODOS os POSTs desse room levarem 400 e nada persistir (ao vivo parecia
 // funcionar pelo BroadcastChannel, mas um reload perdia o setup). O MESMO cap
 // tem de existir nos 4 ficheiros, senão os ecrãs abrem canais diferentes.
+const calibration = Boolean(window.Palco) && new URLSearchParams(location.search).get("calibrate") === "1";
 const ROOM = ((new URLSearchParams(location.search).get("room") || "default").replace(/[^\w-]/g, "").slice(0, 40)) || "default";
 const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let seq = 0;
 
-const bc = new BroadcastChannel("magicdraw:" + ROOM);
+const bc = (window.Palco?.channel("magicdraw:" + ROOM) ?? new BroadcastChannel("magicdraw:" + ROOM));
 bc.onmessage = e => onMsg(e.data);
+if (window.Palco) bc.onopen = () => {
+  sbConnected = true;
+  renderStatusPill();
+  send({ kind: "hello" });
+};
+if (window.Palco) bc.onerror = () => { sbConnected = false; renderStatusPill(); };
 // canal GLOBAL de zonas do edifício: o shell display.html (mapping mode) escuta
 // aqui — as zonas editadas neste admin chegam-lhe ao vivo, e vice-versa.
-const bcZones = new BroadcastChannel("mapping-zones:" + ROOM);
+const bcZones = (window.Palco?.channel("mapping-zones:" + ROOM) ?? new BroadcastChannel("mapping-zones:" + ROOM));
 bcZones.onmessage = e => onMsg(e.data);
 let sbZonesChannel = null;
 
-const SB_URL = "https://rvcvyeodglovmptcuyiz.supabase.co";
+const SB_URL = window.Palco?.configURL || "https://rvcvyeodglovmptcuyiz.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2Y3Z5ZW9kZ2xvdm1wdGN1eWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MzE0MTEsImV4cCI6MjA2MjEwNzQxMX0.nxD3rsoaYbLJratlmxJvaiUq8iKwXFr8-BPCmxfQBv0";
 const SB_HDRS = { apikey: SB_KEY, Authorization: "Bearer " + SB_KEY, "Content-Type": "application/json" };
 // nó da ligação vive dentro de #status (que agora também tem o chip pincel/cor/
@@ -1071,7 +1066,7 @@ async function cloudPost(id, data) {
   return r.ok;
 }
 
-(async () => {
+if (!window.Palco) (async () => {
   try {
     const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
     const sb = createClient(SB_URL, SB_KEY);
@@ -1255,6 +1250,10 @@ const COLORS = [
   "#ffffff", "#ff3b3b", "#ff9500", "#ffee00", "#c6ff00", "#39ff14", "#00ffb3",
   "#00e5ff", "#2979ff", "#0040ff", "#8a2be2", "#b026ff", "#ff2d95", "#ff00c8",
 ];
+const COLOR_NAMES = [
+  "Branco", "Vermelho", "Laranja", "Amarelo", "Lima", "Verde", "Verde-água",
+  "Ciano", "Azul claro", "Azul", "Roxo", "Violeta", "Rosa", "Magenta",
+];
 function selectColor(c) {
   state.color = c;
   state.tool = state.tool === "rainbow" ? lastNonRainbowTool : state.tool; // escolher cor sólida sai do modo arco-íris
@@ -1270,6 +1269,7 @@ function makeSwatch(c) {
   btn.style.background = c;
   btn.style.color = c;
   btn.dataset.color = c;
+  btn.setAttribute("aria-label", COLOR_NAMES[COLORS.indexOf(c)] ?? c);
   btn.onclick = () => selectColor(c);
   return btn;
 }
@@ -1278,12 +1278,14 @@ for (const c of COLORS) colorsEl.appendChild(makeSwatch(c));
 const rainbowBtn = document.createElement("button");
 rainbowBtn.className = "swatch rainbow";
 rainbowBtn.dataset.rainbow = "1";
+rainbowBtn.setAttribute("aria-label", "Arco-íris");
 rainbowBtn.onclick = selectRainbow;
 colorsEl.appendChild(rainbowBtn);
 function renderColors() {
   document.querySelectorAll(".swatch").forEach(btn => {
-    if (btn.dataset.rainbow === "1") { btn.classList.toggle("on", state.tool === "rainbow"); return; }
-    btn.classList.toggle("on", state.tool !== "rainbow" && btn.dataset.color === state.color);
+    const selected = btn.dataset.rainbow === "1" ? state.tool === "rainbow" : state.tool !== "rainbow" && btn.dataset.color === state.color;
+    btn.classList.toggle("on", selected);
+    btn.setAttribute("aria-pressed", selected);
   });
 }
 // FIX (BUG 1, painel landscape): grelha 5×3 de #colors — ver comentário na
@@ -2710,28 +2712,6 @@ function closeAdmin() {
   sendZones(false); // sai do modo admin: zonas ficam pretas/invisíveis no display
 }
 
-/* ---- botão ⚙️: só entra em admin com long-press de 3s (toque curto não faz nada) ---- */
-const adminGearBtn = $("adminGearBtn");
-const LONG_PRESS_MS = 3000;
-let pressStart = 0, pressTimer = null;
-// Sem indicação de progresso durante o hold — decisão deliberada. O anel que
-// aqui existia era o que ensinava quem não devia: uma criança que carregue por
-// acaso via algo a encher e percebia que valia a pena continuar. Agora um toque
-// curto não devolve pista nenhuma, e quem sabe do modo admin sabe que são 3s.
-// Um único setTimeout basta (o intervalo de 50ms só existia para animar o anel).
-function startPress(e) {
-  e.preventDefault();
-  pressStart = Date.now();
-  pressTimer = setTimeout(() => { pressTimer = null; openAdmin(); }, LONG_PRESS_MS);
-}
-function cancelPress() {
-  if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-}
-adminGearBtn.addEventListener("pointerdown", startPress);
-adminGearBtn.addEventListener("pointerup", cancelPress);
-adminGearBtn.addEventListener("pointerleave", cancelPress);
-adminGearBtn.addEventListener("pointercancel", cancelPress);
-
 zonesCloudLoad(); // hidrata zonas guardadas antes de o admin abrir pela 1ª vez
 
 /* ==================================================================
@@ -3185,7 +3165,7 @@ async function saveBuildingAs(name) {
     return { ok: false };
   }
   if (!r.ok) return { ok: false }; // POST da row falhou (400/etc.) — não avança para o índice
-  const indexed = await buildingsIndexUpsert({ id: buildingId, name });
+  const indexed = window.Palco || await buildingsIndexUpsert({ id: buildingId, name });
   if (!indexed) return { ok: false }; // row gravada mas índice falhou: reporta falha em vez de UI incoerente
   return { ok: true, droppedImg };
 }
@@ -3231,9 +3211,10 @@ async function deleteBuilding(buildingId) {
   // ("hand_config_delete_anon", verificado via MCP Supabase) — este pedido
   // apaga mesmo a row, não é só cosmético via índice.
   try {
-    await fetch(`${SB_URL}/rest/v1/hand_config?id=eq.${buildingId}`, { method: "DELETE", headers: SB_HDRS });
-  } catch { /* offline: a row fica órfã; removida do índice na mesma, não volta a aparecer na lista */ }
-  await buildingsIndexRemove(buildingId);
+    const response = await fetch(`${SB_URL}/rest/v1/hand_config?id=eq.${buildingId}`, { method: "DELETE", headers: SB_HDRS });
+    if (window.Palco) return response.ok;
+  } catch { if (window.Palco) return false; /* offline: a row fica órfã; removida do índice na mesma, não volta a aparecer na lista */ }
+  return await buildingsIndexRemove(buildingId);
 }
 
 const buildingsOverlay = $("buildingsOverlay"), buildingsListEl = $("buildingsList");
@@ -3269,7 +3250,10 @@ async function renderBuildingsList() {
       if (delArmed) { // 2º toque: confirma (mesmo padrão de dupla confirmação do resto do admin)
         clearTimeout(delTimer);
         delBtn.disabled = true;
-        deleteBuilding(b.id).then(renderBuildingsList);
+        deleteBuilding(b.id).then(removed => {
+          if (removed) renderBuildingsList();
+          else { delArmed = false; delBtn.disabled = false; delBtn.textContent = "Tentar novamente"; }
+        });
         return;
       }
       delArmed = true;
@@ -3826,8 +3810,17 @@ const portraitLayoutMql = window.matchMedia("(max-width: 699.98px), (orientation
 const tabBtnEls = document.querySelectorAll(".tabBtn");
 function setActivePage(name) {
   document.body.dataset.page = name;
-  tabBtnEls.forEach(b => b.classList.toggle("on", b.dataset.tabtarget === name));
+  tabBtnEls.forEach(button => {
+    const selected = button.dataset.tabtarget === name;
+    button.classList.toggle("on", selected);
+    button.setAttribute("aria-pressed", selected);
+  });
+  PAGE_ORDER.forEach(page => {
+    const panel = document.querySelector('.page[data-page="' + page + '"]');
+    if (panel) panel.inert = portraitLayoutMql.matches && page !== name;
+  });
 }
+portraitLayoutMql.addEventListener("change", () => setActivePage(document.body.dataset.page || "brushes"));
 tabBtnEls.forEach(b => b.onclick = () => setActivePage(b.dataset.tabtarget));
 // swipe horizontal no #panelRoot troca de página (além do toque nos separadores) —
 // só em retrato estreito; em landscape as 3 colunas são estáticas, sem swipe
@@ -3845,6 +3838,38 @@ panelRootEl.addEventListener("pointerup", e => {
 });
 
 /* ================= arranque ================= */
+if (window.Palco) {
+  $("back").href = (calibration ? "/installation/admin.html" : "/") + "?room=" + encodeURIComponent(ROOM);
+  $("photoBtn").remove();
+  $("drawPhotoBtn").remove();
+  const sessionId = new URLSearchParams(location.search).get("session");
+  if (!calibration && sessionId) {
+    const finish = $("drawEndBtn");
+    let opened = false;
+    const goToKiosk = () => location.replace(roomURL("/"));
+    const stopWatching = window.Palco.watchState(({ session }) => {
+      if (session?.id !== sessionId) { goToKiosk(); return; }
+      if (!opened) { opened = true; $("drawModeBtn").click(); }
+      finish.hidden = session.operator;
+    });
+    window.addEventListener("pagehide", stopWatching, { once: true });
+    finish.onclick = async () => {
+      finish.disabled = true;
+      try {
+        await request("visitor", { action: "end", id: sessionId });
+        goToKiosk();
+      } catch (error) {
+        if (error.status === 409) { goToKiosk(); return; }
+        finish.disabled = false;
+        finish.textContent = "Tentar novamente";
+      }
+    };
+  }
+  if (calibration) {
+    openAdmin();
+    window.addEventListener("pagehide", () => { if (adminOpen) closeAdmin(); }, { once: true });
+  }
+}
 setActivePage("brushes"); // página inicial (telemóvel); sem efeito em landscape
 renderBrushes(); renderColors(); renderSizes(); renderMirrors(); renderPreview();
 sizeColorSwatches(); // 1ª medição dos swatches de cor (BUG 1, landscape) — ver definição acima
@@ -3855,7 +3880,7 @@ send({ kind: "hello" }); // pergunta ao display se há foto congelada (responde 
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     if (adminOpen) closeAdmin(); // FIX R2: desliga a grelha de teste (se ligada) antes de sair
-    location.href = "index.html";
+    location.href = $("back").href;
     return;
   }
   // atalhos de undo/redo das ZONAS: só reagem com o admin aberto (ignora fora dele)

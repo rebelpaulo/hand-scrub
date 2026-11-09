@@ -1,0 +1,128 @@
+.kiosk {
+  background:
+    radial-gradient(ellipse at 92% 0%, #26311b88, transparent 39rem),
+    linear-gradient(145deg, #171c16, var(--ink) 34rem);
+}
+.kiosk header { min-height: 76px; }
+.kiosk footer { margin-top: 20px; border-top: 1px solid var(--line); }
+.kiosk-header-status { display: flex; align-items: center; gap: 16px; }
+.kiosk-label { font: 700 .72rem/1.35 var(--mono); letter-spacing: .11em; text-transform: uppercase; }
+.kiosk-header-status .kiosk-label { color: var(--muted); }
+.kiosk .status { padding: 7px 12px; border: 1px solid var(--line); border-radius: 99px; background: #111610; }
+.kiosk-intro { margin-block: clamp(23px, 4vw, 52px) clamp(22px, 3vw, 39px); }
+.kiosk-intro .tag { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.kiosk-intro h1 { font-size: clamp(2.8rem, 6.7vw, 6.8rem); font-weight: 770; line-height: .96; }
+.kiosk-intro em { color: var(--accent); font: italic 400 1.04em/.8 Georgia, serif; letter-spacing: -.075em; }
+.kiosk-intro #welcome { margin-top: 16px; max-width: 42ch; }
+.kiosk-steps {
+  display: flex;
+  align-items: end;
+  flex: none;
+  gap: clamp(13px, 2vw, 25px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kiosk-steps li { display: grid; min-width: 58px; gap: 4px; padding-top: 8px; border-top: 1px solid var(--line); font-weight: 650; }
+.kiosk-steps span { color: var(--accent); font: 700 .7rem/1.2 var(--mono); letter-spacing: .08em; }
+.kiosk-section { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-block: 12px; border-top: 1px solid var(--line); }
+#gallery-count { color: var(--muted); }
+
+.kiosk .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.kiosk .tile {
+  --tile-height: clamp(144px, 19vh, 208px);
+  display: grid;
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  min-height: var(--tile-height);
+  align-content: end;
+  border-radius: 9px;
+  background: #1a1c1a;
+}
+.kiosk .tile-featured { grid-column: span 2; }
+.kiosk .tile .art { position: absolute; z-index: -1; inset: 0; height: 100%; min-height: 0; }
+.kiosk .tile .art::after {
+  background: linear-gradient(0deg, #080b09 0%, #080b09e5 18%, #080b0933 67%, #080b091f 100%);
+}
+.kiosk .tile img { opacity: .89; }
+.kiosk .tile .stamp, .kiosk .tile .mode { top: 10px; padding: 4px 7px; border-radius: 3px; background: #101410ee; }
+.kiosk .tile .stamp { left: 10px; font-family: var(--mono); font-size: .65rem; }
+.kiosk .tile .mode { right: 10px; color: #e4e5db; font-size: .66rem; }
+.kiosk .tile .caption { gap: 10px; align-items: end; min-height: auto; padding: 12px 13px; }
+.kiosk .tile .caption strong { font-size: clamp(1.05rem, 2vw, 1.6rem); font-weight: 760; letter-spacing: -.045em; }
+.kiosk .tile .caption small { color: #d4d6cc; margin-top: 3px; font-size: .74rem; }
+.kiosk .tile .arrow {
+  display: grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #ffffff44;
+  border-radius: 50%;
+  color: var(--text);
+  font-size: .95rem;
+  line-height: 1;
+}
+.kiosk .tile:is(:hover, :focus-visible) .arrow { background: var(--tile-color); color: var(--ink); border-color: var(--tile-color); }
+.kiosk .tile-featured .caption { padding: clamp(13px, 2vw, 24px); }
+.kiosk .tile-featured .caption strong { font-size: clamp(1.5rem, 4vw, 3.8rem); line-height: .96; }
+.kiosk .tile-featured .caption small { margin-top: 7px; font-size: .91rem; }
+.kiosk .tile-featured .stamp { background: var(--accent); color: #14180b; }
+.kiosk .tile-featured .arrow { flex-basis: 38px; width: 38px; height: 38px; font-size: 1.2rem; }
+.kiosk .tile-featured img { object-fit: cover; object-position: 50% 44%; opacity: 1; }
+
+.kiosk #experience { border-radius: 12px; border-color: #8c9781; }
+.kiosk .detail { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); }
+.kiosk .dialog-content { gap: 15px; }
+.experience-instruction { border-top: 1px solid var(--line); padding-top: 13px; }
+.experience-instruction h3 { margin: 0 0 6px; color: var(--tile-color); }
+.kiosk .experience-instruction p { color: var(--text); font-size: 1rem; }
+.kiosk .experience-status {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 9px 10px;
+  background: #10140f;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: .88rem !important;
+}
+.experience-status::before { content: ""; flex: 0 0 7px; height: 7px; border-radius: 50%; background: var(--alert); }
+.experience-status[data-tone="ready"]::before { background: var(--accent); }
+.experience-status[data-tone="loading"]::before { background: #c8d9ff; }
+.kiosk .gesture-lesson { background: radial-gradient(ellipse at 0% 20%, #40281985, transparent 72%), #171819; }
+
+@media (min-width: 1120px) {
+  .kiosk .grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .kiosk .tile-featured { grid-row: span 2; }
+}
+@media (max-width: 959px) {
+  .kiosk .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .kiosk .tile-featured { grid-column: 1 / -1; }
+  .kiosk .tile-featured img { object-position: 50% 46%; }
+}
+@media (max-width: 700px) {
+  .kiosk header { min-height: 64px; }
+  .kiosk-header-status .kiosk-label { display: none; }
+  .kiosk-header-status .status { font-size: .7rem; padding-inline: 8px; }
+  .kiosk .mark { font-size: .78rem; gap: 5px; white-space: nowrap; }
+  .kiosk .mark svg { flex-basis: 26px; height: 26px; }
+  .kiosk-intro { flex-direction: column; align-items: start; gap: 18px; }
+  .kiosk-intro h1 { font-size: clamp(2.5rem, 9vw, 4.4rem); }
+  .kiosk-intro #welcome { margin-top: 11px; }
+  .kiosk-steps { width: 100%; }
+  .kiosk-steps li { flex: 1; grid-template-columns: auto 1fr; align-items: center; font-size: .85rem; }
+  .kiosk .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kiosk .detail { grid-template-columns: 1fr; }
+}
+@media (max-width: 390px) {
+  .kiosk .tile .mode { top: 10px; right: 8px; }
+  .kiosk .tile .stamp { left: 8px; }
+  .kiosk .tile:not(.tile-featured) .arrow { display: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .kiosk .tile img { transition: transform 240ms ease-out; }
+  .kiosk .tile:hover img { transform: scale(1.045); }
+  .kiosk .tile:active img { transform: scale(1.025); }
+}

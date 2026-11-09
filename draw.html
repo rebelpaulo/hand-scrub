@@ -338,7 +338,12 @@ function setLoadStatus(msg) {
 }
 
 let overlayDismissed = false;
+let firstFrameReported = false;
 function dismissOverlay() {
+  if (!firstFrameReported) {
+    firstFrameReported = true;
+    window.Palco?.availability("ready");
+  }
   if (overlayDismissed) return;
   overlayDismissed = true;
   const ov = $("startOverlay");
@@ -382,6 +387,7 @@ async function start() {
   } catch (e) {
     showNotice("⚠️ não foi possível carregar o modelo de mãos — verifica a ligação e recarrega");
     setLoadStatus("falhou — recarrega a página para tentar de novo");
+    window.Palco?.availability("error", "Câmara ou motor indisponível.");
     return;
   }
   try {
@@ -395,11 +401,13 @@ async function start() {
       running = false;
       handState.forEach(st => { st.visible = false; st.pinching = false; if (st.stroke) st.stroke.active = false; st.stroke = null; });
       showNotice("📷 câmara indisponível — câmara desligada");
+      window.Palco?.availability("error", "A câmara desligou-se.");
     });
     loop();
   } catch (e) {
     showNotice("📷 câmara indisponível — verifica as permissões");
     setLoadStatus("falhou — recarrega a página para tentar de novo");
+    window.Palco?.availability("error", "Câmara ou motor indisponível.");
   }
 }
 start();
@@ -411,7 +419,7 @@ start();
 const pipWrap = $("pipWrap");
 const embedded = window.parent !== window;
 if (embedded) document.body.classList.add("chrome-off"); // começa escondida
-if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready" }, location.origin);
+if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready", launch: new URLSearchParams(location.search).get("launch") }, location.origin);
 window.addEventListener("message", e => {
   if (e.origin !== location.origin || e.data?.mapping !== 1) return;
   // esconde/mostra o preview da câmara (canvas + vídeo fonte) sem tocar no tracking
