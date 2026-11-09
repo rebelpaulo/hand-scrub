@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0e1010">
+  <title>Palco de Luz · Manual da instalação</title>
+  <link rel="stylesheet" href="/installation/surfaces.css">
+  <link rel="stylesheet" href="/installation/admin.css">
+  <link rel="stylesheet" href="/installation/manual.css">
+</head>
+<body class="team-page">
+  <div class="shell admin-shell">
+    <header class="team-masthead">
+      <div class="mark"><svg viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="M18 2v32M2 18h32M7 7l22 22m0-22L7 29" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="10" stroke="currentColor"/></svg>PALCO DE LUZ</div>
+      <p class="team-masthead-label">Manual da instalação</p>
+      <a href="/installation/admin.html" class="utility-link"><span aria-hidden="true">↖</span> Voltar ao painel</a>
+    </header>
+
+    <main>
+      <div class="team-hero">
+        <div>
+          <p class="tag">Operação</p>
+          <h1 tabindex="-1">Pôr o palco a funcionar</h1>
+        </div>
+      </div>
+
+      <p class="manual-lede">
+        O Palco de Luz <strong>não é um site</strong>: é um servidor que corre no computador
+        do projetor e liga três ecrãs. Esta página diz o que cada peça faz, por que ordem se
+        liga, e o que fazer quando alguma coisa não acende.
+      </p>
+
+      <nav class="team-index" aria-label="Secções do manual">
+        <a href="#como"><span>01</span> Como funciona</a>
+        <a href="#arrancar"><span>02</span> Arrancar</a>
+        <a href="#no-dia"><span>03</span> No dia</a>
+        <a href="#offline"><span>04</span> Sem internet</a>
+        <a href="#diagnostico"><span>05</span> Diagnóstico</a>
+      </nav>
+
+      <section class="team-station" id="como" aria-labelledby="como-title">
+        <div class="team-station-heading">
+          <p class="tag">01 / Arquitetura</p>
+          <h2 id="como-title">Três peças, uma sala</h2>
+        </div>
+        <div class="manual-flow">
+          <div>
+            <p class="tag">Servidor</p>
+            <h3>O processo Node</h3>
+            <p>Corre no computador do projetor. Guarda o estado da sala em memória: quem é o
+              projetor, que experiência está aberta, o cronómetro do visitante. É ele que serve
+              as três páginas abaixo.</p>
+          </div>
+          <div>
+            <p class="tag">Quiosque</p>
+            <h3>O touchscreen</h3>
+            <p>O menu que o público toca. Mostra as experiências e pede ao servidor para abrir
+              a escolhida. <strong>Nunca pede câmara.</strong></p>
+          </div>
+          <div>
+            <p class="tag">Projeção</p>
+            <h3>O ecrã do projetor</h3>
+            <p>Carrega a experiência e é <strong>aqui que a câmara é pedida</strong>. Mantém uma
+              ligação aberta ao servidor — é essa ligação que põe o projetor «online».</p>
+          </div>
+        </div>
+        <div class="manual-prose" style="margin-top:18px">
+          <p><strong>Porque é que isto tem de correr num servidor sempre ligado.</strong>
+            O estado da sala vive na memória do processo e a projeção fica com uma ligação
+            permanentemente aberta. Alojamentos que arrancam uma função por pedido e a matam a
+            seguir — a Vercel, por exemplo — não servem: o estado desaparecia entre pedidos e o
+            quiosque podia perguntar a uma máquina enquanto o projetor respondia a outra.
+            O repositório traz um <code>Dockerfile</code> para quem quiser alojar online, num
+            serviço de contentor sempre ativo, com <strong>uma só réplica</strong>.</p>
+          <p><strong>E porque é que no dia do evento corre local.</strong> Se o servidor estiver
+            na nuvem, o quiosque e o projetor — que estão na mesma sala, lado a lado — passam a
+            falar um com o outro através da internet do sítio. Cai o wifi, para tudo. Com o
+            servidor no computador do projetor, falam pela rede da sala.</p>
+        </div>
+      </section>
+
+      <section class="team-station" id="arrancar" aria-labelledby="arrancar-title">
+        <div class="team-station-heading">
+          <p class="tag">02 / Arranque</p>
+          <h2 id="arrancar-title">Ligar o servidor</h2>
+        </div>
+        <div class="manual-prose">
+          <p>No computador do projetor, a partir da pasta do projeto. A password de operador tem
+            de ter <strong>12 a 256 caracteres</strong> — abaixo disso o servidor recusa arrancar.</p>
+        </div>
+        <code class="manual-code">read -rs 'PALCO_PASSWORD?Password da equipa: '
+export PALCO_PASSWORD
+node installation/server.mjs</code>
+        <div class="manual-prose" style="margin-top:14px">
+          <p>Depois abre <code>http://127.0.0.1:8777/</code>. Precisa de Node 22 ou superior e
+            não instala dependências nenhumas.</p>
+          <p><strong>Para o touchscreen estar noutro equipamento</strong>, o servidor tem de
+            ouvir na rede <em>e</em> em HTTPS: define <code>PALCO_HOST=0.0.0.0</code> com
+            <code>PALCO_TLS_CERT</code> e <code>PALCO_TLS_KEY</code>. Sem HTTPS a câmara nunca
+            arranca — os browsers só a dão em <code>localhost</code> ou em ligação segura, e
+            é por isso que um endereço do tipo <code>http://192.168.…</code> não chega.</p>
+        </div>
+        <table class="manual-table" style="margin-top:18px">
+          <thead><tr><th scope="col">Variável</th><th scope="col">Para quê</th></tr></thead>
+          <tbody>
+            <tr><th scope="row"><code>PALCO_PASSWORD</code></th><td>Password de operador. Obrigatória, 12 a 256 caracteres.</td></tr>
+            <tr><th scope="row"><code>PALCO_PORT</code></th><td>Porta. Por omissão 8777.</td></tr>
+            <tr><th scope="row"><code>PALCO_HOST</code></th><td>Interface. Por omissão só <code>127.0.0.1</code>; para a rede, com TLS.</td></tr>
+            <tr><th scope="row"><code>PALCO_TLS_CERT</code> / <code>_KEY</code></th><td>Certificado e chave, para servir em HTTPS.</td></tr>
+            <tr><th scope="row"><code>PALCO_ROOMS</code></th><td>Salas independentes, por exemplo <code>fachada,sala</code>. Escolhem-se com <code>?room=fachada</code>.</td></tr>
+            <tr><th scope="row"><code>PALCO_DATA</code></th><td>Onde fica a calibração. Por omissão <code>.palco/config.json</code> — copia este ficheiro para levar o preset da fachada para outra máquina.</td></tr>
+            <tr><th scope="row"><code>PALCO_PUBLIC_ORIGIN</code></th><td>Só para alojamento online: a origem HTTPS pública, atrás do proxy.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="team-station" id="no-dia" aria-labelledby="no-dia-title">
+        <div class="team-station-heading">
+          <p class="tag">03 / Montagem</p>
+          <h2 id="no-dia-title">A ordem no dia do evento</h2>
+        </div>
+        <div class="manual-prose">
+          <p>Por esta ordem. Saltar um passo é a causa mais comum de «o cartão não abre».</p>
+        </div>
+        <ol class="manual-steps" style="margin-top:16px">
+          <li>
+            <strong>Arranca o servidor</strong>
+            <p>No computador do projetor, com a password da equipa.</p>
+          </li>
+          <li>
+            <strong>Entra na Área da equipa</strong>
+            <p>No mesmo computador, <code>/installation/admin.html</code>. A sessão de operador dura 8 horas.</p>
+          </li>
+          <li>
+            <strong>Abre a projeção e deixa-a aberta</strong>
+            <p>Botão <em>Abrir projeção</em>. Abre um separador novo, que é o ecrã do projetor —
+              é a ligação dele que põe o estado em «online». Carrega em <em>Ecrã inteiro</em>.
+              Enquanto este separador estiver fechado, os cartões do quiosque ficam bloqueados.</p>
+          </li>
+          <li>
+            <strong>Dá a câmara nesse separador</strong>
+            <p>É a projeção que pede a câmara, não o quiosque. Se já recusaste uma vez, repõe a
+              permissão no ícone da câmara, na barra de endereço.</p>
+          </li>
+          <li>
+            <strong>Calibra, se a fachada mudou</strong>
+            <p>Com a sala ainda fechada: <em>Projetar Magic Draw</em> e depois <em>Abrir calibração</em>.
+              Confirma a grelha no projetor e guarda.</p>
+          </li>
+          <li>
+            <strong>Escolhe o modo em repouso</strong>
+            <p><em>Galeria tátil</em> ou <em>Espelho de gestos</em>. A galeria funciona nos dois.</p>
+          </li>
+          <li>
+            <strong>Abre ao público</strong>
+            <p>Só agora. Os indicadores em cima — projetor, câmara, espelho — devem estar todos verdes.</p>
+          </li>
+        </ol>
+        <div class="manual-prose" style="margin-top:16px">
+          <p><strong>Durante a sessão.</strong> Cada visitante tem três minutos; ao fim disso a
+            experiência liberta-se sozinha. <em>Apagar projeção</em> suspende a saída sem perder
+            o estado. <em>Reiniciar</em> o servidor devolve a sala ao estado de preparação e
+            obriga a emparelhar o projetor outra vez — não o faças com público à frente.</p>
+        </div>
+      </section>
+
+      <section class="team-station manual-warn" id="offline" aria-labelledby="offline-title">
+        <div class="team-station-heading">
+          <p class="tag">04 / Antes de sair</p>
+          <h2 id="offline-title">Preparar para não haver internet</h2>
+        </div>
+        <div class="manual-prose">
+          <p>Por omissão, os modelos de deteção de mãos vêm de uma CDN. Numa sala sem rede, a
+            experiência não arranca. Corre isto <strong>uma vez, com internet</strong>, e
+            reinicia o servidor:</p>
+        </div>
+        <code class="manual-code">sh installation/download-assets.sh</code>
+        <div class="manual-prose" style="margin-top:14px">
+          <p>Os motores, modelos e WASM passam a viver em <code>installation/vendor/</code> e o
+            servidor serve-os a partir do disco. <strong>Testa com o wifi desligado antes de ir
+            para o evento</strong> — é o único teste que prova que ficou.</p>
+        </div>
+      </section>
+
+      <section class="team-station" id="diagnostico" aria-labelledby="diagnostico-title">
+        <div class="team-station-heading">
+          <p class="tag">05 / Quando não acende</p>
+          <h2 id="diagnostico-title">Diagnóstico</h2>
+        </div>
+        <table class="manual-table">
+          <thead><tr><th scope="col">O que vês</th><th scope="col">Causa</th><th scope="col">O que fazer</th></tr></thead>
+          <tbody>
+            <tr>
+              <th scope="row">«Não foi possível ligar à instalação»</th>
+              <td>O servidor não está a correr, ou estás num endereço que não é ele — num site estático não existe <code>/api</code>.</td>
+              <td>Arranca o servidor e abre <code>http://127.0.0.1:8777/</code>.</td>
+            </tr>
+            <tr>
+              <th scope="row">«A projeção está sem ligação»</th>
+              <td>O separador da projeção não está aberto.</td>
+              <td>Área da equipa → <em>Abrir projeção</em>, e deixa o separador aberto.</td>
+            </tr>
+            <tr>
+              <th scope="row">Os cartões do quiosque não abrem</th>
+              <td>Falta o projetor online, ou a sala ainda não foi aberta ao público.</td>
+              <td>Confirma os três indicadores no painel; depois <em>Abrir ao público</em>.</td>
+            </tr>
+            <tr>
+              <th scope="row">«A câmara requer HTTPS ou localhost»</th>
+              <td>Estás a abrir por um endereço de rede em HTTP simples.</td>
+              <td>Usa <code>localhost</code> nessa máquina, ou configura TLS no servidor.</td>
+            </tr>
+            <tr>
+              <th scope="row">«A câmara está indisponível»</th>
+              <td>Permissão recusada, ou outro programa tem a câmara ocupada.</td>
+              <td>Repõe a permissão no ícone da barra de endereço <strong>do separador da projeção</strong> e fecha o outro programa.</td>
+            </tr>
+            <tr>
+              <th scope="row">A câmara aparece no Meet mas não aqui</th>
+              <td>Estás a olhar para o separador errado: quem pede a câmara é a projeção.</td>
+              <td>Abre a projeção e dá a permissão lá.</td>
+            </tr>
+            <tr>
+              <th scope="row">«O modelo de mãos não ficou disponível»</th>
+              <td>Sem internet e sem os modelos em disco.</td>
+              <td>Corre <code>download-assets.sh</code> com rede e reinicia o servidor.</td>
+            </tr>
+            <tr>
+              <th scope="row">«Define PALCO_PASSWORD com 12 a 256 caracteres»</th>
+              <td>A password é curta de mais; o servidor nem chega a arrancar.</td>
+              <td>Escolhe uma com 12 caracteres ou mais.</td>
+            </tr>
+            <tr>
+              <th scope="row">A projeção pede a password</th>
+              <td>A projeção só abre com sessão de operador, e a tua expirou (8 horas).</td>
+              <td>Entra outra vez na Área da equipa e reabre a projeção.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
