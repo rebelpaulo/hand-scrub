@@ -1,6 +1,14 @@
 const WIDTH = 192;
 const HEIGHT = 292;
 const SIZE = WIDTH * HEIGHT;
+// Caixa da mão, em unidades: larga e alta o bastante para o fogo envolver os lados
+// e descer abaixo do pulso sem ser cortado.
+const BOX_W = 5.2;
+const BOX_H = 7.6;
+const BOX_LEFT = 2.6;   // palma a BOX_LEFT unidades da margem esquerda
+const BOX_TOP = 5.2;    // palma a BOX_TOP unidades do topo
+const CENTRE_X = BOX_LEFT / BOX_W * WIDTH;
+const CENTRE_Y = BOX_TOP / BOX_H * HEIGHT;
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 
 function noiseField() {
@@ -47,7 +55,7 @@ export function createHandFire() {
   let previousTime;
 
   function handMask(points, origin, unit) {
-    const project = p => ({ x: (p.x - origin.x) / (unit * 4) * WIDTH, y: (p.y - origin.y) / (unit * 6.1) * HEIGHT });
+    const project = p => ({ x: (p.x - origin.x) / (unit * BOX_W) * WIDTH, y: (p.y - origin.y) / (unit * BOX_H) * HEIGHT });
     const hand = points.map(project);
     source.clearRect(0, 0, WIDTH, HEIGHT);
     source.fillStyle = source.strokeStyle = "white";
@@ -56,15 +64,20 @@ export function createHandFire() {
     const across = { x: hand[17].x - hand[5].x, y: hand[17].y - hand[5].y };
     const size = Math.max(1, Math.hypot(across.x, across.y));
     const wrist = hand[0];
+    const down = { x: wrist.x - hand[9].x, y: wrist.y - hand[9].y };
+    const reach = Math.hypot(down.x, down.y) || 1;
+    const cuff = { x: wrist.x + down.x / reach * size * .34, y: wrist.y + down.y / reach * size * .34 };
     source.beginPath();
-    source.moveTo(wrist.x - across.x * .24, wrist.y - across.y * .24);
+    source.moveTo(cuff.x - across.x * .24, cuff.y - across.y * .24);
     for (const index of [1, 2, 5, 9, 13, 17]) source.lineTo(hand[index].x, hand[index].y);
-    source.lineTo(wrist.x + across.x * .24, wrist.y + across.y * .24);
+    source.lineTo(cuff.x + across.x * .24, cuff.y + across.y * .24);
     source.closePath();
     source.fill();
+    source.lineWidth = size * .30;
+    source.stroke();
     for (const finger of [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16], [17, 18, 19, 20]]) {
       for (let joint = 0; joint < 3; joint++) {
-        source.lineWidth = size * (joint === 0 ? .21 : joint === 1 ? .17 : .14);
+        source.lineWidth = size * (joint === 0 ? .27 : joint === 1 ? .22 : .18);
         source.beginPath();
         source.moveTo(hand[finger[joint]].x, hand[finger[joint]].y);
         source.lineTo(hand[finger[joint + 1]].x, hand[finger[joint + 1]].y);
@@ -72,9 +85,9 @@ export function createHandFire() {
       }
     }
     source.filter = "none";
-    const fade = source.createLinearGradient(wrist.x, wrist.y, hand[9].x, hand[9].y);
-    fade.addColorStop(0, "transparent");
-    fade.addColorStop(.28, "white");
+    const fade = source.createLinearGradient(cuff.x, cuff.y, hand[9].x, hand[9].y);
+    fade.addColorStop(0, "rgba(255,255,255,.45)");
+    fade.addColorStop(.3, "white");
     fade.addColorStop(1, "white");
     source.globalCompositeOperation = "destination-in";
     source.fillStyle = fade;
@@ -96,8 +109,11 @@ export function createHandFire() {
         const eddy = noise[((y * 2 + driftY) % HEIGHT) * WIDTH + (x * 2 + driftX) % WIDTH];
         const curlX = (noise[((noiseY + 1) % HEIGHT) * WIDTH + noiseX] - noise[((noiseY + HEIGHT - 1) % HEIGHT) * WIDTH + noiseX]) * 80;
         const curlY = (noise[noiseY * WIDTH + (noiseX + WIDTH - 1) % WIDTH] - noise[noiseY * WIDTH + (noiseX + 1) % WIDTH]) * 55;
-        const fromX = clamp(x + ((n - .5) * 5 + curlX) * step, 0, WIDTH - 2);
-        const fromY = clamp(y + (2.8 + eddy * 2.8 + curlY) * step, 0, HEIGHT - 2);
+        const rx = x - CENTRE_X, ry = y - CENTRE_Y;
+        const radius = Math.hypot(rx, ry) || 1;
+        const spread = 1.9 + eddy * 1.5;
+        const fromX = clamp(x + ((n - .5) * 5 + curlX - rx / radius * spread) * step, 0, WIDTH - 2);
+        const fromY = clamp(y + (1.7 + eddy * 2.4 + curlY - ry / radius * spread) * step, 0, HEIGHT - 2);
         const ix = Math.floor(fromX), iy = Math.floor(fromY);
         const fx = fromX - ix, fy = fromY - iy;
         const sample = iy * WIDTH + ix;
@@ -125,7 +141,7 @@ export function createHandFire() {
 
   function draw(ctx, points, unit, time, reduced) {
     const palm = { x: (points[0].x + points[9].x) / 2, y: (points[0].y + points[9].y) / 2 };
-    const origin = { x: palm.x - unit * 2, y: palm.y - unit * 4.4 };
+    const origin = { x: palm.x - unit * BOX_LEFT, y: palm.y - unit * BOX_TOP };
     const elapsed = previousTime === undefined ? 33 : time - previousTime;
     if (previousTime === undefined || elapsed >= 30) {
       const fuel = handMask(points, origin, unit);
@@ -133,7 +149,7 @@ export function createHandFire() {
       simulate(fuel, reduced ? 0 : time, reduced ? 0 : clamp(elapsed / 33, .5, 1.8));
       previousTime = time;
     }
-    const w = unit * 4, h = unit * 6.1;
+    const w = unit * BOX_W, h = unit * BOX_H;
     ctx.save();
     ctx.globalCompositeOperation = "screen";
     ctx.filter = "blur(" + Math.max(4, unit * .14) + "px)";
