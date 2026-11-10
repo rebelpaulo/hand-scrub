@@ -31,8 +31,8 @@ const glow = engine ? null : attachGlow(canvas, { amount: .85 });
 const FOGO = EFFECTS.find(e => e.id === "fogo");
 const OVER_CAMERA = { bg: [0, 0, 0], vignette: 0, grain: 0, chroma: .1 };
 engine?.setEffect(mode === "fire"
-  // a mão inteira é o combustível (fuel); os dedos só empurram o ar e largam brasas (amount: 0)
-  ? { ...FOGO, fluid: { ...FOGO.fluid, mode: "flame", amount: 0, fuel: 1.4, fuelCap: 1.2, radius: .7, diss: 3.1, vdiss: 1, buoy: 300, curl: 14 }, post: { ...OVER_CAMERA, key: 2.4 } }
+  // a mão inteira é o combustível (fuel); os dedos só empurram o ar (amount: 0). Sem brasas: só chama.
+  ? { ...FOGO, parts: [], fluid: { ...FOGO.fluid, mode: "flame", amount: 0, fuel: 1.4, fuelCap: 1.2, radius: .7, diss: 3.1, vdiss: 1, buoy: 300, curl: 14 }, post: { ...OVER_CAMERA, key: 2.4 } }
   : { pal: "chama", fluid: { mode: "glow", radius: .45, diss: 3, vdiss: 1, curl: 10, amount: .5 }, bolts: { type: "arc" }, post: { ...OVER_CAMERA, bloom: .85 } });
 const FLAME_POINTS = [4, 8, 12, 16, 20, 9, 0];   // pontas dos dedos, meio da palma e pulso
 // Silhueta da mão em cápsulas [de, até, raio em palmas]: dedos finos, palma cheia.
