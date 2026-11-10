@@ -140,9 +140,9 @@ requer loopback ou HTTPS.
 
 ## Ficheiros
 - `index.html` — a **home** da instalação: ecrã de atração (attract) com o
-  nome da experiência a rodar + mão fantasma, seguido do seletor de 7
+  nome da experiência a rodar + mão fantasma, seguido do seletor de
   cartões (🦋 Butterfly Effect · 🌑 Sala de Sombras · ✍️ Pinch Draw ·
-  🌬️ Enxame · 🪄 Magic Draw · 🎞️ Motion Lab · Mãos de Fogo · Raios nos Dedos). Toca, clica, tecla ou aproxima a mão para passar do attract
+  🌬️ Enxame · 🪄 Magic Draw · 🎞️ Motion Lab · Mãos de Fogo · Raios nos Dedos · Draw Physics). Toca, clica, tecla ou aproxima a mão para passar do attract
   ao seletor; os cartões respondem a clique, hover-dwell do rato e dwell
   por gesto (👍 700ms).
 - `scrub.html` — 🦋 Butterfly Effect, a app original (self-contained, sem
@@ -150,6 +150,13 @@ requer loopback ou HTTPS.
 - `shadow.html` — 🌑 Sala de Sombras (beta): a sombra do corpo projetada
   numa sala 3D.
 - `draw.html` — ✍️ Pinch Draw: pintura de luz no ar com o gesto de pinch.
+- `drawphysics.html` — Draw Physics: 63 pincéis com física (fumo, fogo,
+  líquidos, raios, cordas, partículas, reação-difusão, tecido, cardume…) em
+  WebGL2, sem bibliotecas. Toque, rato ou mão (dedo indicador esticado
+  desenha, mão fechada pára). Motor em `installation/drawphysics-gl.mjs`
+  (fluido, campos, sprites, fitas, bloom), simulações em
+  `installation/drawphysics-sim.mjs`, receitas dos efeitos em
+  `installation/drawphysics-effects.mjs`. Na projeção o pincel roda sozinho.
 - `enxame.html` — 🌬️ Enxame: milhares (12000, 3000 no mínimo) de partículas
   brancas orbitam num **cilindro que enche o ecrã todo**, à volta do eixo
   vertical da cabeça (MediaPipe `FaceDetector` localiza a cabeça, a cada 3ª

@@ -94,5 +94,17 @@ export const EXPERIENCES = [
     "id": "electric",
     "camera": true,
     "file": "electric.html"
+  },
+  {
+    "title": "Desenha com física",
+    "name": "Draw Physics",
+    "mode": "Com as mãos",
+    "color": "#9af5e4",
+    "image": "/installation/art/drawphysics.svg",
+    "instruction": "Aponta o dedo indicador e desenha no ar com fumo, fogo e luz. Fecha a mão para parar.",
+    "ready": "Vai até à marca no chão. Aponta o dedo para a projeção e desenha.",
+    "id": "drawphysics",
+    "camera": true,
+    "file": "drawphysics.html"
   }
 ];

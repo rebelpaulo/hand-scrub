@@ -475,6 +475,14 @@
           </div>
         </button>
 
+        <button class="card" type="button" data-accent="teal" data-href="drawphysics.html">
+          <div class="preview"><span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17c3-6 6 4 9-2s5-9 9-6"/><circle cx="6" cy="7" r="1.5"/><circle cx="17" cy="17" r="1.5"/><path d="M12 3v2"/><path d="M20 12h1"/></svg></span></div>
+          <div class="body">
+            <h3 class="title">Draw Physics</h3>
+            <p class="desc">desenha com fumo, fogo, líquidos e luz — 63 pincéis com física, no toque ou no ar</p>
+          </div>
+        </button>
+
       </div>
     </section>
 
@@ -532,6 +540,10 @@
           <button type="button" class="map-card" data-accent="ice" data-app="electric">
             <span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-8 12h7l-1 8 8-12h-7z"/></svg></span>
             <span class="txt"><span class="t">Raios nos Dedos</span><span class="d">toca para abrir no ecrã</span></span>
+          </button>
+          <button type="button" class="map-card" data-accent="teal" data-app="drawphysics">
+            <span class="icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17c3-6 6 4 9-2s5-9 9-6"/><circle cx="6" cy="7" r="1.5"/><circle cx="17" cy="17" r="1.5"/><path d="M12 3v2"/><path d="M20 12h1"/></svg></span>
+            <span class="txt"><span class="t">Draw Physics</span><span class="d">toca para abrir no ecrã</span></span>
           </button>
         </div>
 
@@ -650,6 +662,7 @@ const EXPERIENCES = [
   { name: "🎞️ MOTION LAB",      accent: "#f59e0b" },
   { name: "MÃOS DE FOGO", accent: "#ffbd85" },
   { name: "RAIOS NOS DEDOS", accent: "#b7d2ff" },
+  { name: "DRAW PHYSICS", accent: "#5eead4" },
 ];
 let expIdx = 0;
 function paintExperience(i) {
@@ -749,6 +762,10 @@ const MAP_APPS = {
   electric: {
     title: "Raios nos Dedos",
     desc: "Mostra as duas mãos e afasta os dedos. Os raios acompanham as pontas expostas.",
+  },
+  drawphysics: {
+    title: "Draw Physics",
+    desc: "Aponta o dedo e desenha no ar com fumo, fogo, líquidos, raios e luz. Fecha a mão para parar. O pincel muda sozinho de tempos a tempos, para cada visitante encontrar um efeito diferente.",
   },
   elements: {
     title: "Mãos de Fogo",
