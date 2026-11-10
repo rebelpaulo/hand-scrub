@@ -40,7 +40,7 @@ canvas.addEventListener("pointermove", e => {
   if (fingers.get("p" + e.pointerId)?.down) { lastInput = S.time; fingerMove("p" + e.pointerId, x, y); }
   else if (e.pointerType !== "mouse") return;
   else if (clickToDraw) fingerMove("m" + e.pointerId, x, y, true);
-  else { lastInput = S.time; $("hint").dataset.off = "1"; fingers.delete("m" + e.pointerId); fingerDown("p" + e.pointerId, x, y); }
+  else { lastInput = S.time; $("hint").dataset.off = "1"; fingers.delete("m" + e.pointerId); fingerDown("p" + e.pointerId, x, y); ui.collapse?.(); }
 });
 for (const type of ["pointerup", "pointercancel"]) canvas.addEventListener(type, e => E && fingerUp("p" + e.pointerId));
 canvas.addEventListener("pointerleave", e => { if (!E) return; fingers.delete("m" + e.pointerId); if (!clickToDraw) fingerUp("p" + e.pointerId); });
@@ -131,7 +131,7 @@ function initUI() {
       b.querySelector("img").onerror = ev => ev.target.remove();   // efeito novo ainda sem miniatura: fica só o nome
       b.querySelector(".name").textContent = e.name;
       b.setAttribute("aria-pressed", e === E.fx);
-      b.addEventListener("click", () => { setEffect(e.id); ui.dock(false); });
+      b.addEventListener("click", () => { ui.dock(false); setEffect(e.id); });   // fecha primeiro: setEffect refaz os botões e o foco perdia-se
       return b;
     }));
     if (shown !== family) list.scrollLeft = 0;
