@@ -152,7 +152,7 @@ export class Particles {
 }
 
 /* ================= Fluido ================= */
-const MONO = { fire: 1, liquid: 1, topo: 1, psy: 1, lava: 1 };
+const MONO = { fire: 1, flame: 1, liquid: 1, topo: 1, psy: 1, lava: 1 };
 // Teto de tinta por modo: os que pintam com a cor da paleta ficam abaixo do
 // branco; os que usam a tinta como "temperatura" precisam de margem.
 const CAP = { glow: 1.5, smoke: 1.9, lava: 2.4 };
@@ -169,11 +169,13 @@ export class FluidSys {
     const ax = vp.px / W, ay = 1 - vp.py / H, bx = vp.x / W, by = 1 - vp.y / H;
     const k = c.amount * Math.min(dt, .05) * 8, col = MONO[c.mode] ? WHITE : S.cyc(vp.hue, this.tmp);
     const radius = .03 * c.radius * S.ctl.size;
-    this.fluid.splat(ax, ay, bx, by, (bx - ax) / dt, (by - ay) / dt, [col[0] * k, col[1] * k, col[2] * k], radius, c.force * Math.min(1, dt * 9), c.cap || CAP[c.mode] || 3);
+    this.fluid.splat(ax, ay, bx, by, (bx - ax) / dt, (by - ay) / dt, k ? [col[0] * k, col[1] * k, col[2] * k] : null, radius, c.force * Math.min(1, dt * 9), c.cap || CAP[c.mode] || 3);
     if (c.spin) this.fluid.swirl(bx, by, radius * 2.6, (vp.id % 2 ? -1 : 1) * 26 * c.spin * S.ctl.swirl * dt);
   }
   step(dt) {
     const { S, c } = this;
+    // S.fuel: silhuetas a arder (Mãos de Fogo) — ver Fluid.fuel
+    if (c.fuel && S.fuel?.length) this.fluid.fuel(S.fuel, S.W, S.H, c.fuel * Math.min(dt, .05) * 8, c.fuelCap || 1.6);
     this.fluid.step(dt, { curl: c.curl * S.ctl.swirl, lift: ((c.buoy || 0) + (c.grav || 0)) * S.ctl.gravity,
       diss: c.diss / S.ctl.duration, vdiss: c.vdiss });
   }

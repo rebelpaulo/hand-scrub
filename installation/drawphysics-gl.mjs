@@ -40,6 +40,22 @@ void main(){
   o=vec4(clamp(base+add,-uMax,uMax),1.);
 }`,
 
+  // Combustível: a silhueta de uma mão (ossos como cápsulas) aquece o fluido
+  // num só passe. É a união das cápsulas, por isso as sobreposições não queimam mais.
+  fuel: HEAD + `uniform sampler2D uTarget; uniform vec4 uSeg[48]; uniform float uRad[48]; uniform int uN;
+uniform float uAspect,uAmount,uMax;
+void main(){
+  vec2 p=vUv; p.x*=uAspect; float f=0.;
+  for(int i=0;i<48;i++){ if(i>=uN) break;
+    vec2 a=uSeg[i].xy,b=uSeg[i].zw; a.x*=uAspect; b.x*=uAspect;
+    vec2 ab=b-a; float t=clamp(dot(p-a,ab)/max(dot(ab,ab),1e-9),0.,1.);
+    vec2 d=p-(a+ab*t); f=max(f,exp(-dot(d,d)/uRad[i]));
+  }
+  vec3 base=texture(uTarget,vUv).rgb;
+  float m=max(base.r,max(base.g,base.b));
+  o=vec4(base+f*uAmount*clamp(1.-m/uMax,0.,1.),1.);
+}`,
+
   // Empurrão em remoinho à volta de um ponto (efeito Vórtice).
   swirl: HEAD + `uniform sampler2D uTarget; uniform vec2 uA; uniform float uAspect,uRadius,uPower;
 void main(){
@@ -102,6 +118,9 @@ void main(){
   fluidShow: HEAD + `uniform sampler2D uDye; uniform vec2 uT; uniform int uMode;
 uniform vec3 uC1,uC2,uC3; uniform float uTime,uInten;
 float lum(vec2 uv){ vec3 c=texture(uDye,uv).rgb; return (c.r+c.g+c.b)*.3333; }
+float h21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
+float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(h21(i),h21(i+vec2(1.,0.)),f.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),f.x),f.y); }
 vec3 ramp(float t){ t=clamp(t,0.,1.); return t<.5 ? mix(uC3,uC2,t*2.) : mix(uC2,uC1,t*2.-1.); }
 void main(){
   vec3 c=texture(uDye,vUv).rgb;
@@ -120,6 +139,21 @@ void main(){
   if(uMode==2){ // fogo: rampa de temperatura
     vec3 col=ramp(d*1.2)*smoothstep(0.,.22,d)*(1.+1.8*smoothstep(.8,1.7,d));
     col+=vec3(1.,.95,.85)*smoothstep(1.3,2.6,d)*.9;
+    o=vec4(col*uInten,0.); return;
+  }
+  if(uMode==7){ // chama (Mãos de Fogo): a tinta é a temperatura do gás
+    // Línguas: ruído esticado na vertical, a subir mais depressa do que o gás,
+    // rói as bordas frias — a chama acaba em pontas e não num halo.
+    vec2 q=vUv*vec2(uT.y/uT.x,1.);
+    float n=vn(q*vec2(26.,15.)-vec2(0.,uTime*2.6))*.62+vn(q*vec2(58.,34.)-vec2(uTime*.7,uTime*4.4))*.38;
+    float T=max(d*(.72+.6*n)-.07-.1*n,0.);
+    // Cor de fuligem incandescente (corpo negro): vermelho escuro nas pontas
+    // frias, laranja a meio, amarelo junto ao combustível.
+    vec3 hue=mix(uC3,uC2,smoothstep(.1,.75,T)); hue=mix(hue,uC1,smoothstep(.6,1.35,T));
+    // A luz emitida cresce muito mais depressa do que a temperatura, e a
+    // exposição satura canal a canal: o núcleo passa a amarelo e depois a
+    // branco, como numa câmara — é isso que faz o fogo parecer fogo.
+    vec3 col=1.-exp(-hue*3.2*pow(T,2.2));
     o=vec4(col*uInten,0.); return;
   }
   if(uMode==3){ // líquido metálico
@@ -275,7 +309,7 @@ void main(){
   // Composição final: lente gravitacional, caleidoscópio, pixel, desvio de cor,
   // brilho, curva de tons, vinheta e grão.
   final: HEAD + `uniform sampler2D uScene,uBloom; uniform vec2 uRes;
-uniform float uBloomAmt,uExposure,uChroma,uGrain,uPixel,uKaleido,uTime,uVignette;
+uniform float uBloomAmt,uExposure,uChroma,uGrain,uPixel,uKaleido,uTime,uVignette,uKey;
 uniform vec4 uWarp[4]; uniform int uWarpN;
 float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
 // Curva de tons aplicada ao canal mais forte e não a cada canal: as cores
@@ -317,7 +351,11 @@ void main(){
   vec2 g=vUv*uRes+fract(uTime)*91.7;
   col+=(hash(g)-.5)*uGrain;
   col+=(hash(g+17.3)+hash(g*1.31-9.1)-1.)/255.;   // ruído triangular: sem faixas nos degradés escuros
-  o=vec4(col,1.);
+  // uKey: sobre a câmara (canvas com alfa), o que brilha tapa a imagem — a
+  // chama fica com a sua cor em vez de aclarar a pele — e o halo ténue soma-se
+  // a ela sem a escurecer.
+  col=max(col,0.);
+  o=vec4(col,uKey>0. ? smoothstep(.25,1.3,max(col.r,max(col.g,col.b))*uKey) : 1.);
 }`,
 };
 
@@ -491,9 +529,9 @@ function link(gl, vs, fs) {
   return { p, u };
 }
 
-export function createGLX(canvas) {
+export function createGLX(canvas, alpha = false) {
   const gl = canvas.getContext("webgl2", {
-    alpha: false, antialias: false, depth: false, stencil: false,
+    alpha, antialias: false, depth: false, stencil: false,
     powerPreference: "high-performance", preserveDrawingBuffer: false,
   });
   if (!gl) return null;
@@ -570,7 +608,7 @@ export function createGLX(canvas) {
   return X;
 }
 
-const FLUID_MODES = { glow: 0, smoke: 1, fire: 2, liquid: 3, topo: 4, psy: 5, lava: 6 };
+const FLUID_MODES = { glow: 0, smoke: 1, fire: 2, liquid: 3, topo: 4, psy: 5, lava: 6, flame: 7 };
 
 /* ================= Fluido ================= */
 export class Fluid {
@@ -609,6 +647,23 @@ export class Fluid {
       X.tex(0, this.dye.read, u.uTarget);
       X.blit(this.dye.write); this.dye.swap();
     }
+  }
+
+  // segs: [x0, y0, x1, y1, raio] em píxeis do ecrã (W × H), no máximo 48.
+  fuel(segs, W, H, amount, cap) {
+    const { X } = this, gl = X.gl, n = Math.min(48, segs.length);
+    const seg = this.fseg ||= new Float32Array(192), rad = this.frad ||= new Float32Array(48);
+    for (let i = 0; i < n; i++) {
+      const s = segs[i];
+      seg[i * 4] = s[0] / W; seg[i * 4 + 1] = 1 - s[1] / H; seg[i * 4 + 2] = s[2] / W; seg[i * 4 + 3] = 1 - s[3] / H;
+      rad[i] = (s[4] / H) ** 2;
+    }
+    X.blend(null);
+    const u = X.use("fuel");
+    gl.uniform4fv(u.uSeg, seg); gl.uniform1fv(u.uRad, rad); gl.uniform1i(u.uN, n);
+    gl.uniform1f(u.uAspect, this.aspect); gl.uniform1f(u.uAmount, amount); gl.uniform1f(u.uMax, cap);
+    X.tex(0, this.dye.read, u.uTarget);
+    X.blit(this.dye.write); this.dye.swap();
   }
 
   swirl(x, y, radius, power) {
@@ -867,7 +922,7 @@ export class Post {
     gl.uniform1f(u.uBloomAmt, p.bloom); gl.uniform1f(u.uExposure, p.exposure);
     gl.uniform1f(u.uChroma, p.chroma); gl.uniform1f(u.uGrain, p.grain);
     gl.uniform1f(u.uPixel, p.pixel); gl.uniform1f(u.uKaleido, p.kaleido);
-    gl.uniform1f(u.uTime, p.time); gl.uniform1f(u.uVignette, p.vignette);
+    gl.uniform1f(u.uTime, p.time); gl.uniform1f(u.uVignette, p.vignette); gl.uniform1f(u.uKey, p.key || 0);
     gl.uniform1i(u.uWarpN, p.warp.length / 4);
     if (p.warp.length) gl.uniform4fv(u.uWarp, p.warp);
     X.tex(0, this.scene, u.uScene); X.tex(1, L[0], u.uBloom);

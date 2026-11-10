@@ -14,14 +14,16 @@ const preview = document.querySelector("#preview");
 const reduced = matchMedia("(prefers-reduced-motion: reduce)");
 const embedded = parent !== window;
 const mode = document.body.dataset.effect === "electric" ? "electric" : "fire";
-// Fogo e raios do motor do Draw Physics, num canvas próprio somado à câmara
-// (fundo preto + mix-blend-mode: screen). Sem WebGL2, ou com movimento
+// Fogo e raios do motor do Draw Physics, num canvas próprio por cima da câmara.
+// Os raios somam-se à imagem (mix-blend-mode: screen). O fogo não: somado a
+// uma pele clara ficava cor de pêssego, por isso o canvas é transparente e a
+// chama tapa o que tem por trás (post.key). Sem WebGL2, ou com movimento
 // reduzido, fica o desenho antigo em Canvas 2D.
 const stage = document.createElement("canvas");
 stage.setAttribute("aria-hidden", "true");
-stage.style.mixBlendMode = "screen";
+if (mode === "electric") stage.style.mixBlendMode = "screen";
 canvas.after(stage);
-const engine = reduced.matches ? null : createEngine(stage);
+const engine = reduced.matches ? null : createEngine(stage, null, mode === "fire");
 if (!engine) stage.remove();
 reduced.addEventListener("change", () => location.reload());   // o desenho escolhe-se no arranque: mudar a preferência recarrega
 const effects = engine ? null : createElementEffects(canvas, reduced);
@@ -29,9 +31,16 @@ const glow = engine ? null : attachGlow(canvas, { amount: .85 });
 const FOGO = EFFECTS.find(e => e.id === "fogo");
 const OVER_CAMERA = { bg: [0, 0, 0], vignette: 0, grain: 0, chroma: .1 };
 engine?.setEffect(mode === "fire"
-  ? { ...FOGO, fluid: { ...FOGO.fluid, radius: .6, diss: 2.9, vdiss: 1.2, buoy: 300, amount: 1.45 }, post: OVER_CAMERA }   // chama curta, agarrada à mão
+  // a mão inteira é o combustível (fuel); os dedos só empurram o ar e largam brasas (amount: 0)
+  ? { ...FOGO, fluid: { ...FOGO.fluid, mode: "flame", amount: 0, fuel: 1.4, fuelCap: 1.2, radius: .7, diss: 3.1, vdiss: 1, buoy: 300, curl: 14 }, post: { ...OVER_CAMERA, key: 2.4 } }
   : { pal: "chama", fluid: { mode: "glow", radius: .45, diss: 3, vdiss: 1, curl: 10, amount: .5 }, bolts: { type: "arc" }, post: { ...OVER_CAMERA, bloom: .85 } });
 const FLAME_POINTS = [4, 8, 12, 16, 20, 9, 0];   // pontas dos dedos, meio da palma e pulso
+// Silhueta da mão em cápsulas [de, até, raio em palmas]: dedos finos, palma cheia.
+const HAND_FUEL = [
+  ...[[1, 2], [2, 3], [3, 4], [5, 6], [6, 7], [7, 8], [9, 10], [10, 11], [11, 12], [13, 14], [14, 15], [15, 16], [17, 18], [18, 19], [19, 20]]
+    .map(([a, b]) => [a, b, b % 4 ? .085 : .07]),
+  [0, 1, .2], [0, 5, .2], [0, 9, .22], [0, 13, .2], [0, 17, .2], [5, 17, .18], [1, 5, .16],
+];
 let emitters = new Set();
 
 // Cada ponto em chamas (ou ponta de dedo com raio) é um dedo a desenhar no motor.
@@ -42,15 +51,21 @@ function drive(time, fires, electricity) {
     if (engine.fingers.has(id)) engine.fingerMove(id, p.x * k, p.y * k); else engine.fingerDown(id, p.x * k, p.y * k);
   };
   let unit = 0;
+  const fuel = engine.S.fuel = [];
   for (const fire of fires) {
-    for (const i of FLAME_POINTS) touch(fire.id + ":" + i, fire.points[i]);
-    unit += Math.hypot(fire.points[0].x - fire.points[9].x, fire.points[0].y - fire.points[9].y) / fires.length;
+    const p = fire.points, palm = Math.hypot(p[0].x - p[9].x, p[0].y - p[9].y);
+    for (const i of FLAME_POINTS) touch(fire.id + ":" + i, p[i]);
+    for (const [a, b, r] of HAND_FUEL) fuel.push([p[a].x * k, p[a].y * k, p[b].x * k, p[b].y * k, r * palm * k]);
+    // punho: o fogo desce um pouco abaixo do pulso, como uma manga
+    fuel.push([p[0].x * k, p[0].y * k, (p[0].x + (p[0].x - p[9].x) * .35) * k, (p[0].y + (p[0].y - p[9].y) * .35) * k, .2 * palm * k]);
+    unit += palm / fires.length;
   }
   for (const { key, a, b } of electricity?.connections || []) { touch(key + ":a", a); touch(key + ":b", b); }
   engine.S.links = electricity ? electricity.connections.map(({ a, b }) => [a.x * k, a.y * k, b.x * k, b.y * k]) : null;
   if (electricity) unit = electricity.unit;
   // a chama acompanha o tamanho da mão no ecrã (perto da câmara = maior)
   if (unit) engine.ctl.size = Math.min(1.7, Math.max(.45, unit / (Math.min(stage.clientWidth, stage.clientHeight) * .16)));
+  if (fires.length) engine.ctl.gravity = engine.ctl.size;   // mão pequena (longe), chama mais baixa
   for (const id of emitters) if (!seen.has(id)) engine.fingerUp(id);
   emitters = seen;
   engine.frame(time);
