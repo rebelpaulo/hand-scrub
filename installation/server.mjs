@@ -366,7 +366,7 @@ async function api(req, res, url) {
 
 function serveFile(req, res, url) {
   const path = url.pathname === "/" ? "installation/kiosk.html" : url.pathname.slice(1);
-  if (!staticFiles.has(path) && !/^(?:media\/[a-z-]+\.(?:mp4|mp3|jpg|webp)|installation\/(?:[a-z-]+\.(?:html|css|js|mjs)|art\/[a-z-]+\.(?:jpg|svg)|vendor\/(?:[a-z0-9_]+\.(?:task|tflite)|[a-z_.]+\.(?:mjs|js)|wasm\/[a-z_]+\.(?:js|wasm))))$/.test(path)) {
+  if (!staticFiles.has(path) && !/^(?:media\/[a-z-]+\.(?:mp4|mp3|jpg|webp)|installation\/(?:[a-z-]+\.(?:html|css|js|mjs)|art\/(?:[a-z-]+\.(?:jpg|svg)|drawphysics\/[a-z-]+\.webp)|vendor\/(?:[a-z0-9_]+\.(?:task|tflite)|[a-z_.]+\.(?:mjs|js)|wasm\/[a-z_]+\.(?:js|wasm))))$/.test(path)) {
     return fail(res, 404, "Ficheiro desconhecido.");
   }
   if (path === "installation/server.mjs") return fail(res, 404, "Ficheiro desconhecido.");

@@ -157,6 +157,9 @@ requer loopback ou HTTPS.
   (fluido, campos, sprites, fitas, bloom), simulações em
   `installation/drawphysics-sim.mjs`, receitas dos efeitos em
   `installation/drawphysics-effects.mjs`. Na projeção o pincel roda sozinho.
+  As miniaturas dos efeitos (`installation/art/drawphysics/<id>.webp`) são
+  desenhadas pelo próprio motor: ao acrescentar ou mudar um efeito, corre
+  `node installation/art/drawphysics/make.mjs` e abre o endereço que ele dá.
 - `installation/drawphysics-engine.mjs` — o motor do Draw Physics sem página
   à volta (`createEngine(canvas)` → `setEffect`, `fingerDown/Move/Up`,
   `frame`). É o que desenha o fogo das Mãos de Fogo e os raios dos Raios nos
