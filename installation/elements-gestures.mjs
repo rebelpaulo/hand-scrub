@@ -4,6 +4,32 @@ const palmScale = points => Math.max(distance(points[0], points[9]), distance(po
 export const FINGERTIPS = [4, 8, 12, 16, 20];
 export const TRACKING_GRACE_MS = 200;
 
+// Liga as deteções de um quadro às mãos já seguidas, pela base do dedo médio
+// (coordenadas da imagem). O modelo troca a etiqueta Esquerda/Direita a meio e
+// chega a dar a mesma às duas mãos: seguir pela etiqueta apagava o fogo a cada
+// troca e deixava a segunda mão de fora. A ligação decide-se para o quadro
+// inteiro (mais pares ligados, depois menor distância total): escolher a mais
+// próxima deteção a deteção roubava a mão à seguinte e criava uma terceira.
+// Devolve, por deteção, a chave da mão ou undefined (mão nova).
+export function matchHands(hands, points, reach = .3) {
+  const tracks = [...hands].filter(([, hand]) => hand.points);
+  let best = { count: -1, cost: Infinity, ids: [] };
+  // ponytail: força bruta — são 2 deteções e 2-3 mãos; algoritmo húngaro se numHands crescer
+  (function assign(i, ids, count, cost) {
+    if (i === points.length) {
+      if (count > best.count || (count === best.count && cost < best.cost)) best = { count, cost, ids };
+      return;
+    }
+    assign(i + 1, [...ids, undefined], count, cost);
+    if (!points[i]) return;
+    for (const [key, hand] of tracks) {
+      const gap = screenDistance(hand.points[9], points[i]);
+      if (gap < reach && !ids.includes(key)) assign(i + 1, [...ids, key], count + 1, cost + gap);
+    }
+  })(0, [], 0, 0);
+  return best.ids;
+}
+
 export function createSnapDetector() {
   let chargedAt, lastContact, loaded, lastTime, lockedUntil = 0;
   return (points, time) => {

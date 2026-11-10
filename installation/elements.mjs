@@ -1,4 +1,5 @@
-import { createFireActivation, visibleFingertips, electricConnections, TRACKING_GRACE_MS } from "./elements-gestures.mjs";
+import { createFireActivation, visibleFingertips, electricConnections, matchHands, TRACKING_GRACE_MS } from "./elements-gestures.mjs";
+import { oneEuro } from "./smooth.mjs";
 import { createElementEffects } from "./elements-fx.mjs";
 import { roomURL } from "./client.mjs";
 import { attachGlow } from "./glow.mjs";
@@ -33,7 +34,7 @@ const FOGO = EFFECTS.find(e => e.id === "fogo");
 const OVER_CAMERA = { bg: [0, 0, 0], vignette: 0, grain: 0, chroma: .1 };
 engine?.setEffect(mode === "fire"
   // a mão inteira é o combustível (fuel); os dedos só empurram o ar (amount: 0). Sem brasas: só chama.
-  ? { ...FOGO, parts: [], fluid: { ...FOGO.fluid, mode: "flame", amount: 0, fuel: 1.4, fuelCap: 1.2, radius: .7, diss: 3.1, vdiss: 1, buoy: 300, curl: 14 }, post: { ...OVER_CAMERA, key: 2.4 } }
+  ? { ...FOGO, parts: [], fluid: { ...FOGO.fluid, mode: "flame", amount: 0, fuel: 4, fuelCap: 1.05, radius: .7, diss: 3.1, vdiss: 1, buoy: 300, curl: 14 }, post: { ...OVER_CAMERA, key: 2.4, bloom: 0 } }   // sem halo à volta: só chama
   : { pal: "chama", fluid: { mode: "glow", radius: .45, diss: 3, vdiss: 1, curl: 10, amount: .5 }, bolts: { type: "arc" }, post: { ...OVER_CAMERA, bloom: .85 } });
 const FLAME_POINTS = [4, 8, 12, 16, 20, 9, 0];   // pontas dos dedos, meio da palma e pulso
 // Silhueta da mão em cápsulas [de, até, raio em palmas]. Mais larga do que a
@@ -55,7 +56,8 @@ function drive(time, fires, electricity) {
   let unit = 0;
   const fuel = engine.S.fuel = [];
   for (const fire of fires) {
-    const p = fire.points, palm = Math.hypot(p[0].x - p[9].x, p[0].y - p[9].y);
+    // tamanho da mão: o comprimento da palma ou, com a mão inclinada para a câmara, a largura
+    const p = fire.points, palm = Math.max(Math.hypot(p[0].x - p[9].x, p[0].y - p[9].y), Math.hypot(p[5].x - p[17].x, p[5].y - p[17].y) * 1.3);
     for (const i of FLAME_POINTS) touch(fire.id + ":" + i, p[i]);
     for (const [a, b, r] of HAND_FUEL) fuel.push([p[a].x * k, p[a].y * k, p[b].x * k, p[b].y * k, r * palm * k]);
     // punho: o fogo desce um pouco abaixo do pulso, como uma manga
@@ -119,12 +121,15 @@ function screen(point) {
   return { x: (1 - point.x) * imageW + (w - imageW) / 2, y: point.y * imageH + (h - imageH) / 2 };
 }
 
+const FIRE_SMOOTH = { minCutoff: 2, beta: .05 };   // em milésimos da imagem (ver sample)
+let handCount = 0;
+
 function sample(result, time) {
-  const labels = result.handednesses ?? result.handedness;
   const observed = new Set();
+  const matched = matchHands(hands, result.landmarks.map(raw => raw.length === 21 ? raw[9] : null));
   for (const [index, raw] of result.landmarks.entries()) {
-    const id = labels?.[index]?.[0]?.categoryName || String(index);
-    if (raw.length !== 21 || observed.has(id)) continue;
+    if (raw.length !== 21) continue;
+    const id = matched[index] ?? "h" + handCount++;
     observed.add(id);
     if (!hands.has(id)) hands.set(id, { activate: createFireActivation(), seen: -Infinity, active: false });
     const hand = hands.get(id);
@@ -133,6 +138,10 @@ function sample(result, time) {
     hand.active = mode === "fire" && hand.activate(corrected, world, time);
     const blend = Math.min(1, (time - hand.seen) / 65);
     hand.points = raw.map((point, i) => {
+      if (mode === "fire") {   // One Euro: firme com a mão parada, sem atraso a mexer — a chama não fica para trás
+        const [fx, fy] = (hand.filters ||= [])[i] ||= [oneEuro(FIRE_SMOOTH), oneEuro(FIRE_SMOOTH)];
+        return { x: fx(point.x * 1000, time / 1000) / 1000, y: fy(point.y * 1000, time / 1000) / 1000, z: point.z ?? 0 };
+      }
       const previous = hand.points?.[i] ?? point;
       return { x: previous.x + (point.x - previous.x) * blend, y: previous.y + (point.y - previous.y) * blend, z: point.z ?? 0 };
     });
@@ -242,6 +251,7 @@ async function start() {
     const files = await FilesetResolver.forVisionTasks(vision + "/wasm");
     const create = delegate => HandLandmarker.createFromOptions(files, {
       baseOptions: { modelAssetPath: handModel, delegate }, runningMode: "VIDEO", numHands: 2,
+      minHandPresenceConfidence: .4, minTrackingConfidence: .4,   // segura a mão em movimento rápido (0,5 por omissão)
     });
     const model = await create("GPU").catch(() => disposed ? null : create("CPU"));
     if (disposed) { model?.close(); return; }
