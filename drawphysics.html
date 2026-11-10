@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#07090a">
+<title>Draw Physics · Palco de Luz</title>
+<style>
+  :root {
+    --ink: #07090a; --panel: #111512e6; --line: #2a312b; --text: #f2f5ec; --muted: #9aa49b;
+    --accent: #e3fc86; --alert: #ff9a7a;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --round: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--ink); overscroll-behavior: none; }
+  body { color: var(--text); font: 15px/1.4 var(--round); -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  [hidden] { display: none !important; }
+
+  #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+
+  .chrome { transition: opacity .25s; }
+  body.chrome-off .chrome { opacity: 0; pointer-events: none; }
+
+  /* ---------- cabeçalho ---------- */
+  header {
+    position: fixed; z-index: 20; top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left));
+    display: flex; align-items: center; gap: 10px; pointer-events: none;
+  }
+  header > * { pointer-events: auto; }
+  .back, .tool, .fam, .fx, .seg button, .pal {
+    border: 1px solid var(--line); background: var(--panel); border-radius: 12px;
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  }
+  .back { display: grid; place-items: center; width: 46px; height: 46px; color: var(--text); text-decoration: none; font-size: 20px; }
+  .title { display: grid; gap: 1px; padding: 5px 14px 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+  .title small { color: var(--accent); font: 700 10px/1.3 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+  .title strong { font-size: 17px; letter-spacing: -.02em; line-height: 1.15; }
+
+  /* ---------- ferramentas ---------- */
+  .tools { position: fixed; z-index: 20; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); display: flex; gap: 7px; }
+  .tool { display: inline-flex; align-items: center; gap: 7px; min-height: 46px; padding: 0 13px; font-weight: 650; font-size: 14px; }
+  .tool svg { width: 19px; height: 19px; flex: none; }
+  .tool:hover, .fam:hover, .fx:hover, .seg button:hover, .back:hover { border-color: var(--accent); }
+  .tool.primary { background: var(--accent); border-color: var(--accent); color: #161a0e; }
+  .tool[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+  button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- efeitos ---------- */
+  .dock {
+    position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; display: grid; gap: 7px;
+    padding: 26px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    background: linear-gradient(to top, #07090af2 55%, transparent);
+  }
+  .row { display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; padding: 2px; margin: -2px; }
+  .row::-webkit-scrollbar { display: none; }
+  .fam { flex: none; min-height: 38px; padding: 0 13px; border-radius: 99px; color: var(--muted); font-size: 13px; font-weight: 650; white-space: nowrap; }
+  .fam[aria-pressed="true"] { color: #161a0e; background: var(--accent); border-color: var(--accent); }
+  .fx { flex: none; display: grid; gap: 7px; justify-items: start; min-width: 116px; min-height: 62px; padding: 9px 13px 10px; text-align: left; scroll-snap-align: start; }
+  .fx .name { font-weight: 700; font-size: 14.5px; letter-spacing: -.01em; white-space: nowrap; }
+  .fx[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .fx[aria-pressed="true"] .name { color: var(--accent); }
+  .dots { display: inline-flex; gap: 4px; }
+  .dots i { width: 13px; height: 13px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+
+  /* ---------- ajustes ---------- */
+  #panel {
+    position: fixed; z-index: 21; right: max(12px, env(safe-area-inset-right)); top: 70px; width: min(330px, calc(100vw - 24px));
+    max-height: calc(100vh - 250px); overflow-y: auto; display: grid; gap: 14px; padding: 16px;
+    border: 1px solid var(--line); border-radius: 16px; background: var(--panel);
+    -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+  }
+  #panel h2 { margin: 0 0 7px; color: var(--muted); font: 700 10.5px/1 var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+  .slider { display: grid; grid-template-columns: 96px 1fr 34px; align-items: center; gap: 10px; min-height: 40px; font-size: 14px; }
+  .slider output { color: var(--accent); font: 700 12px var(--mono); text-align: right; }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; margin: 0; background: transparent; }
+  input[type="range"]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: var(--line); }
+  input[type="range"]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--line); }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; margin-top: -9px; border-radius: 50%; border: 0; background: var(--accent); }
+  input[type="range"]::-moz-range-thumb { width: 24px; height: 24px; border-radius: 50%; border: 0; background: var(--accent); }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .seg button { min-height: 44px; padding: 0 8px; font-size: 13.5px; font-weight: 650; }
+  .seg button[aria-pressed="true"] { color: #161a0e; background: var(--accent); border-color: var(--accent); }
+  #palettes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .pal { display: grid; place-items: center; min-height: 44px; padding: 0; border-radius: 10px; }
+  .pal .dots { gap: 2px; }
+  .pal .dots i { width: 11px; height: 11px; box-shadow: none; }
+  .pal .auto { font: 700 10.5px var(--mono); letter-spacing: .06em; color: var(--muted); }
+  .pal[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font-size: 14px; }
+  .switch small { display: block; color: var(--muted); font-size: 12px; }
+  .switch input { -webkit-appearance: none; appearance: none; flex: none; width: 48px; height: 28px; margin: 0; border-radius: 99px; background: var(--line); position: relative; cursor: pointer; transition: background .15s; }
+  .switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--text); transition: transform .15s; }
+  .switch input:checked { background: var(--accent); }
+  .switch input:checked::after { transform: translateX(20px); background: #161a0e; }
+
+  /* ---------- avisos ---------- */
+  #toast {
+    position: fixed; z-index: 30; left: 50%; top: 22%; transform: translate(-50%, 8px); padding: 10px 22px; border-radius: 99px;
+    background: #07090acc; border: 1px solid var(--line); font-size: clamp(20px, 3.4vw, 34px); font-weight: 750; letter-spacing: -.02em;
+    opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; white-space: nowrap;
+  }
+  #toast[data-on] { opacity: 1; transform: translate(-50%, 0); }
+  body.embedded #toast { display: none; }
+  #hint {
+    position: fixed; z-index: 10; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none;
+    color: var(--muted); font-size: clamp(16px, 2.2vw, 22px); transition: opacity .6s;
+  }
+  #hint strong { display: block; color: var(--text); font-size: clamp(26px, 5vw, 52px); letter-spacing: -.03em; line-height: 1.1; margin-bottom: 8px; }
+  #hint[data-off], body.chrome-off #hint { opacity: 0; }
+  #show-ui { position: fixed; z-index: 20; right: 12px; bottom: 12px; opacity: 0; pointer-events: none; }
+  body.chrome-off:not(.embedded) #show-ui { opacity: .55; pointer-events: auto; }
+  #pip { position: fixed; z-index: 15; right: 12px; bottom: 150px; width: 150px; aspect-ratio: 4/3; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+  body.chrome-off #pip { bottom: 12px; }
+  #pip video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  #unsupported { position: fixed; inset: 0; z-index: 40; display: grid; place-content: center; gap: 8px; padding: 24px; text-align: center; background: var(--ink); }
+  #unsupported strong { font-size: 24px; }
+  #unsupported span { color: var(--muted); max-width: 44ch; }
+
+  @media (max-width: 760px) {
+    .tool span { display: none; }
+    .tool { padding: 0; width: 46px; justify-content: center; }
+    .title strong { font-size: 15px; }
+    #panel { left: 12px; right: 12px; width: auto; top: auto; bottom: 150px; max-height: calc(100vh - 230px); }
+    .fx { min-width: 104px; }
+  }
+  @media (max-width: 420px) { .title small { display: none; } #b-full, #b-hide { display: none; } }
+  @media (prefers-reduced-motion: reduce) { .chrome, #toast, #hint { transition: none; } }
+</style>
+<script type="module" src="/installation/drawphysics.mjs"></script>
+</head>
+<body>
+<canvas id="stage" aria-label="Tela de desenho com física"></canvas>
+
+<div id="hint"><strong>Toca e arrasta</strong>Cada efeito responde de maneira diferente ao teu dedo.</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<header class="chrome">
+  <a class="back" href="index.html" aria-label="Voltar">←</a>
+  <div class="title"><small>Draw Physics</small><strong id="fx-name"></strong></div>
+</header>
+
+<nav class="tools chrome" aria-label="Ferramentas">
+  <button class="tool primary" type="button" id="b-surprise">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/></svg>
+    <span>Surpresa</span>
+  </button>
+  <button class="tool" type="button" id="b-clear">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+    <span>Limpar</span>
+  </button>
+  <button class="tool" type="button" id="b-save" aria-label="Guardar imagem">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg>
+    <span>Guardar</span>
+  </button>
+  <button class="tool" type="button" id="b-panel" aria-expanded="false" aria-controls="panel">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+    <span>Ajustes</span>
+  </button>
+  <button class="tool" type="button" id="b-full" aria-label="Ecrã inteiro">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+  </button>
+  <button class="tool" type="button" id="b-hide" aria-label="Esconder o painel">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18M10.6 6.2A9.7 9.7 0 0 1 12 6c5 0 8.5 4 9.5 6a13 13 0 0 1-2.6 3.4M6.5 7.6A13 13 0 0 0 2.5 12c1 2 4.500 6 9.5 6 1.300 0 2.500-.3 3.600-.7"/></svg>
+  </button>
+</nav>
+
+<section id="panel" class="chrome" hidden aria-label="Ajustes do efeito">
+  <div>
+    <h2>Traço</h2>
+    <label class="slider">Tamanho <input id="c-size" type="range" min=".4" max="2.5" step=".1" value="1"><output></output></label>
+    <label class="slider">Duração <input id="c-duration" type="range" min=".3" max="3" step=".1" value="1"><output></output></label>
+    <label class="slider">Redemoinho <input id="c-swirl" type="range" min="0" max="2.5" step=".1" value="1"><output></output></label>
+    <label class="slider">Gravidade <input id="c-gravity" type="range" min="-2" max="2" step=".1" value="1"><output></output></label>
+    <label class="slider">Brilho <input id="c-glow" type="range" min="0" max="2" step=".1" value="1"><output></output></label>
+  </div>
+  <div><h2>Simetria</h2><div class="seg" id="symmetry"></div></div>
+  <div><h2>Cores</h2><div id="palettes"></div></div>
+  <div>
+    <h2>Modos</h2>
+    <label class="switch"><span>Desenhar sozinho<small>Quando ninguém toca, o ecrã não fica parado.</small></span><input id="t-auto" type="checkbox"></label>
+    <label class="switch"><span>Desenhar com as mãos<small>Aponta o dedo à câmara. Fecha a mão para parar.</small></span><input id="t-hands" type="checkbox"></label>
+  </div>
+</section>
+
+<div class="dock chrome">
+  <div class="row" id="families" role="group" aria-label="Famílias de efeitos"></div>
+  <div class="row" id="effects" role="group" aria-label="Efeitos"></div>
+</div>
+
+<button class="tool" type="button" id="show-ui">Mostrar painel</button>
+<div id="pip" hidden><video id="camera" playsinline muted aria-hidden="true"></video></div>
+<div id="unsupported" hidden><strong>Este equipamento não consegue correr o Draw Physics</strong><span>É preciso um navegador com WebGL2 e texturas de vírgula flutuante. Experimenta noutro navegador ou noutro equipamento.</span></div>
+</body>
+</html>

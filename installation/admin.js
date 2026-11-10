@@ -1,4 +1,4 @@
-import { room, roomURL, request, watchState } from "./client.mjs";
+import { room, roomURL, request, watchState, explainIfStatic } from "./client.mjs";
 
 const byId = id => document.getElementById(id);
 const login = byId("login-panel");
@@ -208,4 +208,4 @@ byId("copy-projector").addEventListener("click", async () => {
 
 request("operator").then(({ authenticated }) => {
   if (authenticated) showOperations(false);
-}).catch(() => feedback("login-error", "Não foi possível ligar à instalação."));
+}).catch(() => { feedback("login-error", "Não foi possível ligar à instalação."); explainIfStatic(); });

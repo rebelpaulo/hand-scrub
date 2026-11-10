@@ -16,7 +16,7 @@
   html, body { margin: 0; height: 100%; background: #07080d; overflow: hidden; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: var(--text); }
 
-  canvas#stage { position: fixed; inset: 0; display: block; }
+  canvas#stage { position: fixed; inset: 0; display: block; touch-action: none; }
 
   /* ---------- hint pill ---------- */
   #hint {
@@ -24,7 +24,7 @@
     background: var(--panel); backdrop-filter: blur(10px);
     border: 1px solid var(--line); border-radius: 99px;
     padding: 9px 18px; font-size: 13px; color: var(--text);
-    z-index: 50; white-space: nowrap; pointer-events: none;
+    z-index: 50; pointer-events: none; text-align: center; width: max-content; max-width: calc(100vw - 32px);
   }
 
   /* ---------- camera-fail notice ---------- */
@@ -103,11 +103,15 @@ const $ = id => document.getElementById(id);
 const stage = $("stage"), sctx = stage.getContext("2d");
 const pipVideo = $("pipVideo"), pipCanvas = $("pipCanvas"), pctx = pipCanvas.getContext("2d");
 const notice = $("notice");
+// Halo em WebGL por cima do canvas (ver installation/glow.mjs). Se falhar, o
+// traço volta ao brilho antigo do Canvas 2D (shadowBlur).
+const glow = await import("./installation/glow.mjs").then(m => m.attachGlow(stage, { amount: 1.15 })).catch(() => null);
 
 /* ================= tunables ================= */
 const PINCH_ENTER = 0.35, PINCH_EXIT = 0.5; // histerese: entra apertado, sai largo — sem traços picotados no limiar
 const EMA_ALPHA = 0.4;         // point smoothing
 const MIN_POINT_DIST = 3;      // px, minimum spacing between stored points
+const LOST_GRACE = 180;        // ms sem ver a mão antes de dar o traço por terminado
 const FADE_START = 3000;       // ms, full brightness until here
 const FADE_END = 5000;         // ms, fully faded (and pruned) by here
 const COLOR_A = [0x4d, 0xa6, 0xff]; // #4da6ff electric blue
@@ -186,8 +190,8 @@ resize();
 // upgrade to IoU/position-based hand tracking if that glitch shows up live.
 let strokes = []; // { points: [{x,y,t}], active }
 const handState = [
-  { visible: false, pinching: false, stroke: null, sx: 0, sy: 0, x: 0, y: 0, lm4: null, lm8: null },
-  { visible: false, pinching: false, stroke: null, sx: 0, sy: 0, x: 0, y: 0, lm4: null, lm8: null },
+  { visible: false, pinching: false, stroke: null, sx: 0, sy: 0, x: 0, y: 0, lm4: null, lm8: null, seen: 0 },
+  { visible: false, pinching: false, stroke: null, sx: 0, sy: 0, x: 0, y: 0, lm4: null, lm8: null, seen: 0 },
 ];
 
 /* ================= render loop (always running) ================= */
@@ -218,20 +222,24 @@ function drawStrokes(now) {
     const runs = computeRuns(pts, now);
 
     // pass 1: thick glow, hue interpolated blue -> magenta along the stroke
+    // um degradé do primeiro ao último ponto: enquanto o traço está todo aceso
+    // é um só troço, e a cor a meio do troço dava um violeta uniforme
+    const ink = sctx.createLinearGradient(pts[0].x, pts[0].y, pts[n].x, pts[n].y);
+    ink.addColorStop(0, lerpColor(0)); ink.addColorStop(1, lerpColor(1));
     sctx.globalCompositeOperation = "lighter";
-    sctx.lineWidth = 14; sctx.shadowBlur = 24;
+    const halo = glow?.active;   // se o halo se desligou, volta o brilho do Canvas
+    sctx.lineWidth = halo ? 17 : 14; sctx.shadowBlur = halo ? 0 : 24;
     for (const r of runs) {
       if (r.end - r.start < 1 || r.alpha <= 0) continue;
-      const color = lerpColor(((r.start + r.end) / 2) / (n || 1));
       sctx.globalAlpha = r.alpha;
-      sctx.strokeStyle = color; sctx.shadowColor = color;
+      sctx.strokeStyle = ink; sctx.shadowColor = lerpColor(((r.start + r.end) / 2) / (n || 1));
       tracePath(sctx, pts, r.start, r.end);
       sctx.stroke();
     }
 
     // pass 2: thin hot white core
     sctx.globalCompositeOperation = "source-over";
-    sctx.lineWidth = 4; sctx.shadowBlur = 8; sctx.shadowColor = "#ffffff"; sctx.strokeStyle = "#ffffff";
+    sctx.lineWidth = halo ? 3.2 : 4; sctx.shadowBlur = halo ? 0 : 8; sctx.shadowColor = "#ffffff"; sctx.strokeStyle = "#ffffff";
     for (const r of runs) {
       if (r.end - r.start < 1 || r.alpha <= 0) continue;
       sctx.globalAlpha = r.alpha;
@@ -262,6 +270,7 @@ function renderLoop() {
   drawBackground();
   drawStrokes(now);
   drawCursors();
+  glow?.render();
   requestAnimationFrame(renderLoop);
 }
 requestAnimationFrame(renderLoop);
@@ -273,12 +282,14 @@ function processHands(res, now) {
     const st = handState[i];
     const lm = hands[i];
     if (!lm) {
+      // a deteção falha quadros soltos: só se larga o traço se a mão não voltar
+      if (st.stroke && now - st.seen < LOST_GRACE) continue;
       st.visible = false;
       if (st.stroke) { st.stroke.active = false; st.stroke = null; }
       st.pinching = false; st.lm4 = null; st.lm8 = null;
       continue;
     }
-    st.visible = true;
+    st.visible = true; st.seen = now;
     st.lm4 = lm[4]; st.lm8 = lm[8];
 
     const handSize = dist(lm[0], lm[9]) || 0.0001;
@@ -385,8 +396,7 @@ async function start() {
   try {
     await initModel();
   } catch (e) {
-    showNotice("⚠️ não foi possível carregar o modelo de mãos — verifica a ligação e recarrega");
-    setLoadStatus("falhou — recarrega a página para tentar de novo");
+    touchOnly("⚠️ sem o modelo de mãos — desenha com o dedo ou com o rato");
     window.Palco?.availability("error", "Câmara ou motor indisponível.");
     return;
   }
@@ -405,12 +415,40 @@ async function start() {
     });
     loop();
   } catch (e) {
-    showNotice("📷 câmara indisponível — verifica as permissões");
-    setLoadStatus("falhou — recarrega a página para tentar de novo");
+    touchOnly("📷 sem câmara — desenha com o dedo ou com o rato");
     window.Palco?.availability("error", "Câmara ou motor indisponível.");
   }
 }
 start();
+
+/* ================= toque e rato ================= */
+// O mesmo traço de luz, com o dedo no ecrã ou com o rato: serve o tablet e
+// deixa a experiência utilizável quando não há câmara.
+function touchOnly(msg) {
+  showNotice(msg);
+  $("pipWrap").style.display = "none";
+  $("hint").textContent = "✍️ desenha com o dedo ou com o rato";
+  overlayDismissed = true;
+  $("startOverlay")?.remove();
+}
+const touchStrokes = new Map();
+addEventListener("pointerdown", e => {
+  if (e.target.closest("a, button") || $("startOverlay")) return;
+  const stroke = { points: [{ x: e.clientX, y: e.clientY, t: performance.now() }], active: true };
+  strokes.push(stroke); touchStrokes.set(e.pointerId, stroke);
+});
+addEventListener("pointermove", e => {
+  const stroke = touchStrokes.get(e.pointerId); if (!stroke) return;
+  const batch = e.getCoalescedEvents?.();
+  for (const ev of batch?.length ? batch : [e]) {
+    const last = stroke.points[stroke.points.length - 1];
+    if (!last || Math.hypot(ev.clientX - last.x, ev.clientY - last.y) >= MIN_POINT_DIST) stroke.points.push({ x: ev.clientX, y: ev.clientY, t: performance.now() });
+  }
+});
+for (const type of ["pointerup", "pointercancel"]) addEventListener(type, e => {
+  const stroke = touchStrokes.get(e.pointerId);
+  if (stroke) { stroke.active = false; touchStrokes.delete(e.pointerId); }
+});
 
 /* ================= ponte postMessage (shell de projeção) ================= */
 // PRINCÍPIO (ver display.html/C1): dentro do shell de projeção, o link

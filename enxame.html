@@ -13,7 +13,7 @@
     --hot: #fb7185;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; }  /* o arrasto é do enxame, não do browser */
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: var(--text); }
 
   /* ---------- fullscreen mirrored camera background ---------- */
@@ -33,7 +33,7 @@
     background: var(--panel); backdrop-filter: blur(10px);
     border: 1px solid var(--line); border-radius: 99px;
     padding: 9px 18px; font-size: 13px; color: var(--text);
-    z-index: 50; white-space: nowrap; pointer-events: none;
+    z-index: 50; pointer-events: none; text-align: center; width: max-content; max-width: calc(100vw - 32px);
   }
 
   /* ---------- camera-fail notice ---------- */
@@ -633,6 +633,7 @@ function tintedPersonMask() {
 // (achado P2 do Codex, PR #29).
 const handState = { Left: { pinching: false }, Right: { pinching: false } };
 let pinchPoints = [];
+let touchPoint = null;   // íman do dedo/rato quando não há câmara (ver fim do ficheiro)
 // ARREMESSO: a mão que largou por último + a sua velocidade no instante da
 // largada (px/s) -- lida em stepParticles() quando anyPinch cai a zero. Num
 // double->zero no mesmo frame (ambas as mãos largam no mesmo frame de
@@ -1105,6 +1106,7 @@ function frame(now) {
       processTracking(now);
     }
 
+    if (!running) pinchPoints = touchPoint ? [touchPoint] : [];   // sem câmara: o dedo/rato é o íman
     const dt = clampDt((now - lastPhysT) / 1000, MAX_DT);
     lastPhysT = now;
     stepParticles(dt, now);
@@ -1174,8 +1176,7 @@ async function start() {
   try {
     await initModels();
   } catch (e) {
-    showNotice("⚠️ não foi possível carregar os modelos — verifica a ligação e recarrega");
-    setLoadStatus("falhou — recarrega a página para tentar de novo");
+    touchOnly("⚠️ sem os modelos de tracking — toca e arrasta para atrair o enxame");
     window.Palco?.availability("error", "Câmara ou motor indisponível.");
     return;
   }
@@ -1193,12 +1194,40 @@ async function start() {
       window.Palco?.availability("error", "A câmara desligou-se.");
     });
   } catch (e) {
-    showNotice("📷 câmara indisponível — verifica as permissões");
-    setLoadStatus("falhou — recarrega a página para tentar de novo");
+    touchOnly("📷 sem câmara — toca e arrasta para atrair o enxame");
     window.Palco?.availability("error", "Câmara ou motor indisponível.");
   }
 }
 start();
+
+/* ================= toque e rato (sem câmara) ================= */
+// O dedo no ecrã faz de pinch: carregar atrai, largar solta (com arremesso,
+// pela mesma via da mão). Só conta enquanto a câmara não está a correr.
+function touchOnly(msg) {
+  showNotice(msg);
+  $("hint").textContent = "👆 toca e arrasta para atrair o enxame — larga para o deixar voltar";
+  overlayDismissed = true;
+  $("startOverlay")?.remove();
+}
+addEventListener("pointerdown", e => {
+  if (running || e.target.closest("a, button") || $("startOverlay")) return;
+  const now = performance.now();
+  touchPoint = { x: e.clientX, y: e.clientY, userHand: "Right", since: now, id: e.pointerId, t: now };
+  tornadoSign = HAND_SWIRL.Right;
+});
+addEventListener("pointermove", e => {
+  if (touchPoint?.id !== e.pointerId) return;
+  const now = performance.now();
+  const v = velocityEMAStep(touchPoint.x, touchPoint.y, touchPoint.t, e.clientX, e.clientY, now, touchPoint.vx, touchPoint.vy, VEL_EMA_ALPHA);
+  Object.assign(touchPoint, { x: e.clientX, y: e.clientY, t: now, vx: v.vx, vy: v.vy });
+});
+for (const type of ["pointerup", "pointercancel"]) addEventListener(type, e => {
+  if (touchPoint?.id !== e.pointerId) return;
+  const now = performance.now(), moving = now - touchPoint.t < 100;   // parado antes de largar: solta, não arremessa
+  lastReleaseHand = "Right"; lastReleaseVX = moving && touchPoint.vx || 0; lastReleaseVY = moving && touchPoint.vy || 0;
+  lastReleaseHoldMs = now - touchPoint.since;
+  touchPoint = null;
+});
 
 /* ================= ponte postMessage (shell de projeção) ================= */
 // PRINCÍPIO (ver display.html/C1): dentro do shell de projeção, o link

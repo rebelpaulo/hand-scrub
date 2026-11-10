@@ -1,5 +1,5 @@
 import { EXPERIENCES } from "./catalog.mjs";
-import { room, roomURL, request, watchState } from "./client.mjs";
+import { room, roomURL, request, watchState, explainIfStatic } from "./client.mjs";
 
 const byId = id => document.getElementById(id);
 const gallery = byId("gallery");
@@ -182,7 +182,7 @@ byId("view-session").addEventListener("click", () => {
   const entry = byApp.get(state?.session?.app);
   if (entry) choose(entry);
 });
-watchState(showState, connectionLost);
+watchState(showState, () => { connectionLost(); explainIfStatic(); });
 
 byId("seek").addEventListener("change", async event => {
   const session = state?.session;
