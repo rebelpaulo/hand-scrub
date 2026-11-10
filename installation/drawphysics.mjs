@@ -22,6 +22,7 @@ function setEffect(id, quiet) {
   ui.sync?.();
 }
 
+let clickToDraw = true;   // desligado, o rato desenha só de passar por cima
 const toCanvas = e => { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * S.W, (e.clientY - r.top) / r.height * S.H]; };
 canvas.addEventListener("pointerdown", e => {
   if (!E || e.button > 0) return;
@@ -37,10 +38,12 @@ canvas.addEventListener("pointermove", e => {
   if (!E) return;
   const [x, y] = toCanvas(e);
   if (fingers.get("p" + e.pointerId)?.down) { lastInput = S.time; fingerMove("p" + e.pointerId, x, y); }
-  else if (e.pointerType === "mouse") fingerMove("m" + e.pointerId, x, y, true);
+  else if (e.pointerType !== "mouse") return;
+  else if (clickToDraw) fingerMove("m" + e.pointerId, x, y, true);
+  else { lastInput = S.time; $("hint").dataset.off = "1"; fingers.delete("m" + e.pointerId); fingerDown("p" + e.pointerId, x, y); }
 });
 for (const type of ["pointerup", "pointercancel"]) canvas.addEventListener(type, e => E && fingerUp("p" + e.pointerId));
-canvas.addEventListener("pointerleave", e => fingers?.delete("m" + e.pointerId));
+canvas.addEventListener("pointerleave", e => { if (!E) return; fingers.delete("m" + e.pointerId); if (!clickToDraw) fingerUp("p" + e.pointerId); });
 canvas.addEventListener("contextmenu", e => e.preventDefault());
 
 // Dedo automático: desenha sozinho quando ninguém toca (modo vitrine).
@@ -102,18 +105,33 @@ function toast(text) {
 }
 
 function initUI() {
-  const families = $("families"), list = $("effects"), panel = $("panel");
+  const families = $("families"), list = $("effects"), panel = $("panel"), dock = $("dock"), opener = $("b-dock");
   let family = E.fx.family, shown = null;
   const dots = id => PALETTES[id].c.map(c => `<i style="background:${c}"></i>`).join("");
+  // miniaturas feitas pelo motor: node installation/art/drawphysics/make.mjs
+  const thumb = id => `/installation/art/drawphysics/${id}.webp`;
+
+  // A gaveta dos efeitos sai de cima do desenho mal se escolhe um (ou se começa
+  // a desenhar); o botão "Efeitos" traz-a de volta.
+  ui.dock = open => {
+    if (dock.inert === !open) return;
+    const hadFocus = dock.contains(document.activeElement);
+    dock.inert = !open; opener.hidden = open;
+    document.body.classList.toggle("dock-off", !open);
+    if (open) list.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
+    else if (hadFocus) opener.focus();
+  };
+  opener.addEventListener("click", () => ui.dock(true));
 
   function renderEffects() {
     list.replaceChildren(...EFFECTS.filter(e => e.family === family).map(e => {
       const b = document.createElement("button");
       b.type = "button"; b.className = "fx"; b.dataset.id = e.id;
-      b.innerHTML = `<span class="dots">${dots(e.pal)}</span><span class="name"></span>`;
+      b.innerHTML = `<img alt="" loading="lazy" src="${thumb(e.id)}"><span class="name"></span>`;
+      b.querySelector("img").onerror = ev => ev.target.remove();   // efeito novo ainda sem miniatura: fica só o nome
       b.querySelector(".name").textContent = e.name;
       b.setAttribute("aria-pressed", e === E.fx);
-      b.addEventListener("click", () => setEffect(e.id));
+      b.addEventListener("click", () => { setEffect(e.id); ui.dock(false); });
       return b;
     }));
     if (shown !== family) list.scrollLeft = 0;
@@ -160,10 +178,17 @@ function initUI() {
   $("b-panel").addEventListener("click", () => { panel.hidden = !panel.hidden; $("b-panel").setAttribute("aria-expanded", !panel.hidden); });
   $("b-hide").addEventListener("click", () => document.body.classList.add("chrome-off"));
   $("show-ui").addEventListener("click", () => document.body.classList.remove("chrome-off"));
+  $("t-click").addEventListener("change", e => {
+    clickToDraw = e.target.checked;
+    for (const id of fingers.keys()) if (id[0] === "p") fingerUp(id);   // o traço do outro modo não fica preso
+  });
   $("t-auto").addEventListener("change", e => { ctl.auto = e.target.checked; });
   $("t-hands").addEventListener("change", e => e.target.checked ? startHands() : stopHands());
 
-  ui.collapse = () => { if (!panel.hidden && matchMedia("(max-width: 760px)").matches) { panel.hidden = true; $("b-panel").setAttribute("aria-expanded", "false"); } };
+  ui.collapse = () => {
+    ui.dock(false);
+    if (!panel.hidden && matchMedia("(max-width: 760px)").matches) { panel.hidden = true; $("b-panel").setAttribute("aria-expanded", "false"); }
+  };
   // keepFamily: o separador foi escolhido à mão; senão segue a família do efeito.
   ui.sync = keepFamily => {
     if (!keepFamily) family = E.fx.family;
@@ -173,6 +198,7 @@ function initUI() {
     for (const b of pals.children) b.setAttribute("aria-pressed", (b.dataset.id || null) === ctl.palette);
     $("t-auto").checked = ctl.auto;
     $("fx-name").textContent = E.fx.name;
+    opener.firstElementChild.src = thumb(E.fx.id);
   };
   ui.sync();
 

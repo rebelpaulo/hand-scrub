@@ -42,6 +42,9 @@ test("online server serves offline model and isolates public and operator event 
   await writeFile(join(vendor, ".ready"), "");
   const model = "selfie_multiclass_256x256.tflite";
   await writeFile(join(vendor, model), "model fixture");
+  const thumbs = join(dir, "art", "drawphysics");
+  await mkdir(thumbs, { recursive: true });
+  for (const file of ["fumo-colorido.webp", "make.mjs"]) await writeFile(join(thumbs, file), "thumb fixture");
 
   const password = "test-operator-password";
   const child = spawn(process.execPath, [join(dir, "server.mjs")], {
@@ -61,6 +64,14 @@ test("online server serves offline model and isolates public and operator event 
   const asset = await fetch(origin + "/installation/vendor/" + model);
   assert.equal(asset.status, 200);
   assert.equal(await asset.text(), "model fixture");
+  // miniaturas do Draw Physics: só os .webp da pasta, não o script que as gera
+  const thumb = await fetch(origin + "/installation/art/drawphysics/fumo-colorido.webp");
+  assert.equal(thumb.status, 200);
+  assert.equal(thumb.headers.get("content-type"), "image/webp");
+  await thumb.arrayBuffer();
+  const script = await fetch(origin + "/installation/art/drawphysics/make.mjs");
+  assert.equal(script.status, 404);
+  await script.arrayBuffer();
 
   const post = (path, body, cookie) => fetch(origin + "/api/" + path, {
     method: "POST", body: JSON.stringify(body), headers: cookie ? { cookie } : {},

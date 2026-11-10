@@ -53,22 +53,33 @@
     position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; display: grid; gap: 7px;
     padding: 26px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
     background: linear-gradient(to top, #07090af2 55%, transparent);
+    transition: transform .28s cubic-bezier(.2, .8, .2, 1), visibility 0s;
   }
+  /* escolhido o efeito, a gaveta sai de cima do desenho; #b-dock volta a abri-la */
+  body.dock-off .dock { transform: translateY(100%); visibility: hidden; transition-delay: 0s, .28s; }
+  #b-dock {
+    position: fixed; z-index: 20; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom));
+    min-height: 54px; gap: 10px; padding: 5px 15px 5px 5px;
+  }
+  #b-dock img { width: 70px; height: 44px; border-radius: 8px; object-fit: cover; background: #000; }
   .row { display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; padding: 2px; margin: -2px; }
   .row::-webkit-scrollbar { display: none; }
   .fam { flex: none; min-height: 38px; padding: 0 13px; border-radius: 99px; color: var(--muted); font-size: 13px; font-weight: 650; white-space: nowrap; }
   .fam[aria-pressed="true"] { color: #161a0e; background: var(--accent); border-color: var(--accent); }
-  .fx { flex: none; display: grid; gap: 7px; justify-items: start; min-width: 116px; min-height: 62px; padding: 9px 13px 10px; text-align: left; scroll-snap-align: start; }
-  .fx .name { font-weight: 700; font-size: 14.5px; letter-spacing: -.01em; white-space: nowrap; }
+  .fx { flex: none; position: relative; width: 132px; aspect-ratio: 16 / 10; padding: 0; overflow: hidden; background: #000; scroll-snap-align: start; }
+  .fx img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .fx .name {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 9px 6px; background: linear-gradient(transparent, #000d);
+    font-weight: 700; font-size: 13px; letter-spacing: -.01em; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .fx[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
   .fx[aria-pressed="true"] .name { color: var(--accent); }
   .dots { display: inline-flex; gap: 4px; }
-  .dots i { width: 13px; height: 13px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
 
   /* ---------- ajustes ---------- */
   #panel {
     position: fixed; z-index: 21; right: max(12px, env(safe-area-inset-right)); top: 70px; width: min(330px, calc(100vw - 24px));
-    max-height: calc(100vh - 250px); overflow-y: auto; display: grid; gap: 14px; padding: 16px;
+    max-height: calc(100vh - 270px); overflow-y: auto; display: grid; gap: 14px; padding: 16px;
     border: 1px solid var(--line); border-radius: 16px; background: var(--panel);
     -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
   }
@@ -86,7 +97,7 @@
   #palettes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
   .pal { display: grid; place-items: center; min-height: 44px; padding: 0; border-radius: 10px; }
   .pal .dots { gap: 2px; }
-  .pal .dots i { width: 11px; height: 11px; box-shadow: none; }
+  .pal .dots i { width: 11px; height: 11px; border-radius: 50%; }
   .pal .auto { font: 700 10.5px var(--mono); letter-spacing: .06em; color: var(--muted); }
   .pal[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
   .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font-size: 14px; }
@@ -112,8 +123,8 @@
   #hint[data-off], body.chrome-off #hint { opacity: 0; }
   #show-ui { position: fixed; z-index: 20; right: 12px; bottom: 12px; opacity: 0; pointer-events: none; }
   body.chrome-off:not(.embedded) #show-ui { opacity: .55; pointer-events: auto; }
-  #pip { position: fixed; z-index: 15; right: 12px; bottom: 150px; width: 150px; aspect-ratio: 4/3; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #000; }
-  body.chrome-off #pip { bottom: 12px; }
+  #pip { position: fixed; z-index: 15; right: 12px; bottom: 176px; width: 150px; aspect-ratio: 4/3; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+  body.dock-off #pip, body.chrome-off #pip { bottom: 12px; }
   #pip video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
   #unsupported { position: fixed; inset: 0; z-index: 40; display: grid; place-content: center; gap: 8px; padding: 24px; text-align: center; background: var(--ink); }
   #unsupported strong { font-size: 24px; }
@@ -123,11 +134,15 @@
     .tool span { display: none; }
     .tool { padding: 0; width: 46px; justify-content: center; }
     .title strong { font-size: 15px; }
-    #panel { left: 12px; right: 12px; width: auto; top: auto; bottom: 150px; max-height: calc(100vh - 230px); }
-    .fx { min-width: 104px; }
+    .tool#b-dock { width: auto; padding: 5px 15px 5px 5px; }
+    #b-dock span { display: inline; }
+    #panel { left: 12px; right: 12px; width: auto; top: auto; bottom: 176px; max-height: calc(100vh - 256px); }
+    body.dock-off #panel { bottom: 78px; }
+    .fx { width: 116px; }
   }
   @media (max-width: 420px) { .title small { display: none; } #b-full, #b-hide { display: none; } }
-  @media (prefers-reduced-motion: reduce) { .chrome, #toast, #hint { transition: none; } }
+  @media (hover: none) { #row-click { display: none; } }
+  @media (prefers-reduced-motion: reduce) { .chrome, .dock, #toast, #hint { transition: none; } }
 </style>
 <script type="module" src="/installation/drawphysics.mjs"></script>
 </head>
@@ -180,15 +195,17 @@
   <div><h2>Cores</h2><div id="palettes"></div></div>
   <div>
     <h2>Modos</h2>
+    <label class="switch" id="row-click"><span>Clicar para desenhar<small>Desligado, basta passar o rato por cima.</small></span><input id="t-click" type="checkbox" checked></label>
     <label class="switch"><span>Desenhar sozinho<small>Quando ninguém toca, o ecrã não fica parado.</small></span><input id="t-auto" type="checkbox"></label>
     <label class="switch"><span>Desenhar com as mãos<small>Aponta o dedo à câmara. Fecha a mão para parar.</small></span><input id="t-hands" type="checkbox"></label>
   </div>
 </section>
 
-<div class="dock chrome">
+<div class="dock chrome" id="dock">
   <div class="row" id="families" role="group" aria-label="Famílias de efeitos"></div>
   <div class="row" id="effects" role="group" aria-label="Efeitos"></div>
 </div>
+<button class="tool chrome" type="button" id="b-dock" aria-controls="dock" hidden><img alt=""><span>Efeitos</span></button>
 
 <button class="tool" type="button" id="show-ui">Mostrar painel</button>
 <div id="pip" hidden><video id="camera" playsinline muted aria-hidden="true"></video></div>

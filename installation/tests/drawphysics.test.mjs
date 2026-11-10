@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync } from "node:fs";
 import { EFFECTS, ENGINES, FAMILIES, PALETTES, SYMMETRIES, symmetryPoints } from "../drawphysics-effects.mjs";
 import { EXPERIENCES } from "../catalog.mjs";
 
@@ -13,6 +14,13 @@ test("cada efeito tem id único, família, paleta e pelo menos um motor", () => 
     assert.ok(ENGINES.some(k => e[k]), e.id + ": sem motor");
   }
   for (const f of families) assert.ok(EFFECTS.some(e => e.family === f), f + ": família vazia");
+});
+
+test("cada efeito tem a sua miniatura e não sobra nenhuma", () => {
+  // refazem-se com: node installation/art/drawphysics/make.mjs
+  const files = readdirSync(new URL("../art/drawphysics/", import.meta.url)).filter(f => f.endsWith(".webp")).sort();
+  assert.deepEqual(files, EFFECTS.map(e => e.id + ".webp").sort());
+  for (const e of EFFECTS) assert.match(e.id, /^[a-z-]+$/, e.id + ": o servidor só serve miniaturas com este formato de nome");
 });
 
 test("as paletas têm três cores hexadecimais", () => {
