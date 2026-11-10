@@ -105,11 +105,11 @@ const pipVideo = $("pipVideo"), pipCanvas = $("pipCanvas"), pctx = pipCanvas.get
 const notice = $("notice");
 // Halo em WebGL por cima do canvas (ver installation/glow.mjs). Se falhar, o
 // traço volta ao brilho antigo do Canvas 2D (shadowBlur).
+const { oneEuro } = await import("./installation/smooth.mjs");   // firme com a mão parada, sem atraso quando ela corre
 const glow = await import("./installation/glow.mjs").then(m => m.attachGlow(stage, { amount: 1.15 })).catch(() => null);
 
 /* ================= tunables ================= */
 const PINCH_ENTER = 0.35, PINCH_EXIT = 0.5; // histerese: entra apertado, sai largo — sem traços picotados no limiar
-const EMA_ALPHA = 0.4;         // point smoothing
 const MIN_POINT_DIST = 3;      // px, minimum spacing between stored points
 const LOST_GRACE = 180;        // ms sem ver a mão antes de dar o traço por terminado
 const FADE_START = 3000;       // ms, full brightness until here
@@ -287,6 +287,7 @@ function processHands(res, now) {
       st.visible = false;
       if (st.stroke) { st.stroke.active = false; st.stroke = null; }
       st.pinching = false; st.lm4 = null; st.lm8 = null;
+      st.fx?.reset(); st.fy?.reset();
       continue;
     }
     st.visible = true; st.seen = now;
@@ -296,18 +297,24 @@ function processHands(res, now) {
     const ratio = dist(lm[4], lm[8]) / handSize;
     const isPinch = st.pinching ? ratio < PINCH_EXIT : ratio < PINCH_ENTER;
     const midXn = (lm[4].x + lm[8].x) / 2, midYn = (lm[4].y + lm[8].y) / 2;
-    const rawX = (1 - midXn) * W, rawY = midYn * H; // mirrored to match selfie view
+    // espelhado (vista selfie) e em "cover": a mesma escala nos dois eixos, para
+    // um círculo no ar não sair oval num ecrã 16:9 com câmara 4:3
+    const vw = pipVideo.videoWidth || 4, vh = pipVideo.videoHeight || 3, cover = Math.max(W / vw, H / vh);
+    const rawX = W / 2 + (.5 - midXn) * vw * cover, rawY = H / 2 + (midYn - .5) * vh * cover;
+    // o MediaPipe identifica as mãos pela ordem: quando uma sai, a outra herda o
+    // índice. Um salto destes fecha o traço em vez de riscar o ecrã de lado a lado.
+    const jump = st.pinching && Math.hypot(rawX - st.sx, rawY - st.sy) > Math.hypot(W, H) * .2;
+    st.fx ||= oneEuro(); st.fy ||= oneEuro();
+    if (jump) { st.fx.reset(); st.fy.reset(); }
+    const fx = st.fx(rawX, now / 1000), fy = st.fy(rawY, now / 1000);
 
     if (isPinch) {
-      if (!st.pinching) {
-        // new pinch = new stroke; seed smoothing with the raw point (no lag-in)
-        st.sx = rawX; st.sy = rawY;
+      if (!st.pinching || jump) {
+        if (st.stroke) st.stroke.active = false;
         st.stroke = { points: [], active: true };
         strokes.push(st.stroke);
-      } else {
-        st.sx += (rawX - st.sx) * EMA_ALPHA;
-        st.sy += (rawY - st.sy) * EMA_ALPHA;
       }
+      st.sx = fx; st.sy = fy;
       const pts = st.stroke.points;
       const last = pts[pts.length - 1];
       if (!last || Math.hypot(st.sx - last.x, st.sy - last.y) >= MIN_POINT_DIST) {
@@ -316,7 +323,7 @@ function processHands(res, now) {
       st.x = st.sx; st.y = st.sy;
     } else {
       if (st.pinching && st.stroke) { st.stroke.active = false; st.stroke = null; }
-      st.x = rawX; st.y = rawY;
+      st.x = fx; st.y = fy;
     }
     st.pinching = isPinch;
   }
@@ -433,7 +440,7 @@ function touchOnly(msg) {
 }
 const touchStrokes = new Map();
 addEventListener("pointerdown", e => {
-  if (e.target.closest("a, button") || $("startOverlay")) return;
+  if (e.target.closest?.("a, button") || $("startOverlay")) return;
   const stroke = { points: [{ x: e.clientX, y: e.clientY, t: performance.now() }], active: true };
   strokes.push(stroke); touchStrokes.set(e.pointerId, stroke);
 });
