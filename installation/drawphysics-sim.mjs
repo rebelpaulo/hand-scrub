@@ -153,6 +153,9 @@ export class Particles {
 
 /* ================= Fluido ================= */
 const MONO = { fire: 1, liquid: 1, topo: 1, psy: 1, lava: 1 };
+// Teto de tinta por modo: os que pintam com a cor da paleta ficam abaixo do
+// branco; os que usam a tinta como "temperatura" precisam de margem.
+const CAP = { glow: 1.5, smoke: 1.9, lava: 2.4 };
 export class FluidSys {
   constructor(S, X, c) {
     this.S = S; this.c = { mode: "glow", radius: 1, force: 1, diss: .5, vdiss: .4, curl: 18, amount: 1, ...c };
@@ -166,7 +169,7 @@ export class FluidSys {
     const ax = vp.px / W, ay = 1 - vp.py / H, bx = vp.x / W, by = 1 - vp.y / H;
     const k = c.amount * Math.min(dt, .05) * 8, col = MONO[c.mode] ? WHITE : S.cyc(vp.hue, this.tmp);
     const radius = .03 * c.radius * S.ctl.size;
-    this.fluid.splat(ax, ay, bx, by, (bx - ax) / dt, (by - ay) / dt, [col[0] * k, col[1] * k, col[2] * k], radius, c.force * Math.min(1, dt * 9));
+    this.fluid.splat(ax, ay, bx, by, (bx - ax) / dt, (by - ay) / dt, [col[0] * k, col[1] * k, col[2] * k], radius, c.force * Math.min(1, dt * 9), c.cap || CAP[c.mode] || 3);
     if (c.spin) this.fluid.swirl(bx, by, radius * 2.6, (vp.id % 2 ? -1 : 1) * 26 * c.spin * S.ctl.swirl * dt);
   }
   step(dt) {
@@ -363,9 +366,12 @@ export class BoltSys {
       this.list.push({ pts: bolt(p.x, p.y, p.x + Math.cos(a) * l, p.y + Math.sin(a) * l, .3, 4), w: w * .5, born: S.time, ttl, c: S.pal[1] });
     }
   }
-  step() {
+  step(dt) {
     const { S, c } = this, u = S.u, size = S.ctl.size;
     this.list = this.list.filter(b => S.time - b.born < b.ttl);
+    // com um só dedo, a âncora do arco segue-o devagar: o raio liga a mão ao
+    // sítio por onde ela passou há instantes, em vez de ficar preso ao início
+    for (const v of S.vps) if (v.down && v.ax !== undefined) { const k = 1 - Math.exp(-dt * 1.6); v.ax += (v.x - v.ax) * k; v.ay += (v.y - v.ay) * k; }
     if (S.time < this.next) return;
     this.next = S.time + .045;
     const downs = S.vps.filter(v => v.down);

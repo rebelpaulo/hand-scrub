@@ -928,8 +928,8 @@ async function startExperience() {
     loop();
   } catch (e) {
     err.textContent = "Erro: " + e.message;
-    setLoadStatus("falhou — recarrega a página para tentar de novo");
-    if (window.Palco) enterTouchMode();
+    setLoadStatus("sem câmara — a preparar o controlo por toque");
+    enterTouchMode();
   }
 }
 
@@ -939,7 +939,13 @@ function enterTouchMode() {
   const ready = () => {
     if (player.readyState < 2 || !player.seekable.length) return;
     dismissOverlay();
-    window.Palco.availability("limited", "Usa o controlo de tempo no touchscreen.");
+    window.Palco?.availability("limited", "Usa o controlo de tempo no touchscreen.");
+    if (!window.Palco) {
+      // fora da instalação não há tablet a mandar o tempo: o dedo (ou o rato)
+      // arrastado sobre o vídeo faz de linha do tempo
+      $("bar").hidden = false;
+      toast("👆 sem câmara — arrasta sobre o vídeo para andar no tempo");
+    }
     player.removeEventListener("loadeddata", ready);
     player.removeEventListener("progress", ready);
   };
@@ -1210,20 +1216,30 @@ selectScene(pendingScene);
 cloudLoad();
 startExperience();
 
+/* ================= tempo por toque ================= */
+function seekTo(fraction) {
+  if (!player.seekable.length) return;
+  const position = Math.max(0, Math.min(1, fraction));
+  lastTouchSeek = performance.now();
+  controlledByTouch = true;
+  player.pause();
+  displayedTime = targetTime = trimIn + position * ((trimOut || player.duration) - trimIn);
+  player.currentTime = displayedTime;
+}
+// sem câmara e fora da instalação: arrastar sobre o vídeo percorre o tempo
+let dragSeek = null;
+player.addEventListener("pointerdown", e => { if (touchOnly && !window.Palco) { dragSeek = e.pointerId; seekTo(e.clientX / innerWidth); } });
+addEventListener("pointermove", e => { if (dragSeek === e.pointerId) seekTo(e.clientX / innerWidth); });
+for (const type of ["pointerup", "pointercancel"]) addEventListener(type, e => { if (dragSeek === e.pointerId) dragSeek = null; });
+
 /* ================= ponte postMessage (shell de projeção) ================= */
 if (window.parent !== window) parent.postMessage({ mapping: 1, evt: "ready", launch: new URLSearchParams(location.search).get("launch") }, location.origin);
 window.addEventListener("message", e => {
   if (e.origin !== location.origin || e.data?.mapping !== 1) return;
   if (e.data.cmd === "campreview") pip.setCamPreview(!!e.data.on);
   else if (e.data.cmd === "scene" && Number.isInteger(e.data.i) && SCENES[e.data.i]) selectScene(e.data.i);
-  else if (e.data.cmd === "scrubSeek" && Number.isFinite(e.data.position) && player.seekable.length) {
-    const position = Math.max(0, Math.min(1, e.data.position));
-    lastTouchSeek = performance.now();
-    controlledByTouch = true;
-    player.pause();
-    displayedTime = targetTime = trimIn + position * ((trimOut || player.duration) - trimIn);
-    player.currentTime = displayedTime;
-  } else if (e.data.cmd === "chrome") { chromeOn = !!e.data.on; applyChrome(); }
+  else if (e.data.cmd === "scrubSeek" && Number.isFinite(e.data.position)) seekTo(e.data.position);
+  else if (e.data.cmd === "chrome") { chromeOn = !!e.data.on; applyChrome(); }
   // M1: painel de mapping — reencaminha para os MESMOS handlers do botão/select
   // reais (playBtn.onclick, "change" do #mode), sem duplicar a lógica deles.
   // ALTERNA sempre, em vez de perseguir um estado que o painel julga conhecer

@@ -61,10 +61,10 @@ export const EFFECTS = [
 
   /* ---------- Fogo e energia ---------- */
   { id: "fogo", name: "Fogo", family: "fogo", pal: "fogo",
-    fluid: { mode: "fire", radius: .95, diss: 1.4, vdiss: .5, curl: 30, buoy: 420, amount: 2 },
+    fluid: { mode: "fire", radius: .95, diss: 1.4, vdiss: .5, curl: 30, buoy: 420, amount: 3.2 },
     parts: [part("ember", { rate: 7, size: [2, 4.5], life: [.6, 1.5], speed: 60, grav: -200, wander: 320, glow: 3, color: 0 })] },
   { id: "chama-azul", name: "Chama azul", family: "fogo", pal: "chama",
-    fluid: { mode: "fire", radius: .8, diss: 1.6, vdiss: .5, curl: 24, buoy: 480, amount: 2.1 } },
+    fluid: { mode: "fire", radius: .8, diss: 1.6, vdiss: .5, curl: 24, buoy: 480, amount: 3.2 } },
   { id: "faiscas", name: "Faíscas", family: "fogo", pal: "ouro",
     fluid: { mode: "glow", radius: .6, diss: 3, vdiss: 1, curl: 6, amount: .25 },
     parts: [part("spark", { rate: 70, size: [2, 4], life: [.5, 1.4], speed: 520, follow: .5, grav: 900, drag: .5, bounce: .55, glow: 4, stretch: .016, color: "rand" })] },
@@ -168,7 +168,7 @@ export const EFFECTS = [
     ribbon: { style: "core", width: 27, life: .5 },
     parts: [part("spark", { rate: 34, size: [2, 4], life: [.3, .8], speed: 420, follow: .9, drag: 1.5, glow: 4, stretch: .02, color: "rand" })] },
   { id: "aura", name: "Aura dourada", family: "jogos", pal: "ouro",
-    fluid: { mode: "fire", radius: 1.5, diss: 1.3, vdiss: .5, curl: 22, buoy: 270, amount: 1.5 },
+    fluid: { mode: "fire", radius: 1.5, diss: 1.3, vdiss: .5, curl: 22, buoy: 270, amount: 2.2 },
     parts: [part("spark", { rate: 16, size: [1.6, 3], life: [.5, 1.2], speed: 40, grav: -560, drag: .4, glow: 4, stretch: .02, color: 0 })] },
   { id: "tricolor", name: "Rasto tricolor", family: "jogos", pal: "tricolor",
     ribbon: { style: "tri", width: 24, life: 2.2 } },

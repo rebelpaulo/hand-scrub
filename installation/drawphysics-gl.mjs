@@ -27,13 +27,17 @@ void main(){ o = texture(uTex,vUv)*uScale; }`,
 
   // Junta cor/velocidade ao longo de um segmento (do ponto A ao ponto B), para
   // traços rápidos não ficarem aos soluços.
-  splat: HEAD + `uniform sampler2D uTarget; uniform vec2 uA,uB; uniform float uAspect,uRadius,uMax; uniform vec3 uColor;
+  splat: HEAD + `uniform sampler2D uTarget; uniform vec2 uA,uB; uniform float uAspect,uRadius,uMax,uSoft; uniform vec3 uColor;
 void main(){
   vec2 p=vUv,a=uA,b=uB; p.x*=uAspect; a.x*=uAspect; b.x*=uAspect;
   vec2 ab=b-a; float t=clamp(dot(p-a,ab)/max(dot(ab,ab),1e-9),0.,1.);
   vec2 d=p-(a+ab*t);
   vec3 base=texture(uTarget,vUv).rgb;
-  o=vec4(clamp(base+exp(-dot(d,d)/uRadius)*uColor,-uMax,uMax),1.);
+  vec3 add=exp(-dot(d,d)/uRadius)*uColor;
+  // tinta: quanto mais cheio está o sítio, menos entra — um dedo parado ou a
+  // passar devagar deixa de queimar tudo para branco
+  if(uSoft>0.) add*=clamp(1.-max(base.r,max(base.g,base.b))/uMax,0.,1.);
+  o=vec4(clamp(base+add,-uMax,uMax),1.);
 }`,
 
   // Empurrão em remoinho à volta de um ponto (efeito Vórtice).
@@ -114,7 +118,7 @@ void main(){
     o=vec4(hue*(.28+.85*light)*a*uInten,a*.82); return;
   }
   if(uMode==2){ // fogo: rampa de temperatura
-    vec3 col=ramp(d*.85)*smoothstep(0.,.22,d)*(1.+1.8*smoothstep(.8,1.7,d));
+    vec3 col=ramp(d*1.2)*smoothstep(0.,.22,d)*(1.+1.8*smoothstep(.8,1.7,d));
     col+=vec3(1.,.95,.85)*smoothstep(1.3,2.6,d)*.9;
     o=vec4(col*uInten,0.); return;
   }
@@ -274,7 +278,14 @@ void main(){
 uniform float uBloomAmt,uExposure,uChroma,uGrain,uPixel,uKaleido,uTime,uVignette;
 uniform vec4 uWarp[4]; uniform int uWarpN;
 float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
-vec3 tone(vec3 x){ return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14),0.,1.); }
+// Curva de tons aplicada ao canal mais forte e não a cada canal: as cores
+// saturadas ficam na sua cor em vez de fugirem para branco. Só o muito quente
+// (núcleo do fogo, raios) clareia para branco.
+vec3 tone(vec3 x){
+  float m=max(x.r,max(x.g,x.b)); if(m<1e-5) return vec3(0.);
+  float t=(m*(2.51*m+.03))/(m*(2.43*m+.59)+.14);
+  return clamp(mix(x*(t/m),vec3(t),smoothstep(1.3,5.,m)*.75),0.,1.);
+}
 void main(){
   float asp=uRes.x/uRes.y;
   vec2 uv=vUv;
@@ -303,7 +314,9 @@ void main(){
   vec2 v=vUv-.5;
   col*=1.-uVignette*dot(v,v)*1.5;
   col=pow(col,vec3(1./2.2));
-  col+=(hash(vUv*uRes+fract(uTime)*91.7)-.5)*uGrain;
+  vec2 g=vUv*uRes+fract(uTime)*91.7;
+  col+=(hash(g)-.5)*uGrain;
+  col+=(hash(g+17.3)+hash(g*1.31-9.1)-1.)/255.;   // ruído triangular: sem faixas nos degradés escuros
   o=vec4(col,1.);
 }`,
 };
@@ -577,7 +590,7 @@ export class Fluid {
   clear() { for (const t of [this.vel.read, this.vel.write, this.prs.read, this.prs.write, this.dye.read, this.dye.write]) this.X.clear(t); }
 
   // Coordenadas uv (0..1, y para cima). dvx/dvy: velocidade do dedo em uv/segundo.
-  splat(ax, ay, bx, by, dvx, dvy, color, radius, force) {
+  splat(ax, ay, bx, by, dvx, dvy, color, radius, force, cap = 3) {
     const { X } = this, gl = X.gl;
     X.blend(null);
     let u = X.use("splat");
@@ -585,13 +598,13 @@ export class Fluid {
     gl.uniform1f(u.uAspect, this.aspect);
     gl.uniform1f(u.uRadius, radius * radius);
     if (force) {
-      gl.uniform1f(u.uMax, 2000);
+      gl.uniform1f(u.uMax, 2000); gl.uniform1f(u.uSoft, 0);
       gl.uniform3f(u.uColor, dvx * this.simW * force, dvy * this.simH * force, 0);
       X.tex(0, this.vel.read, u.uTarget);
       X.blit(this.vel.write); this.vel.swap();
     }
     if (color) {
-      gl.uniform1f(u.uMax, 3);
+      gl.uniform1f(u.uMax, cap); gl.uniform1f(u.uSoft, 1);
       gl.uniform3f(u.uColor, color[0], color[1], color[2]);
       X.tex(0, this.dye.read, u.uTarget);
       X.blit(this.dye.write); this.dye.swap();
@@ -670,7 +683,7 @@ export class Field {
     X.blend(null);
     gl.uniform2f(u.uA, ax, ay); gl.uniform2f(u.uB, bx, by);
     gl.uniform1f(u.uAspect, this.aspect); gl.uniform1f(u.uRadius, radius * radius);
-    gl.uniform1f(u.uMax, 4); gl.uniform3f(u.uColor, color[0], color[1], color[2]);
+    gl.uniform1f(u.uMax, 4); gl.uniform1f(u.uSoft, 0); gl.uniform3f(u.uColor, color[0], color[1], color[2]);
     X.tex(0, this.s.read, u.uTarget); X.blit(this.s.write); this.s.swap();
   }
   step(name, set, times = 1) {

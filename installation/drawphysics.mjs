@@ -2,6 +2,7 @@
 // toque, ao painel e, na projeção do Palco de Luz, às mãos na câmara.
 
 import { EFFECTS, FAMILIES, PALETTES, SYMMETRIES, symmetryPoints } from "./drawphysics-effects.mjs";
+import { oneEuro } from "./smooth.mjs";
 import { createGLX, Sprites, Ribbons, Post, STRIDE } from "./drawphysics-gl.mjs";
 import * as Sim from "./drawphysics-sim.mjs";
 
@@ -363,7 +364,8 @@ function initUI() {
 /* ================= mãos (câmara + MediaPipe) ================= */
 const video = $("camera"), pip = $("pip");
 let tracker, stream, handsOn = false, lastVideoTime = -1, reported = false;
-const handState = [{ on: false }, { on: false }];
+const handState = [0, 1].map(() => ({ on: false, seen: 0, fx: oneEuro(), fy: oneEuro() }));
+const LOST_GRACE = 180;   // ms sem ver a mão antes de largar o traço
 
 function report(state, reason) {
   if (reported === state) return;
@@ -413,16 +415,26 @@ function trackHands() {
   requestAnimationFrame(trackHands);
   if (video.readyState < 2 || video.currentTime === lastVideoTime) return;
   lastVideoTime = video.currentTime;
-  const hands = tracker.detectForVideo(video, performance.now()).landmarks || [];
+  const now = performance.now();
+  const hands = tracker.detectForVideo(video, now).landmarks || [];
   report("ready");
   cursorCount = 0;
   for (let i = 0; i < 2; i++) {
     const lm = hands[i], st = handState[i], id = "h" + i;
-    if (!lm) { if (st.on) { fingerUp(id); st.on = false; } fingers.delete(id); continue; }
+    if (!lm) {
+      // a deteção falha quadros soltos: só larga o traço se a mão não voltar
+      if (st.on && now - st.seen < LOST_GRACE) continue;
+      if (st.on) { fingerUp(id); st.on = false; }
+      fingers.delete(id); st.fx.reset(); st.fy.reset();
+      continue;
+    }
+    st.seen = now;
     // Desenha com o indicador esticado; mão fechada pára o traço.
     const ratio = d3(lm[8], lm[0]) / (d3(lm[6], lm[0]) || 1e-4);
     const point = st.on ? ratio > 1.08 : ratio > 1.2;
-    const x = S.W * Math.min(1, Math.max(0, .5 + (.5 - lm[8].x) * 1.3)), y = S.H * Math.min(1, Math.max(0, .5 + (lm[8].y - .5) * 1.3));
+    // filtro One Euro: firme com a mão parada, sem atraso quando ela corre
+    const x = st.fx(S.W * Math.min(1, Math.max(0, .5 + (.5 - lm[8].x) * 1.3)), now / 1000);
+    const y = st.fy(S.H * Math.min(1, Math.max(0, .5 + (lm[8].y - .5) * 1.3)), now / 1000);
     if (point && !st.on) { fingerDown(id, x, y); st.on = true; }
     else if (!point && st.on) { fingerUp(id); st.on = false; }
     if (point) { fingerMove(id, x, y); lastInput = S.time; }
