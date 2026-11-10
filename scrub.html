@@ -27,6 +27,7 @@
   video#player {
     position: fixed; inset: 0; width: 100vw; height: 100vh;
     object-fit: cover; background: #000;
+    touch-action: none;   /* sem câmara arrasta-se sobre o vídeo; o browser não pode roubar o gesto */
   }
 
   /* thin global progress bar */

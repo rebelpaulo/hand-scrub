@@ -13,7 +13,7 @@
     --hot: #fb7185;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; }  /* o arrasto é do enxame, não do browser */
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; color: var(--text); }
 
   /* ---------- fullscreen mirrored camera background ---------- */
@@ -1223,8 +1223,9 @@ addEventListener("pointermove", e => {
 });
 for (const type of ["pointerup", "pointercancel"]) addEventListener(type, e => {
   if (touchPoint?.id !== e.pointerId) return;
-  lastReleaseHand = "Right"; lastReleaseVX = touchPoint.vx || 0; lastReleaseVY = touchPoint.vy || 0;
-  lastReleaseHoldMs = performance.now() - touchPoint.since;
+  const now = performance.now(), moving = now - touchPoint.t < 100;   // parado antes de largar: solta, não arremessa
+  lastReleaseHand = "Right"; lastReleaseVX = moving && touchPoint.vx || 0; lastReleaseVY = moving && touchPoint.vy || 0;
+  lastReleaseHoldMs = now - touchPoint.since;
   touchPoint = null;
 });
 

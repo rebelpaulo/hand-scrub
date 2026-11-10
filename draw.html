@@ -227,7 +227,8 @@ function drawStrokes(now) {
     const ink = sctx.createLinearGradient(pts[0].x, pts[0].y, pts[n].x, pts[n].y);
     ink.addColorStop(0, lerpColor(0)); ink.addColorStop(1, lerpColor(1));
     sctx.globalCompositeOperation = "lighter";
-    sctx.lineWidth = glow ? 17 : 14; sctx.shadowBlur = glow ? 0 : 24;
+    const halo = glow?.active;   // se o halo se desligou, volta o brilho do Canvas
+    sctx.lineWidth = halo ? 17 : 14; sctx.shadowBlur = halo ? 0 : 24;
     for (const r of runs) {
       if (r.end - r.start < 1 || r.alpha <= 0) continue;
       sctx.globalAlpha = r.alpha;
@@ -238,7 +239,7 @@ function drawStrokes(now) {
 
     // pass 2: thin hot white core
     sctx.globalCompositeOperation = "source-over";
-    sctx.lineWidth = glow ? 3.2 : 4; sctx.shadowBlur = glow ? 0 : 8; sctx.shadowColor = "#ffffff"; sctx.strokeStyle = "#ffffff";
+    sctx.lineWidth = halo ? 3.2 : 4; sctx.shadowBlur = halo ? 0 : 8; sctx.shadowColor = "#ffffff"; sctx.strokeStyle = "#ffffff";
     for (const r of runs) {
       if (r.end - r.start < 1 || r.alpha <= 0) continue;
       sctx.globalAlpha = r.alpha;

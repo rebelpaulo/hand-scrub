@@ -137,6 +137,7 @@ export function attachGlow(source, { amount = 1, threshold = .12, knee = .1, lev
   return {
     canvas,
     set amount(v) { amount = v; },
+    get active() { return !off; },   // falso depois de se desligar: quem usa volta ao seu próprio brilho
     render() {
       if (off || !source.width || !source.height) return;
       // Salvaguarda para o PC do evento: se os quadros passam de ~28 ms durante
