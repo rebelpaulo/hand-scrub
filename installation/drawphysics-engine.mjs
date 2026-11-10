@@ -23,8 +23,9 @@ function hue(h, out) {   // arco-íris em cores lineares
   return out;
 }
 
-export function createEngine(canvas, ctlInit) {
-  const X = createGLX(canvas);
+// alpha: canvas transparente, para pôr por cima de outra imagem (ver post.key).
+export function createEngine(canvas, ctlInit, alpha) {
+  const X = createGLX(canvas, alpha);
   if (!X) return null;
   const ctl = { size: 1, duration: 1, swirl: 1, gravity: 1, glow: 1, sym: "none", palette: null, ...ctlInit };
 
@@ -198,7 +199,7 @@ export function createEngine(canvas, ctlInit) {
     for (const s of systems) s.draw?.(G);
     if (E.cursorCount) { X.bind(post.scene); sprites.draw(E.cursors, E.cursorCount, "ring", true, G.W, G.H); }
     post.end({ bloom: P.bloom * ctl.glow, exposure: P.exposure, chroma: P.chroma, grain: P.grain, pixel: P.pixel * Math.max(1, S.u * 1.4),
-      kaleido: P.kaleido, time: S.time, vignette: P.vignette, warp: S.warp });
+      kaleido: P.kaleido, time: S.time, vignette: P.vignette, warp: S.warp, key: P.key });
   }
 
   return Object.assign(E, { fingers, setEffect, clearAll, dropStrokes, applyPalette, fingerDown, fingerMove, fingerUp, frame });
