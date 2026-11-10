@@ -170,8 +170,12 @@ requer loopback ou HTTPS.
 - `installation/smooth.mjs` — filtro One Euro para pontos do tracking (firme
   com a mão parada, sem atraso em movimento). Usado no Draw Physics e no
   Pinch Draw.
+- `installation/polarity.mjs` — Sala de Sombras: decide se a máscara de pessoa
+  vem ao contrário. Só inverte com 3 cantos cheios e o centro vazio durante
+  4 s; tapar um canto da imagem já não deixa a sala às escuras.
 - **Sem câmara** (ou fora da instalação): Pinch Draw desenha com o dedo ou o
-  rato, o Enxame segue o dedo, o Butterfly Effect percorre o vídeo ao
+  rato, o Enxame segue o dedo, o Motion Lab mostra um fundo de luzes e a caixa
+  desenha-se a arrastar o dedo, o Butterfly Effect percorre o vídeo ao
   arrastar, as Mãos de Fogo e os Raios têm demonstração, e o Draw Physics
   funciona por toque. Num alojamento só de ficheiros (ex.: Vercel), o quiosque
   e a área da equipa explicam que precisam do servidor e apontam para a home.

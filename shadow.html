@@ -191,6 +191,7 @@
   <div id="toast"></div>
 
 <script type="module">
+import { polarityVote, polarityGate } from "./installation/polarity.mjs";
 const $ = id => document.getElementById(id);
 const stage = $("stage");
 const cam = $("cam"), overlay = $("overlay"), octx = overlay.getContext("2d");
@@ -481,6 +482,7 @@ let invertMask = false;
 let manualMaskOverride = false;  // depois de "i", para de reajustar sozinho
 let lastPolarityCheck = 0;
 const POLARITY_PATCH = 16;
+const polarity = polarityGate();
 
 /* A silhueta é um GOBO na própria luz (SpotLight.map, como um slide num
    projetor): branco deixa a luz passar, preto é a tua sombra. A sombra fica
@@ -506,22 +508,21 @@ function patchPersonDensity(data, w, h, x0, y0) {
 
 function checkMaskPolarity(data, w, h, now) {
   if (manualMaskOverride) return; // o "i" manual manda a partir daí
-  if (now - lastPolarityCheck < 2000) return;
+  if (now - lastPolarityCheck < 1000) return;
   lastPolarityCheck = now;
 
-  const cornerAvg = (
-    patchPersonDensity(data, w, h, 0, 0) +
-    patchPersonDensity(data, w, h, w - POLARITY_PATCH, 0) +
-    patchPersonDensity(data, w, h, 0, h - POLARITY_PATCH) +
-    patchPersonDensity(data, w, h, w - POLARITY_PATCH, h - POLARITY_PATCH)
-  ) / 4;
+  const corners = [
+    patchPersonDensity(data, w, h, 0, 0),
+    patchPersonDensity(data, w, h, w - POLARITY_PATCH, 0),
+    patchPersonDensity(data, w, h, 0, h - POLARITY_PATCH),
+    patchPersonDensity(data, w, h, w - POLARITY_PATCH, h - POLARITY_PATCH),
+  ];
   const bottomCenter = patchPersonDensity(data, w, h, Math.floor(w / 2 - POLARITY_PATCH / 2), h - POLARITY_PATCH);
 
-  // esperado: a pessoa domina o centro-inferior e é rara nos 4 cantos;
-  // se estiver ao contrário, a polaridade da máscara está invertida.
-  if (cornerAvg > bottomCenter + 0.15) invertMask = true;
-  else if (bottomCenter > cornerAvg + 0.15) invertMask = false;
-  // zona ambígua: mantém o estado anterior para não oscilar
+  // esperado: a pessoa domina o centro-inferior e é rara nos cantos. Só troca
+  // com 3 cantos ao contrário e durante 4 s seguidos: alguém a tapar um canto
+  // de baixo deixava a sala às escuras (ver installation/polarity.mjs).
+  invertMask = polarity(polarityVote(corners, bottomCenter));
 }
 
 function paintMask(result) {

@@ -982,6 +982,11 @@ const ROOM = ((new URLSearchParams(location.search).get("room") || "default").re
 const CLIENT_ID = Math.random().toString(36).slice(2, 10); // 8 chars
 let seq = 0;
 
+// O desenho que a parede tinha quando este painel abriu, à espera de o eco
+// estar dimensionado (ver adoptWallInk). Qualquer mexida no desenho, daqui ou
+// de outro painel, torna-o velho.
+let wallInk = null;
+const INK_CHANGES = new Set(["tstroke", "undo", "redo", "clear", "fill"]);
 const bc = (window.Palco?.channel("magicdraw:" + ROOM) ?? new BroadcastChannel("magicdraw:" + ROOM));
 bc.onmessage = e => onMsg(e.data);
 if (window.Palco) bc.onopen = () => {
@@ -1140,6 +1145,13 @@ function onMsg(msg) {
     renderBrushes(); renderColors(); renderSizes(); renderMirrors(); renderPreview();
   }
   if (msg.kind === "dstate") hasPhoto = !!msg.hasPhoto; // resposta do display ao 'hello' OU ao 'photo' (aceite/recusado) — única fonte de verdade
+  if (INK_CHANGES.has(msg.kind)) wallInk = null;
+  // painel recarregado: a parede manda o desenho que lá está (ver adoptWallInk)
+  if (msg.kind === "dstate" && typeof msg.ink === "string" && msg.ink.startsWith("data:image/")) {
+    const im = new Image();
+    im.onload = () => { wallInk = im; adoptWallInk(); };
+    im.src = msg.ink;
+  }
   // FEATURE B2: o display envia a foto tirada (dataURL JPEG reduzido) para o
   // eco do modo Desenhar deixar de ser "às cegas" — validação de forma antes
   // de decodificar (canal público, mesmo padrão do resto deste handler)
@@ -1184,6 +1196,7 @@ function refreshZoneViews() {
 }
 
 function send(payload) {
+  if (INK_CHANGES.has(payload.kind)) wallInk = null;
   const msg = { v: 1, src: CLIENT_ID, seq: seq++, ...payload };
   bc.postMessage(msg);
   sbChannel?.send({ type: "broadcast", event: "msg", payload: msg });
@@ -3525,6 +3538,19 @@ function restoreEcho(c) {
   sectx.restore();
   compositeEcho();
 }
+// Só entra num eco ainda por estrear: depois do primeiro traço daqui, o eco é que manda.
+function adoptWallInk() {
+  if (!wallInk || !strokeEcho.width) return;   // eco por dimensionar: fica à espera do sizeDrawCanvas
+  if (!echoUndo.length && !echoRedo.length && !tabletStrokesLocal.size) {
+    sectx.save();
+    sectx.setTransform(1, 0, 0, 1, 0, 0);
+    sectx.clearRect(0, 0, strokeEcho.width, strokeEcho.height);
+    sectx.drawImage(wallInk, 0, 0, strokeEcho.width, strokeEcho.height);
+    sectx.restore();
+    compositeEcho();
+  }
+  wallInk = null;
+}
 function pushEchoHistory() { // chamado ANTES de cada operação (traço/limpar): 1 passo desfazível
   echoUndo.push(snapshotEcho());
   if (echoUndo.length > ECHO_HISTORY_MAX) echoUndo.shift();
@@ -3539,6 +3565,7 @@ function sizeDrawCanvas() {
   const dpr = window.devicePixelRatio || 1;
   if (dCanvas.width === Math.floor(cw * dpr) && dCanvas.height === Math.floor(ch * dpr)) {
     rebuildDrawMask(); compositeEcho(); // mesmo tamanho (reabrir o ecrã): o desenho e o histórico ficam
+    adoptWallInk();
     return;
   }
   // rodar o tablet não apaga o desenho: copia-se o eco e volta a desenhar-se à nova escala
@@ -3563,6 +3590,7 @@ function sizeDrawCanvas() {
   // o histórico fica: restoreEcho() já reamplia cada passo às dimensões atuais
   rebuildDrawMask(); // resize: recalcula o recorte para o novo tamanho
   compositeEcho();
+  adoptWallInk();
 }
 window.addEventListener("resize", () => { if (drawScreenOpen) sizeDrawCanvas(); });
 
@@ -3895,7 +3923,7 @@ if (window.Palco) {
       if (wallBusy && !drawScreen.classList.contains("wall-busy")) {
         tabletStrokesLocal.clear();
         sectx.save(); sectx.setTransform(1, 0, 0, 1, 0, 0); sectx.clearRect(0, 0, strokeEcho.width, strokeEcho.height); sectx.restore();
-        echoUndo = []; echoRedo = [];
+        echoUndo = []; echoRedo = []; wallInk = null;
         compositeEcho();
       }
       drawScreen.classList.toggle("wall-busy", wallBusy);
