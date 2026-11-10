@@ -543,6 +543,8 @@
   #drawSizes button.on { border-color: var(--neon); background: #0f2b26; box-shadow: 0 0 0 3px #00ffcc33; }
   #drawCanvasWrap { grid-column: 2; grid-row: 2; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 6px; }
   canvas#drawCanvasT { display: block; border-radius: 8px; touch-action: none; background: #000; }
+  /* a projeção está a (re)carregar: o canvas espera por ela */
+  .wall-busy canvas#drawCanvasT { pointer-events: none; opacity: .35; }
   #drawBottom {
     grid-column: 1 / 3; grid-row: 3; display: flex; gap: 8px; padding: 8px;
     background: #0c0e14cc; border-top: 1px solid var(--line);
@@ -1129,6 +1131,13 @@ function onMsg(msg) {
   if (msg.kind === "clear" && (!msg.scope || msg.scope === "all")) {
     hasPhoto = false;
     clearLocalPhoto();
+  }
+  // painel acabado de abrir (ainda sem nenhuma escolha humana): adota o pincel
+  // que a parede está a usar, em vez de mostrar o pincel por omissão
+  if (msg.kind === "dstate" && stateRev === 0 && msg.rev > 0 && msg.state && typeof msg.state.tool === "string") {
+    for (const key of ["tool", "color", "size", "mirror"]) if (typeof msg.state[key] === typeof state[key]) state[key] = msg.state[key];
+    stateRev = msg.rev;
+    renderBrushes(); renderColors(); renderSizes(); renderMirrors(); renderPreview();
   }
   if (msg.kind === "dstate") hasPhoto = !!msg.hasPhoto; // resposta do display ao 'hello' OU ao 'photo' (aceite/recusado) — única fonte de verdade
   // FEATURE B2: o display envia a foto tirada (dataURL JPEG reduzido) para o
@@ -3528,6 +3537,17 @@ function sizeDrawCanvas() {
   let cw = wrap.clientWidth, ch = cw * 9 / 16;
   if (ch > wrap.clientHeight) { ch = wrap.clientHeight; cw = ch * 16 / 9; }
   const dpr = window.devicePixelRatio || 1;
+  if (dCanvas.width === Math.floor(cw * dpr) && dCanvas.height === Math.floor(ch * dpr)) {
+    rebuildDrawMask(); compositeEcho(); // mesmo tamanho (reabrir o ecrã): o desenho e o histórico ficam
+    return;
+  }
+  // rodar o tablet não apaga o desenho: copia-se o eco e volta a desenhar-se à nova escala
+  let kept = null;
+  if (strokeEcho.width && strokeEcho.height) {
+    kept = document.createElement("canvas");
+    kept.width = strokeEcho.width; kept.height = strokeEcho.height;
+    kept.getContext("2d").drawImage(strokeEcho, 0, 0);
+  }
   dCanvas.style.width = cw + "px"; dCanvas.style.height = ch + "px";
   dCanvas.width = cw * dpr; dCanvas.height = ch * dpr;
   dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -3539,7 +3559,8 @@ function sizeDrawCanvas() {
   // dispositivo do strokeEcho — têm de bater byte-a-byte no blit de compositeEcho()
   drawMask.width = cw * dpr; drawMask.height = ch * dpr;
   inkScratch.width = cw * dpr; inkScratch.height = ch * dpr;
-  echoUndo = []; echoRedo = [];
+  if (kept) { sectx.save(); sectx.setTransform(1, 0, 0, 1, 0, 0); sectx.drawImage(kept, 0, 0, strokeEcho.width, strokeEcho.height); sectx.restore(); }
+  // o histórico fica: restoreEcho() já reamplia cada passo às dimensões atuais
   rebuildDrawMask(); // resize: recalcula o recorte para o novo tamanho
   compositeEcho();
 }
@@ -3615,6 +3636,24 @@ drawClearBtnEl.onclick = () => {
 /* ---- eco local simplificado: mesma família de 8 pincéis, um segmento de
    cada vez (sem o path contínuo/mandala do display — aproximado de propósito) ---- */
 function echoSegment(s, A, B) {
+  const { tool, size } = s.brush, len = Math.hypot(B.x - A.x, B.y - A.y);
+  // o que acontece UMA vez por segmento (não por cópia da simetria)
+  if (tool === "stamp") {
+    s.distSinceStamp += len;
+    if (s.distSinceStamp < size * 1.8) return;
+    s.distSinceStamp = 0;
+    s.emoji = STAMP_EMOJIS_TABLET[(s.brush.seed + s.stamps++) % STAMP_EMOJIS_TABLET.length]; // mesma sequência da parede
+  }
+  if (tool === "rainbow") s.hue = (s.hue + len * 0.4) % 360;
+  // simetria: as mesmas N cópias rodadas em torno do centro que a parede desenha
+  const n = s.brush.mirror > 0 ? s.brush.mirror : 1, cx = dCanvas.clientWidth / 2, cy = dCanvas.clientHeight / 2;
+  for (let k = 0; k < n; k++) {
+    const ang = k * 2 * Math.PI / n, cos = Math.cos(ang), sin = Math.sin(ang);
+    const rot = p => k ? { x: cx + (p.x - cx) * cos - (p.y - cy) * sin, y: cy + (p.x - cx) * sin + (p.y - cy) * cos } : p;
+    echoCopy(s, rot(A), rot(B));
+  }
+}
+function echoCopy(s, A, B) {
   const { tool, color, size } = s.brush;
   sectx.lineCap = "round"; sectx.lineJoin = "round"; sectx.shadowBlur = 0; sectx.globalAlpha = 1;
   sectx.globalCompositeOperation = "source-over";
@@ -3622,7 +3661,7 @@ function echoSegment(s, A, B) {
     // destination-out na CAMADA DE TRAÇOS apenas — apaga o desenho e revela a
     // imagem de fundo por baixo, sem furar até ao preto
     sectx.globalCompositeOperation = "destination-out";
-    sectx.lineWidth = size * 2;
+    sectx.lineWidth = size * 2.5; // mesma largura da borracha na parede
     sectx.beginPath(); sectx.moveTo(A.x, A.y); sectx.lineTo(B.x, B.y); sectx.stroke();
     sectx.globalCompositeOperation = "source-over";
     return;
@@ -3636,17 +3675,12 @@ function echoSegment(s, A, B) {
     return;
   }
   if (tool === "stamp") {
-    s.distSinceStamp += Math.hypot(B.x - A.x, B.y - A.y);
-    if (s.distSinceStamp < size * 1.8) return;
-    s.distSinceStamp = 0;
-    if (!s.emoji || Math.random() < 0.5) s.emoji = STAMP_EMOJIS_TABLET[Math.random() * STAMP_EMOJIS_TABLET.length | 0];
     sectx.font = `${Math.round(size * 2)}px serif`; sectx.textAlign = "center"; sectx.textBaseline = "middle";
     sectx.fillText(s.emoji, B.x, B.y);
     return;
   }
   sectx.beginPath(); sectx.moveTo(A.x, A.y); sectx.lineTo(B.x, B.y);
   if (tool === "rainbow") {
-    s.hue = (s.hue + Math.hypot(B.x - A.x, B.y - A.y) * 0.4) % 360;
     sectx.strokeStyle = `hsl(${s.hue.toFixed(1)},100%,60%)`; sectx.lineWidth = size;
     sectx.shadowColor = "#fff"; sectx.shadowBlur = 6;
   } else if (tool === "neon") {
@@ -3755,9 +3789,12 @@ dCanvas.addEventListener("pointerdown", e => {
     return;
   }
   const sid = Math.random().toString(36).slice(2, 10);
-  const brush = { tool: state.tool, color: state.color, size: state.size, mirror: state.mirror };
+  // cw (largura deste canvas), hue e seed vão com o pincel para a parede desenhar
+  // à mesma escala, com o mesmo arco-íris e a mesma sequência de carimbos
+  const brush = { tool: state.tool, color: state.color, size: state.size, mirror: state.mirror,
+    cw: Math.round(dCanvas.clientWidth), hue: Math.round(Math.random() * 360), seed: Math.random() * 1e6 | 0 };
   pushEchoHistory(); // 1 passo de undo POR traço (cada dedo) — alinha com o display, que assa/empilha por tstroke
-  tabletStrokesLocal.set(e.pointerId, { sid, brush, lastPt: { x: px, y: py }, hue: Math.random() * 360, distSinceStamp: 0, emoji: null, pending: [], timer: null });
+  tabletStrokesLocal.set(e.pointerId, { sid, brush, lastPt: { x: px, y: py }, hue: brush.hue, distSinceStamp: 0, stamps: 0, emoji: null, pending: [], timer: null });
   send({ kind: "tstroke", sid, phase: "start", pts: [[r4(nx), r4(ny)]], brush }); // brush SEMPRE no 'start' — o display congela-o por traço
 });
 dCanvas.addEventListener("pointermove", e => {
@@ -3777,7 +3814,7 @@ dCanvas.addEventListener("pointermove", e => {
   if (!s.timer) {
     s.timer = setTimeout(() => {
       s.timer = null;
-      if (s.pending.length) { send({ kind: "tstroke", sid: s.sid, phase: "move", pts: s.pending }); s.pending = []; }
+      if (s.pending.length) { send({ kind: "tstroke", sid: s.sid, phase: "move", pts: s.pending, brush: s.brush }); s.pending = []; }
     }, TSTROKE_THROTTLE_MS);
   }
 });
@@ -3851,6 +3888,17 @@ if (window.Palco) {
       if (session?.id !== sessionId) { goToKiosk(); return; }
       if (!opened) { opened = true; $("drawModeBtn").click(); }
       finish.hidden = session.operator;
+      // a projeção (re)carrega: o servidor recusa os traços até ela estar pronta e a
+      // parede recomeça vazia. O tablet limpa o eco e espera, em vez de continuar
+      // a desenhar sobre um desenho que já não existe.
+      const wallBusy = !["ready", "limited"].includes(session.status);
+      if (wallBusy && !drawScreen.classList.contains("wall-busy")) {
+        tabletStrokesLocal.clear();
+        sectx.save(); sectx.setTransform(1, 0, 0, 1, 0, 0); sectx.clearRect(0, 0, strokeEcho.width, strokeEcho.height); sectx.restore();
+        echoUndo = []; echoRedo = [];
+        compositeEcho();
+      }
+      drawScreen.classList.toggle("wall-busy", wallBusy);
     });
     window.addEventListener("pagehide", stopWatching, { once: true });
     finish.onclick = async () => {
