@@ -985,7 +985,8 @@ let seq = 0;
 // O desenho que a parede tinha quando este painel abriu, à espera de o eco
 // estar dimensionado (ver adoptWallInk). Qualquer mexida no desenho, daqui ou
 // de outro painel, torna-o velho.
-let wallInk = null;
+let wallInk = null, inkGen = 0;   // inkGen: uma imagem ainda a descodificar também fica velha
+const dropWallInk = () => { inkGen++; wallInk = null; };
 const INK_CHANGES = new Set(["tstroke", "undo", "redo", "clear", "fill"]);
 const bc = (window.Palco?.channel("magicdraw:" + ROOM) ?? new BroadcastChannel("magicdraw:" + ROOM));
 bc.onmessage = e => onMsg(e.data);
@@ -1145,11 +1146,11 @@ function onMsg(msg) {
     renderBrushes(); renderColors(); renderSizes(); renderMirrors(); renderPreview();
   }
   if (msg.kind === "dstate") hasPhoto = !!msg.hasPhoto; // resposta do display ao 'hello' OU ao 'photo' (aceite/recusado) — única fonte de verdade
-  if (INK_CHANGES.has(msg.kind)) wallInk = null;
+  if (INK_CHANGES.has(msg.kind)) dropWallInk();
   // painel recarregado: a parede manda o desenho que lá está (ver adoptWallInk)
   if (msg.kind === "dstate" && typeof msg.ink === "string" && msg.ink.startsWith("data:image/")) {
-    const im = new Image();
-    im.onload = () => { wallInk = im; adoptWallInk(); };
+    const im = new Image(), gen = ++inkGen;   // a resposta mais recente ganha
+    im.onload = () => { if (gen === inkGen) { wallInk = im; adoptWallInk(); } };
     im.src = msg.ink;
   }
   // FEATURE B2: o display envia a foto tirada (dataURL JPEG reduzido) para o
@@ -1196,7 +1197,7 @@ function refreshZoneViews() {
 }
 
 function send(payload) {
-  if (INK_CHANGES.has(payload.kind)) wallInk = null;
+  if (INK_CHANGES.has(payload.kind)) dropWallInk();
   const msg = { v: 1, src: CLIENT_ID, seq: seq++, ...payload };
   bc.postMessage(msg);
   sbChannel?.send({ type: "broadcast", event: "msg", payload: msg });
@@ -3923,7 +3924,7 @@ if (window.Palco) {
       if (wallBusy && !drawScreen.classList.contains("wall-busy")) {
         tabletStrokesLocal.clear();
         sectx.save(); sectx.setTransform(1, 0, 0, 1, 0, 0); sectx.clearRect(0, 0, strokeEcho.width, strokeEcho.height); sectx.restore();
-        echoUndo = []; echoRedo = []; wallInk = null;
+        echoUndo = []; echoRedo = []; dropWallInk();
         compositeEcho();
       }
       drawScreen.classList.toggle("wall-busy", wallBusy);
