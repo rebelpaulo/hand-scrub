@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSnapDetector, visibleFingertips, electricConnections, createFireActivation } from "../elements-gestures.mjs";
+import { createSnapDetector, visibleFingertips, electricConnections, createFireActivation, nearestHand } from "../elements-gestures.mjs";
 
 const point = (x, y, z = 0) => ({ x, y, z });
 const hand = () => {
@@ -115,4 +115,15 @@ test("connections persist when visible hands move far apart", () => {
   const left = { id: "Left", points: shrink(openHand(), .3, .1), tips: [4, 8, 12, 16, 20] };
   const right = { id: "Right", points: shrink(openHand(1), .7, .9), tips: [4, 8, 12, 16, 20] };
   assert.equal(electricConnections([left, right]).length, 5);
+});
+
+test("as mãos seguem-se pela posição: cada deteção fica com a mão mais próxima, e uma segunda mão é nova", () => {
+  const at = x => ({ points: Object.assign([], { 9: point(x, .5) }) });
+  const hands = new Map([["a", at(.2)], ["b", at(.8)]]);
+  const taken = new Set();
+  assert.equal(nearestHand(hands, point(.75, .52), taken), "b");
+  taken.add("b");
+  assert.equal(nearestHand(hands, point(.26, .48), taken), "a");
+  assert.equal(nearestHand(hands, point(.78, .5), taken), undefined, "a mão b já tem dona e a outra está longe");
+  assert.equal(nearestHand(new Map([["novo", {}]]), point(.5, .5), new Set()), undefined, "mão ainda sem pontos");
 });

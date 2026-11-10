@@ -4,6 +4,20 @@ const palmScale = points => Math.max(distance(points[0], points[9]), distance(po
 export const FINGERTIPS = [4, 8, 12, 16, 20];
 export const TRACKING_GRACE_MS = 200;
 
+// A mão já seguida mais próxima de uma deteção (pela base do dedo médio, em
+// coordenadas da imagem). O modelo troca a etiqueta Esquerda/Direita a meio e
+// chega a dar a mesma às duas mãos: seguir pela etiqueta apagava o fogo a cada
+// troca e deixava a segunda mão de fora.
+export function nearestHand(hands, point, taken, reach = .3) {
+  let id, best = reach;
+  for (const [key, hand] of hands) {
+    if (taken.has(key) || !hand.points) continue;
+    const gap = screenDistance(hand.points[9], point);
+    if (gap < best) { best = gap; id = key; }
+  }
+  return id;
+}
+
 export function createSnapDetector() {
   let chargedAt, lastContact, loaded, lastTime, lockedUntil = 0;
   return (points, time) => {
