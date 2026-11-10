@@ -1,6 +1,7 @@
 import { createFireActivation, visibleFingertips, electricConnections, TRACKING_GRACE_MS } from "./elements-gestures.mjs";
 import { createElementEffects } from "./elements-fx.mjs";
 import { roomURL } from "./client.mjs";
+import { attachGlow } from "./glow.mjs";
 
 const video = document.querySelector("#camera");
 const canvas = document.querySelector("#effects");
@@ -12,6 +13,7 @@ const reduced = matchMedia("(prefers-reduced-motion: reduce)");
 const embedded = parent !== window;
 const mode = document.body.dataset.effect === "electric" ? "electric" : "fire";
 const effects = createElementEffects(canvas, reduced);
+const glow = attachGlow(canvas, { amount: .85 });   // halo por cima do fogo e dos raios; null sem WebGL2
 const hands = new Map();
 const advice = mode === "fire"
   ? "Abre a palma para acender o fogo. Fecha a mão para apagar. Também podes estalar os dedos."
@@ -156,6 +158,7 @@ function render(time) {
     if (trackingStatus.textContent !== message) trackingStatus.textContent = message;
   }
   effects.render(time, fires, electricity);
+  glow?.render();
   frame = requestAnimationFrame(render);
 }
 
