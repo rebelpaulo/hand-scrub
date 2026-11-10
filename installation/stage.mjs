@@ -6,7 +6,7 @@ export function connectStage({ frame, selectTarget, showMessage, showCue }) {
   const client = sessionStorage.getItem(key) || crypto.randomUUID();
   sessionStorage.setItem(key, client);
   const generation = crypto.randomUUID();
-  let launch, app, busy = false, changed = false, feedback, consecutiveFailures = 0;
+  let launch, app, busy = false, changed = false, feedback, failingSince;
   let selecting = false, cueState;
   const fullscreen = document.getElementById("stage-fullscreen");
   fullscreen.hidden = false;
@@ -25,7 +25,7 @@ export function connectStage({ frame, selectTarget, showMessage, showCue }) {
       const sent = feedback;
       const next = await request("display", { client, generation, ...sent });
       if (feedback === sent) feedback = undefined;
-      consecutiveFailures = 0;
+      failingSince = undefined;
       if (next.launch !== launch || next.app !== app) {
         launch = next.launch;
         app = next.app;
@@ -43,7 +43,11 @@ export function connectStage({ frame, selectTarget, showMessage, showCue }) {
         else showMessage(next.state.enabled ? "Escolhe uma experiência no touchscreen." : "A equipa está a preparar a sala.");
       }
     } catch (error) {
-      if (++consecutiveFailures >= 2 || error.status === 403 || error.status === 409) {
+      // Uma falha de rede curta não apaga a experiência a meio. 8 s é o tempo
+      // que o servidor espera antes de dar o projetor por perdido e acabar a
+      // sessão (displayWindow em server.mjs); recusas explícitas são imediatas.
+      failingSince ??= Date.now();
+      if (Date.now() - failingSince >= 8000 || error.status === 403 || error.status === 409) {
         launch = app = undefined;
         selectTarget("idle");
         showMessage(error.message);

@@ -14,7 +14,7 @@
      textura WebGL (desenhado, espelhado, no #src, que por sua vez alimenta o
      shader). Tudo o que o utilizador vê passa pelo #gl. */
   video#cam { position: fixed; inset: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-  canvas#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
+  canvas#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #000; touch-action: none; }
 
   #notice {
     position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -531,6 +531,7 @@ void main() {
    * ========================================================================== */
 
   let landmarker = null, cameraReady = false, lastVideoTime = -1;
+  let noCamera = false;   // sem câmara: fundo de luzes e caixa por toque
 
   // Se o modelo de mãos falhar (rede, CDN em baixo), arranca a câmara na
   // mesma — degradação honesta: sem uHasBox a caixa nunca aparece, mas o
@@ -565,19 +566,38 @@ void main() {
         clearNotice();
       } else {
         window.Palco?.availability("error", "Modelo de mãos indisponível.");
-        showNotice("⚠️ sem modelo de mãos (rede?) — vês a câmara em direto, sem caixa por gestos");
+        showNotice("⚠️ sem modelo de mãos (rede?) — arrasta o dedo no ecrã para desenhar a caixa");
       }
       stream.getVideoTracks()[0]?.addEventListener("ended", () => {
         cameraReady = false;
+        camEl.srcObject = null;   // senão o último quadro ficava congelado no ecrã
         window.Palco?.availability("error", "A câmara desligou-se.");
-        showNotice("📷 câmara desligada");
+        touchOnly("📷 câmara desligada");
       });
     } catch (e) {
       window.Palco?.availability("error", "Câmara indisponível.");
-      showNotice(modelOk
-        ? "📷 câmara indisponível — liga uma câmara e recarrega a página"
-        : "📷 câmara e modelo de mãos indisponíveis — liga uma câmara e recarrega a página");
+      touchOnly("📷 sem câmara");
     }
+  }
+
+  // Sem câmara a experiência continua: um fundo de luzes a passear dá aos
+  // efeitos o que mostrar, e a caixa desenha-se com o dedo (ver TOQUE).
+  function touchOnly(why) {
+    noCamera = true;
+    showNotice(why + " — arrasta o dedo no ecrã para desenhar a caixa do efeito");
+    if (!hasBox) setTouchBox(W * .25, H * .22, W * .75, H * .78);
+  }
+  function drawDemoSource(now) {
+    const t = now / 1000, r = Math.min(W, H) * .45;
+    srcCtx.fillStyle = "#07060d"; srcCtx.fillRect(0, 0, W, H);
+    srcCtx.globalCompositeOperation = "lighter";
+    for (const [color, fx, fy, phase] of [["#ff7a3c", .31, .23, 0], ["#3cc8ff", .23, .37, 2], ["#b45cff", .41, .29, 4], ["#ffd24a", .17, .43, 1]]) {
+      const x = W * (.5 + .4 * Math.sin(t * fx + phase)), y = H * (.5 + .38 * Math.cos(t * fy + phase * 1.7));
+      const glow = srcCtx.createRadialGradient(x, y, 0, x, y, r);
+      glow.addColorStop(0, color); glow.addColorStop(1, color + "00");
+      srcCtx.fillStyle = glow; srcCtx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    srcCtx.globalCompositeOperation = "source-over";
   }
 
   function coverTransform(fw, fh) {
@@ -702,8 +722,30 @@ void main() {
     return Math.abs(area2) / 2 > 1; // > 1px² — descarta degenerados
   }
 
+  /* TOQUE — arrastar no ecrã desenha a caixa, de canto a canto. Enquanto o dedo
+     arrasta manda o toque; ao largar, a caixa fica onde está até as duas mãos
+     a voltarem a agarrar. */
+  let touchDrag = null;
+  function setTouchBox(x0, y0, x1, y1) {
+    boxCorners = { TL: { x: x0, y: y0 }, TR: { x: x1, y: y0 }, BR: { x: x1, y: y1 }, BL: { x: x0, y: y1 } };
+    hasBox = true;
+  }
+  glCanvas.addEventListener("pointerdown", e => { touchDrag = { id: e.pointerId, x: e.clientX, y: e.clientY }; });
+  glCanvas.addEventListener("pointermove", e => {
+    if (e.pointerId !== touchDrag?.id) return;
+    const x0 = Math.min(touchDrag.x, e.clientX), x1 = Math.max(touchDrag.x, e.clientX);
+    const y0 = Math.min(touchDrag.y, e.clientY), y1 = Math.max(touchDrag.y, e.clientY);
+    if (x1 - x0 < 12 || y1 - y0 < 12) return;   // um toque parado não é uma caixa
+    if (!touchDrag.moved) clearNotice();   // a dica já fez o seu trabalho
+    touchDrag.moved = true;
+    setTouchBox(x0, y0, x1, y1);
+  });
+  for (const type of ["pointerup", "pointercancel"])
+    glCanvas.addEventListener(type, e => { if (e.pointerId === touchDrag?.id) touchDrag = null; });
+
   function updateBox(now) {
     if (manualBoxActive) { boxCorners = manualBox; hasBox = true; boxReason = "a seguir"; rejectedQuad = null; return; }
+    if (touchDrag?.moved) { boxReason = "toque"; rejectedQuad = null; return; }
     const L = handState.Left, R = handState.Right;
     if (!(L.visible && R.visible)) {
       // solto: caixa congela onde estava. Uma falha de deteção de um quadro não
@@ -988,8 +1030,9 @@ void main() {
       const el = testSourceEl || camEl;
       const vw = testSourceEl ? (el.width || 0) : (el.videoWidth || 0);
       const vh = testSourceEl ? (el.height || 0) : (el.videoHeight || 0);
-      if (vw && vh) {
-        drawSourceFrame(el, vw, vh);
+      if (vw && vh) drawSourceFrame(el, vw, vh);
+      else if (noCamera) drawDemoSource(now);
+      if (vw && vh || noCamera) {
         uploadSourceTexture(srcCanvas);
         render(now);
       }

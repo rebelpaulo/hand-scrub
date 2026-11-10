@@ -658,7 +658,8 @@ function handleMsg(payload) {
       // um painel (re)carregado pergunta pelo mundo: diz-lhe se há foto congelada
       // e que pincel está em uso (senão mostrava o pincel por omissão enquanto
       // as mãos desenhavam com o anterior)
-      send("dstate", { hasPhoto: photoOnDisplay, state: currentState, rev: currentStateRev });
+      // ...e o desenho que cá está, para o eco do painel não recomeçar em branco
+      send("dstate", { hasPhoto: photoOnDisplay, state: currentState, rev: currentStateRev, ink: inkData() });
       break;
     case "zones":
       // substitui o estado por completo (nunca deltas, mesmo padrão do 'state')
@@ -896,6 +897,24 @@ function sendPhotoData(rect) {
     if (dataUrl.length > PHOTODATA_MAX_BYTES) return; // não coube de forma nenhuma: não envia, eco do tablet fica sem foto
     send("photodata", { img: dataUrl });
   } catch { /* toDataURL pode falhar (ex.: canvas tainted por CORS) — sequência de foto continua normalmente, só o eco do tablet fica sem foto */ }
+}
+// O desenho da parede, reduzido e com transparência, para um painel
+// recarregado (mesmos limites da foto). Sem WebP no browser da parede sai PNG,
+// que só segue se couber.
+function inkData() {
+  if (!undoStack.length && !redoStack.length) return undefined;   // nada desenhado
+  try {
+    const scale = Math.min(1, PHOTODATA_MAX_SIDE / Math.max(drawCanvas.width, drawCanvas.height));
+    const oc = document.createElement("canvas");
+    oc.width = Math.max(1, Math.round(drawCanvas.width * scale));
+    oc.height = Math.max(1, Math.round(drawCanvas.height * scale));
+    oc.getContext("2d").drawImage(drawCanvas, 0, 0, oc.width, oc.height);
+    for (let q = .8; q > .15; q -= .2) {
+      const url = oc.toDataURL("image/webp", q);
+      if (url.length <= PHOTODATA_MAX_BYTES) return url;
+      if (!url.startsWith("data:image/webp")) break;
+    }
+  } catch { /* sem imagem: o painel fica com o eco vazio, como antes */ }
 }
 function abortPhotoSequence() {
   countdownNum.hidden = true;
