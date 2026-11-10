@@ -22,6 +22,7 @@ const mode = document.body.dataset.effect === "electric" ? "electric" : "fire";
 const stage = document.createElement("canvas");
 stage.setAttribute("aria-hidden", "true");
 if (mode === "electric") stage.style.mixBlendMode = "screen";
+else stage.style.opacity = ".8";   // a mão vê-se um pouco através da chama
 canvas.after(stage);
 const engine = reduced.matches ? null : createEngine(stage, null, mode === "fire");
 if (!engine) stage.remove();
@@ -35,11 +36,12 @@ engine?.setEffect(mode === "fire"
   ? { ...FOGO, parts: [], fluid: { ...FOGO.fluid, mode: "flame", amount: 0, fuel: 1.4, fuelCap: 1.2, radius: .7, diss: 3.1, vdiss: 1, buoy: 300, curl: 14 }, post: { ...OVER_CAMERA, key: 2.4 } }
   : { pal: "chama", fluid: { mode: "glow", radius: .45, diss: 3, vdiss: 1, curl: 10, amount: .5 }, bolts: { type: "arc" }, post: { ...OVER_CAMERA, bloom: .85 } });
 const FLAME_POINTS = [4, 8, 12, 16, 20, 9, 0];   // pontas dos dedos, meio da palma e pulso
-// Silhueta da mão em cápsulas [de, até, raio em palmas]: dedos finos, palma cheia.
+// Silhueta da mão em cápsulas [de, até, raio em palmas]. Mais larga do que a
+// mão, para a chama a envolver por fora em vez de só a tapar.
 const HAND_FUEL = [
   ...[[1, 2], [2, 3], [3, 4], [5, 6], [6, 7], [7, 8], [9, 10], [10, 11], [11, 12], [13, 14], [14, 15], [15, 16], [17, 18], [18, 19], [19, 20]]
-    .map(([a, b]) => [a, b, b % 4 ? .085 : .07]),
-  [0, 1, .2], [0, 5, .2], [0, 9, .22], [0, 13, .2], [0, 17, .2], [5, 17, .18], [1, 5, .16],
+    .map(([a, b]) => [a, b, b % 4 ? .13 : .115]),
+  [0, 1, .3], [0, 5, .3], [0, 9, .32], [0, 13, .3], [0, 17, .3], [5, 17, .27], [1, 5, .24],
 ];
 let emitters = new Set();
 
@@ -57,7 +59,7 @@ function drive(time, fires, electricity) {
     for (const i of FLAME_POINTS) touch(fire.id + ":" + i, p[i]);
     for (const [a, b, r] of HAND_FUEL) fuel.push([p[a].x * k, p[a].y * k, p[b].x * k, p[b].y * k, r * palm * k]);
     // punho: o fogo desce um pouco abaixo do pulso, como uma manga
-    fuel.push([p[0].x * k, p[0].y * k, (p[0].x + (p[0].x - p[9].x) * .35) * k, (p[0].y + (p[0].y - p[9].y) * .35) * k, .2 * palm * k]);
+    fuel.push([p[0].x * k, p[0].y * k, (p[0].x + (p[0].x - p[9].x) * .35) * k, (p[0].y + (p[0].y - p[9].y) * .35) * k, .3 * palm * k]);
     unit += palm / fires.length;
   }
   for (const { key, a, b } of electricity?.connections || []) { touch(key + ":a", a); touch(key + ":b", b); }
