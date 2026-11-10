@@ -104,6 +104,9 @@
      script): o "← voltar" é o único chrome deste ecrã, e projetado era um
      botão na parede do edifício */
   body.chrome-off #back { opacity: 0; pointer-events: none; }
+  /* idem para os avisos ("câmara indisponível", "abre o painel num tablet"):
+     a equipa vê o estado na Área da equipa, não na parede */
+  body.chrome-off #notice, body.chrome-off #hint { display: none; }
 </style>
 </head>
 <body>
@@ -465,12 +468,23 @@ window.__warpDebug = {
 let W = 0, H = 0;
 function resize() {
   const dpr = window.devicePixelRatio || 1;
+  // o desenho e a foto sobrevivem ao resize (entrar/sair de ecrã inteiro):
+  // copiam-se antes e voltam a desenhar-se à nova escala
+  const keep = [drawCanvas, photoCanvas].map(cv => {
+    if (!cv.width || !cv.height) return null;
+    const copy = document.createElement("canvas");
+    copy.width = cv.width; copy.height = cv.height;
+    copy.getContext("2d").drawImage(cv, 0, 0);
+    return copy;
+  });
   W = window.innerWidth; H = window.innerHeight;
   for (const [cv, ctx] of [[photoCanvas, pctx], [drawCanvas, dctx], [strokeCanvas, sctx], [cursorCanvas, cctx], [zoneCanvas, zctx]]) {
     cv.width = W * dpr; cv.height = H * dpr;
     cv.style.width = W + "px"; cv.style.height = H + "px";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
+  if (keep[0]) dctx.drawImage(keep[0], 0, 0, W, H);
+  if (keep[1]) pctx.drawImage(keep[1], 0, 0, W, H);
   // warpCanvas (WebGL) + o offscreen de composição: mesma resolução nativa das
   // camadas de conteúdo, para o warp não perder nitidez.
   warpCanvas.width = W * dpr; warpCanvas.height = H * dpr;
@@ -478,7 +492,6 @@ function resize() {
   warpOffscreen.width = W * dpr; warpOffscreen.height = H * dpr;
   warpOffCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   if (warp) warp.resize();
-  undoStack = []; redoStack = []; // snapshots à resolução antiga deixam de bater certo
   renderZones(); // vetorial: não se perde no resize, só recalcula a partir de x/y normalizados
 }
 window.addEventListener("resize", resize);
@@ -642,7 +655,9 @@ function handleMsg(payload) {
       break;
     case "hello":
       // um painel (re)carregado pergunta pelo mundo: diz-lhe se há foto congelada
-      send("dstate", { hasPhoto: photoOnDisplay });
+      // e que pincel está em uso (senão mostrava o pincel por omissão enquanto
+      // as mãos desenhavam com o anterior)
+      send("dstate", { hasPhoto: photoOnDisplay, state: currentState, rev: currentStateRev });
       break;
     case "zones":
       // substitui o estado por completo (nunca deltas, mesmo padrão do 'state')
@@ -1047,7 +1062,8 @@ function incrementalSegment(strokeObj, A, C, B) {
     strokeObj.distSinceStamp = (strokeObj.distSinceStamp || 0) + segLen;
     if (strokeObj.distSinceStamp >= state.size * 1.8) {
       doStamp = true; strokeObj.distSinceStamp = 0;
-      if (!strokeObj.emoji || Math.random() < 0.5) strokeObj.emoji = STAMP_EMOJIS[Math.random() * STAMP_EMOJIS.length | 0];
+      if (strokeObj.seed !== undefined) strokeObj.emoji = STAMP_EMOJIS[(strokeObj.seed + strokeObj.stamps++) % STAMP_EMOJIS.length];
+      else if (!strokeObj.emoji || Math.random() < 0.5) strokeObj.emoji = STAMP_EMOJIS[Math.random() * STAMP_EMOJIS.length | 0];
     }
   }
 
@@ -1093,7 +1109,7 @@ function restoreSnapshot(c) {
   // espaço de pixels nativo (sem o transform de DPR) — 1:1 com o snapshot
   dctx.save(); dctx.setTransform(1, 0, 0, 1, 0, 0);
   dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
-  if (c) dctx.drawImage(c, 0, 0);
+  if (c) dctx.drawImage(c, 0, 0, drawCanvas.width, drawCanvas.height); // à escala atual: o histórico sobrevive a um resize
   dctx.restore();
 }
 function pushUndo(snapshot) {
@@ -1215,7 +1231,7 @@ function appendStrokePoint(strokeObj, px, py) {
   // crayon: 3 offsets de jitter semeados AGORA (estáveis nos redesenhos por frame)
   newPt.jit = [0, 1, 2].map(() => [(Math.random() - 0.5) * size * 0.3, (Math.random() - 0.5) * size * 0.3]);
   // rainbow: hue avança ao longo do path por segmento, semeado por ponto
-  if (lastPt) strokeObj.hue = (strokeObj.hue + dist(lastPt, newPt) * 0.4) % 360;
+  if (lastPt) strokeObj.hue = (strokeObj.hue + dist(lastPt, newPt) * 0.4 * (strokeObj.hueK || 1)) % 360;
   newPt.hue = strokeObj.hue;
   pts.push(newPt);
 
@@ -1282,17 +1298,33 @@ function bakeStroke(strokeObj) {
    incrementalSegment/renderStrokePath/bakeStroke) — grátis por reuso. */
 const tabletStrokes = new Map(); // "src:sid" -> strokeObj (mesma forma do st.stroke do pinch)
 const TABLET_STROKE_TIMEOUT_MS = 10000; // órfão: 'start' sem 'end' há mais de 10s
+function newTabletStroke(key, payload) {
+  const brush = { ...DEFAULT_STATE, ...(payload.brush || {}) }; // congelado por traço, como no pinch
+  // O tablet desenha num canvas mais pequeno do que a parede: a espessura (e
+  // o ritmo do arco-íris) vêm na escala dele. brush.cw = largura do canvas do
+  // tablet em px; sem ela (painel antigo) fica como estava.
+  const k = brush.cw > 0 ? W / brush.cw : 1;
+  brush.size = Math.min(400, Math.max(1, brush.size * k || 1));
+  brush.mirror = [2, 4, 8].includes(brush.mirror) ? brush.mirror : 0;
+  const strokeObj = { pts: [], buf: [], hue: Number.isFinite(brush.hue) ? brush.hue : Math.random() * 360, hueK: 1 / k,
+    seed: Number.isSafeInteger(brush.seed) ? brush.seed : undefined, stamps: 0,
+    distSinceStamp: 0, emoji: null, preSnap: snapshotDrawCanvas(), brush, lastSeen: Date.now() };
+  tabletStrokes.set(key, strokeObj);
+  return strokeObj;
+}
 function handleTstroke(payload) {
   const key = payload.src + ":" + payload.sid;
   if (payload.phase === "start") {
-    const brush = { ...DEFAULT_STATE, ...(payload.brush || {}) }; // brush vem SEMPRE no 'start' — congelado por traço, como no pinch
-    const strokeObj = { pts: [], buf: [], hue: Math.random() * 360, distSinceStamp: 0, emoji: null, preSnap: snapshotDrawCanvas(), brush, lastSeen: Date.now() };
-    tabletStrokes.set(key, strokeObj);
+    const strokeObj = newTabletStroke(key, payload);
     for (const [nx, ny] of payload.pts || []) appendStrokePoint(strokeObj, nx * W, ny * H);
     return;
   }
-  const strokeObj = tabletStrokes.get(key);
-  if (!strokeObj) return; // 'move'/'end' sem 'start' correspondente (ex.: display recarregado a meio do traço) — ignora
+  let strokeObj = tabletStrokes.get(key);
+  // 'move' de um traço que já não existe (o 'start' perdeu-se, ou o dedo esteve
+  // parado mais de 10 s e o traço foi fechado): continua-o como traço novo, com
+  // o pincel que o tablet repete em cada 'move'. Sem pincel (ou no 'end'), ignora.
+  if (!strokeObj && payload.phase === "move" && payload.brush) strokeObj = newTabletStroke(key, payload);
+  if (!strokeObj) return;
   strokeObj.lastSeen = Date.now();
   if (payload.phase === "move") {
     for (const [nx, ny] of payload.pts || []) appendStrokePoint(strokeObj, nx * W, ny * H);
@@ -1300,6 +1332,10 @@ function handleTstroke(payload) {
   }
   if (payload.phase === "end") {
     for (const [nx, ny] of payload.pts || []) appendStrokePoint(strokeObj, nx * W, ny * H); // pts finais, se houver
+    // toque sem arrasto num pincel de path: não desenha nada, mas o tablet já
+    // empilhou um passo de desfazer — empilha-se aqui também, senão o próximo
+    // "desfazer" apagava na parede um traço que o tablet mantinha
+    if (PATH_TOOLS.has(strokeObj.brush.tool) && strokeObj.pts.length < 2) pushUndo(snapshotDrawCanvas());
     bakeStroke(strokeObj);
     tabletStrokes.delete(key);
   }
@@ -1415,8 +1451,9 @@ function loop() {
   const now = performance.now();
   if (cam.currentTime !== lastVideoTime) {
     lastVideoTime = cam.currentTime;
-    const res = landmarker.detectForVideo(cam, now);
-    processHands(res, now);
+    // uma exceção aqui matava a cadeia de rAF: com warp ativo a parede congelava
+    try { processHands(landmarker.detectForVideo(cam, now), now); }
+    catch (e) { console.error("magicdraw-display: tracking falhou neste quadro", e); }
     if (!firstFrameReported) {
       firstFrameReported = true;
       window.Palco?.availability("ready");
