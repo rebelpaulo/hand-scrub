@@ -114,6 +114,7 @@ const PINCH_DEBOUNCE_MS = 120;
 
 // head/face tracking
 const FACE_EVERY_N = 3;                // run face detection every 3rd tracked frame (cheap; hands run every frame)
+const PINCH_LOST_GRACE_MS = 150;       // quadros sem a mão tolerados a meio de um pinch
 const HEAD_EMA = 0.3;                  // smoothing on head center/radius
 const FALLBACK_RADIUS_FACTOR = 0.28;   // no face detected -> anchor cloud drifts to screen center with this "radius"
 
@@ -508,6 +509,7 @@ resize();
 
 /* ================= head anchor (from FaceDetector, EMA-smoothed) ================= */
 let head = null; // { cx, cy, r } in screen px, or null while no face has been seen
+let headSeenAt = 0;
 function currentHead() {
   if (head) return head;
   return { cx: W / 2, cy: H / 2, r: Math.min(W, H) * FALLBACK_RADIUS_FACTOR };
@@ -554,7 +556,9 @@ function drawMaskThroughCover(ctx, img) {
 
 function processFace(res) {
   const dets = res.detections || [];
-  if (!dets.length) { head = null; return; }
+  // uma deteção falhada não larga a cabeça: só ao fim de 1 s sem cara
+  if (!dets.length) { if (performance.now() - headSeenAt > 1000) head = null; return; }
+  headSeenAt = performance.now();
   let best = dets[0], bestArea = best.boundingBox.width * best.boundingBox.height;
   for (let i = 1; i < dets.length; i++) {
     const bb = dets[i].boundingBox, a = bb.width * bb.height;
@@ -578,7 +582,7 @@ function processFace(res) {
    Trusted as-is (no live-test evidence here contradicted it, unlike shadow.html's
    history) -- porting shadow's polarity self-check would double this section for
    a case we have no evidence applies to this model/deployment. */
-let maskCanvas = null, mctx = null, maskReady = false;
+let maskCanvas = null, mctx = null, maskImage = null, maskReady = false;
 function paintPersonMask(result) {
   const mask = result?.categoryMask;
   if (!mask) return;
@@ -588,14 +592,11 @@ function paintPersonMask(result) {
     maskCanvas = document.createElement("canvas");
     maskCanvas.width = w; maskCanvas.height = h;
     mctx = maskCanvas.getContext("2d");
+    maskImage = mctx.createImageData(w, h);   // reutilizado: só o alfa muda (a cor não conta no destination-out)
   }
-  const id = mctx.createImageData(w, h);
-  for (let i = 0; i < w * h; i++) {
-    const o = i * 4;
-    id.data[o] = 0; id.data[o + 1] = 0; id.data[o + 2] = 0; // colour is irrelevant for destination-out; only alpha matters
-    id.data[o + 3] = data[i] !== 0 ? 255 : 0;                // person = category != 0
-  }
-  mctx.putImageData(id, 0, 0);
+  const alpha = maskImage.data;
+  for (let i = 0; i < w * h; i++) alpha[i * 4 + 3] = data[i] !== 0 ? 255 : 0;   // person = category != 0
+  mctx.putImageData(maskImage, 0, 0);
   maskReady = true;
 }
 function processSeg(res) {
@@ -682,7 +683,8 @@ function processHands(res, now) {
     if (st.pinching) {
       const midXn = (lm[4].x + lm[8].x) / 2, midYn = (lm[4].y + lm[8].y) / 2;
       const p = camToScreen(midXn, midYn); // cover + espelho — alinha o íman com os dedos VISÍVEIS (alvo de atração)
-      pts.push({ x: p.x, y: p.y, userHand, since: st.pinchStart || 0 });
+      pts.push(st.lastPt = { x: p.x, y: p.y, userHand, since: st.pinchStart || 0 });
+      st.seenAt = now;
       // ARREMESSO: EMA da velocidade rastreada na PALMA (ponto médio do pulso
       // lm[0] e da base do dedo médio lm[9]), NÃO no ponto de pinch -- abrir os
       // dedos desloca o ponto médio polegar-indicador mesmo com a mão parada,
@@ -710,13 +712,18 @@ function processHands(res, now) {
   for (const name of ["Left", "Right"]) {
     if (seen[name]) continue;
     const st = handState[name];
+    // a deteção falha quadros soltos (mão desfocada pelo movimento): o pinch
+    // aguenta PINCH_LOST_GRACE_MS no último ponto antes de contar como largada
+    if (st.pinching && now - st.seenAt < PINCH_LOST_GRACE_MS) { pts.push(st.lastPt); continue; }
+    st.belowSince = undefined;   // ao reentrar, o pinch volta a dever o debounce
     if (st.pinching) {
       lastReleaseHand = name; lastReleaseVX = st.vx || 0; lastReleaseVY = st.vy || 0;
       lastReleaseHoldMs = st.pinchStart !== undefined ? now - st.pinchStart : 0;
     }
     st.pinching = false;
   }
-  pinchPoints = pts;
+  // A/B da banda de duas mãos fixos por mão: a ordem de deteção troca entre quadros
+  pinchPoints = pts.sort((a, b) => a.userHand < b.userHand ? -1 : 1);
 }
 
 /* ================= particles ================= */
@@ -1031,6 +1038,7 @@ function drawParticles(now) {
 /* ================= perf guard: shrink the swarm if frames run slow ================= */
 let frameTimeEMA = 16, lastPerfStepAt = 0, perfSteps = 0, goodStreakStart = null;
 function perfGuard(rawDtMs, now) {
+  if (!overlayDismissed || rawDtMs > 250) return;   // carregar modelos e voltar de um separador escondido não são carga
   frameTimeEMA = frameTimeEMA * 0.9 + rawDtMs * 0.1;
 
   // FREEZE: a live pinch or the ~2s right after a release is a transient cost
@@ -1190,7 +1198,8 @@ async function start() {
     setLoadStatus("a preparar a primeira deteção");
     stream.getVideoTracks()[0]?.addEventListener("ended", () => {
       running = false;
-      showNotice("📷 câmara indisponível — câmara desligada");
+      camBg.srcObject = null; maskReady = false; head = null;   // sem o último quadro congelado nem a silhueta fantasma
+      touchOnly("📷 câmara desligada — toca e arrasta para atrair o enxame");
       window.Palco?.availability("error", "A câmara desligou-se.");
     });
   } catch (e) {
@@ -1210,7 +1219,7 @@ function touchOnly(msg) {
   $("startOverlay")?.remove();
 }
 addEventListener("pointerdown", e => {
-  if (running || e.target.closest("a, button") || $("startOverlay")) return;
+  if (running || e.target.closest?.("a, button") || $("startOverlay")) return;
   const now = performance.now();
   touchPoint = { x: e.clientX, y: e.clientY, userHand: "Right", since: now, id: e.pointerId, t: now };
   tornadoSign = HAND_SWIRL.Right;

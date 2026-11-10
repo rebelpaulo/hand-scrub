@@ -288,7 +288,7 @@
   const pillRejEl = document.getElementById("pillRej"), rejValEl = document.getElementById("rejVal");
 
   const srcCanvas = document.createElement("canvas"); // staging 2D: cover+espelho do vídeo, por frame
-  const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true });
+  const srcCtx = srcCanvas.getContext("2d");   // nunca é lido de volta: fica acelerado pela GPU
 
   let W = 0, H = 0;
   function applySize(w, h) {
@@ -539,6 +539,7 @@ void main() {
   // própria câmara também não estiver disponível.
   async function startCamera() {
     let modelOk = true;
+    showNotice("a preparar a câmara e o tracking…");   // o modelo demora: sem isto a projeção fica preta sem explicação
     try {
       const { FilesetResolver, HandLandmarker } =
         await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
@@ -644,6 +645,7 @@ void main() {
     BLx: new OneEuroFilter(OE.minCutoff, OE.beta, OE.dCutoff), BLy: new OneEuroFilter(OE.minCutoff, OE.beta, OE.dCutoff),
   };
   let boxCorners = null, hasBox = false;
+  let handsLostAt;
   let boxCleared = false; // tecla 0/Esc: esconde a caixa até uma mão sumir e as duas voltarem (re-arma como um "largar")
   let manualBoxActive = false, manualBox = null; // gancho de teste — ver window.__lab
 
@@ -704,11 +706,15 @@ void main() {
     if (manualBoxActive) { boxCorners = manualBox; hasBox = true; boxReason = "a seguir"; rejectedQuad = null; return; }
     const L = handState.Left, R = handState.Right;
     if (!(L.visible && R.visible)) {
-      boxCleared = false; // solto: caixa congela onde estava
+      // solto: caixa congela onde estava. Uma falha de deteção de um quadro não
+      // conta como "largar" — senão a caixa apagada voltava sozinha.
+      handsLostAt ??= now;
+      if (now - handsLostAt > 180) boxCleared = false;
       boxReason = (L.visible || R.visible) ? "só 1 mão" : "sem mãos"; // NEW: instrumentação
       rejectedQuad = null;
       return;
     }
+    handsLostAt = undefined;
     if (boxCleared) { boxReason = "apagada"; rejectedQuad = null; return; } // apagada por tecla — espera uma mão sumir para re-armar
 
     // a mão mais à esquerda no ecrã dá a aresta esquerda, a outra a direita;
@@ -861,7 +867,7 @@ void main() {
   let clampPip = () => {};
   function setPipVisible(on) {
     pipEl.hidden = !on;
-    pipReopenEl.hidden = !!on;
+    pipReopenEl.hidden = !!on || parent !== window;   // na projeção o botão de reabrir não aparece
     // Reenquadra ao reabrir (review PR #47): o listener de resize sai cedo
     // enquanto o preview está escondido, por isso um redimensionamento ou
     // rotação nesse intervalo deixava-o com left/top de um ecrã que já não

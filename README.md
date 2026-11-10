@@ -157,14 +157,19 @@ requer loopback ou HTTPS.
   (fluido, campos, sprites, fitas, bloom), simulações em
   `installation/drawphysics-sim.mjs`, receitas dos efeitos em
   `installation/drawphysics-effects.mjs`. Na projeção o pincel roda sozinho.
+- `installation/drawphysics-engine.mjs` — o motor do Draw Physics sem página
+  à volta (`createEngine(canvas)` → `setEffect`, `fingerDown/Move/Up`,
+  `frame`). É o que desenha o fogo das Mãos de Fogo e os raios dos Raios nos
+  Dedos: cada ponta de dedo é um "dedo" do motor, num canvas somado à câmara.
 - `installation/glow.mjs` — halo (bloom) em WebGL2 partilhado pelas
   experiências desenhadas em Canvas 2D: lê o canvas como textura e soma só o
-  brilho por cima, com dither contra faixas no projetor. Usado no Pinch Draw,
-  nas Mãos de Fogo e nos Raios nos Dedos. Sem WebGL2, ou se os quadros
+  brilho por cima, com dither contra faixas no projetor. Usado no Pinch Draw
+  (e nas Mãos de Fogo e Raios quando caem no desenho antigo). Sem WebGL2, ou se os quadros
   passarem de ~28 ms durante dois segundos, desliga-se e fica a imagem
   original.
 - `installation/smooth.mjs` — filtro One Euro para pontos do tracking (firme
-  com a mão parada, sem atraso em movimento). Usado no Draw Physics.
+  com a mão parada, sem atraso em movimento). Usado no Draw Physics e no
+  Pinch Draw.
 - **Sem câmara** (ou fora da instalação): Pinch Draw desenha com o dedo ou o
   rato, o Enxame segue o dedo, o Butterfly Effect percorre o vídeo ao
   arrastar, as Mãos de Fogo e os Raios têm demonstração, e o Draw Physics

@@ -375,7 +375,11 @@ export class BoltSys {
     if (S.time < this.next) return;
     this.next = S.time + .045;
     const downs = S.vps.filter(v => v.down);
-    if (c.type === "strike") {
+    // S.links: pares de pontos dados por fora (os Raios ligam pontas de dedos
+    // de duas mãos); com eles, os dedos já não se ligam em cadeia.
+    if (S.links) {
+      for (const [x0, y0, x1, y1] of S.links) for (let k = 0; k < 2; k++) this.push(x0, y0, x1, y1, (k ? 1.3 : 2.8) * u * size, .09, k ? 0 : 1);   // vários pares ao mesmo tempo: mais finos
+    } else if (c.type === "strike") {
       for (const v of downs) for (let i = 0; i < 2; i++) {
         const a = rnd(TAU), l = rnd(200, 520) * u * size;
         this.push(v.x, v.y, v.x + Math.cos(a) * l, v.y + Math.sin(a) * l, 3.2 * u, .1, 2);

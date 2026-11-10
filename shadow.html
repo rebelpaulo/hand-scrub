@@ -284,13 +284,16 @@ let pipClosed = false;
   reopen.addEventListener("click", () => {
     pipClosed = false; pip.hidden = false; reopen.hidden = true; saveState();
   });
+  let shellPreview = null;   // último "campreview" do shell de projeção: manda sobre o estado guardado
   pip.applySavedVisibility = () => {
+    if (shellPreview !== null) return pip.setCamPreview(shellPreview);
     pip.hidden = pipClosed; reopen.hidden = !pipClosed;
     if (!pipClosed) { const r = pip.getBoundingClientRect(); placePip(r.left, r.top); }
   };
   // liga/desliga o preview via comando externo (shell de projeção) — não mexe
   // em pipClosed/localStorage, é só visibilidade momentânea
-  pip.setCamPreview = on => { pip.hidden = !on; reopen.hidden = on; };
+  // na projeção (dentro do shell) o botão de reabrir nunca aparece: ninguém lhe toca
+  pip.setCamPreview = on => { shellPreview = on; pip.hidden = !on; reopen.hidden = on || parent !== window; };
 
   let sx, sy, ox, oy, dragging = false;
   pip.addEventListener("pointerdown", e => {
@@ -565,12 +568,14 @@ function paintMask(result) {
 
   // overlay de depuração no PiP (não espelhado outra vez — o <canvas#overlay>
   // já tem transform:scaleX(-1) em CSS, tal como no index.html)
-  octx.clearRect(0, 0, overlay.width, overlay.height);
-  octx.globalAlpha = 0.55;
-  octx.filter = "invert(1)"; // tmp agora é preto (gobo) — inverte para branco no PiP, legível sobre o vídeo
-  octx.drawImage(tmp, 0, 0, w, h, 0, 0, overlay.width, overlay.height);
-  octx.filter = "none";
-  octx.globalAlpha = 1;
+  if (!pip.hidden) {   // na projeção o PiP está escondido: não se paga o filtro por máscara
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    octx.globalAlpha = 0.55;
+    octx.filter = "invert(1)"; // tmp agora é preto (gobo) — inverte para branco no PiP, legível sobre o vídeo
+    octx.drawImage(tmp, 0, 0, w, h, 0, 0, overlay.width, overlay.height);
+    octx.filter = "none";
+    octx.globalAlpha = 1;
+  }
 
   // cobertura (proximidade): amostra num canvas minúsculo
   sctx.clearRect(0, 0, SAMPLE_W, SAMPLE_H);
@@ -584,6 +589,7 @@ function paintMask(result) {
   dismissOverlay(); // primeira máscara entregue: o loop de segmentação já está a funcionar
 }
 
+let segFails = 0;
 function segLoop() {
   if (!running) return;
   if (cam.currentTime !== lastVideoTime && cam.readyState >= 2) {
@@ -594,7 +600,12 @@ function segLoop() {
       try {
         res = segmenter.segmentForVideo(cam, t0);
         paintMask(res);
-      } catch { /* frame ocasionalmente instável — ignora e continua */ }
+        segFails = 0;
+      } catch {
+        // um quadro instável ignora-se; trinta seguidos é o segmentador morto:
+        // avisa a equipa em vez de deixar a sombra congelada em silêncio
+        if (++segFails === 30) { toast("⚠️ o reconhecimento da silhueta parou — recarrega a página", 60000); window.Palco?.availability("error", "O reconhecimento da silhueta parou."); }
+      }
       finally {
         // sem callback, a máscara devolvida é um clone nosso: fechar SEMPRE,
         // senão vaza uma WebGLTexture por frame até perder o contexto

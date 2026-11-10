@@ -2,6 +2,8 @@ import { createFireActivation, visibleFingertips, electricConnections, TRACKING_
 import { createElementEffects } from "./elements-fx.mjs";
 import { roomURL } from "./client.mjs";
 import { attachGlow } from "./glow.mjs";
+import { createEngine } from "./drawphysics-engine.mjs";
+import { EFFECTS } from "./drawphysics-effects.mjs";
 
 const video = document.querySelector("#camera");
 const canvas = document.querySelector("#effects");
@@ -12,8 +14,47 @@ const preview = document.querySelector("#preview");
 const reduced = matchMedia("(prefers-reduced-motion: reduce)");
 const embedded = parent !== window;
 const mode = document.body.dataset.effect === "electric" ? "electric" : "fire";
-const effects = createElementEffects(canvas, reduced);
-const glow = attachGlow(canvas, { amount: .85 });   // halo por cima do fogo e dos raios; null sem WebGL2
+// Fogo e raios do motor do Draw Physics, num canvas próprio somado à câmara
+// (fundo preto + mix-blend-mode: screen). Sem WebGL2, ou com movimento
+// reduzido, fica o desenho antigo em Canvas 2D.
+const stage = document.createElement("canvas");
+stage.setAttribute("aria-hidden", "true");
+stage.style.mixBlendMode = "screen";
+canvas.after(stage);
+const engine = reduced.matches ? null : createEngine(stage);
+if (!engine) stage.remove();
+reduced.addEventListener("change", () => location.reload());   // o desenho escolhe-se no arranque: mudar a preferência recarrega
+const effects = engine ? null : createElementEffects(canvas, reduced);
+const glow = engine ? null : attachGlow(canvas, { amount: .85 });
+const FOGO = EFFECTS.find(e => e.id === "fogo");
+const OVER_CAMERA = { bg: [0, 0, 0], vignette: 0, grain: 0, chroma: .1 };
+engine?.setEffect(mode === "fire"
+  ? { ...FOGO, fluid: { ...FOGO.fluid, radius: .6, diss: 2.9, vdiss: 1.2, buoy: 300, amount: 1.45 }, post: OVER_CAMERA }   // chama curta, agarrada à mão
+  : { pal: "chama", fluid: { mode: "glow", radius: .45, diss: 3, vdiss: 1, curl: 10, amount: .5 }, bolts: { type: "arc" }, post: { ...OVER_CAMERA, bloom: .85 } });
+const FLAME_POINTS = [4, 8, 12, 16, 20, 9, 0];   // pontas dos dedos, meio da palma e pulso
+let emitters = new Set();
+
+// Cada ponto em chamas (ou ponta de dedo com raio) é um dedo a desenhar no motor.
+function drive(time, fires, electricity) {
+  const k = engine.S.W / (stage.clientWidth || 1), seen = new Set();
+  const touch = (id, p) => {
+    seen.add(id);
+    if (engine.fingers.has(id)) engine.fingerMove(id, p.x * k, p.y * k); else engine.fingerDown(id, p.x * k, p.y * k);
+  };
+  let unit = 0;
+  for (const fire of fires) {
+    for (const i of FLAME_POINTS) touch(fire.id + ":" + i, fire.points[i]);
+    unit += Math.hypot(fire.points[0].x - fire.points[9].x, fire.points[0].y - fire.points[9].y) / fires.length;
+  }
+  for (const { key, a, b } of electricity?.connections || []) { touch(key + ":a", a); touch(key + ":b", b); }
+  engine.S.links = electricity ? electricity.connections.map(({ a, b }) => [a.x * k, a.y * k, b.x * k, b.y * k]) : null;
+  if (electricity) unit = electricity.unit;
+  // a chama acompanha o tamanho da mão no ecrã (perto da câmara = maior)
+  if (unit) engine.ctl.size = Math.min(1.7, Math.max(.45, unit / (Math.min(stage.clientWidth, stage.clientHeight) * .16)));
+  for (const id of emitters) if (!seen.has(id)) engine.fingerUp(id);
+  emitters = seen;
+  engine.frame(time);
+}
 const hands = new Map();
 const advice = mode === "fire"
   ? "Abre a palma para acender o fogo. Fecha a mão para apagar. Também podes estalar os dedos."
@@ -157,20 +198,20 @@ function render(time) {
     }
     if (trackingStatus.textContent !== message) trackingStatus.textContent = message;
   }
-  effects.render(time, fires, electricity);
-  glow?.render();
+  if (engine) drive(time, fires, electricity);
+  else { effects.render(time, fires, electricity); glow?.render(); }
   frame = requestAnimationFrame(render);
 }
 
 document.querySelector("#demo-preview").addEventListener("click", () => { demoUntil = performance.now() + 5000; });
-window.addEventListener("resize", effects.resize);
+if (effects) window.addEventListener("resize", effects.resize);
 window.addEventListener("pagehide", () => {
   disposed = true;
   cancelAnimationFrame(frame);
   releaseCamera();
 }, { once: true });
 if (!window.Palco) window.addEventListener("pageshow", event => { if (event.persisted) location.reload(); });
-effects.resize();
+effects?.resize();
 frame = requestAnimationFrame(render);
 
 async function start() {
