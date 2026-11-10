@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSnapDetector, visibleFingertips, electricConnections, createFireActivation, nearestHand } from "../elements-gestures.mjs";
+import { createSnapDetector, visibleFingertips, electricConnections, createFireActivation, matchHands } from "../elements-gestures.mjs";
 
 const point = (x, y, z = 0) => ({ x, y, z });
 const hand = () => {
@@ -120,10 +120,12 @@ test("connections persist when visible hands move far apart", () => {
 test("as mãos seguem-se pela posição: cada deteção fica com a mão mais próxima, e uma segunda mão é nova", () => {
   const at = x => ({ points: Object.assign([], { 9: point(x, .5) }) });
   const hands = new Map([["a", at(.2)], ["b", at(.8)]]);
-  const taken = new Set();
-  assert.equal(nearestHand(hands, point(.75, .52), taken), "b");
-  taken.add("b");
-  assert.equal(nearestHand(hands, point(.26, .48), taken), "a");
-  assert.equal(nearestHand(hands, point(.78, .5), taken), undefined, "a mão b já tem dona e a outra está longe");
-  assert.equal(nearestHand(new Map([["novo", {}]]), point(.5, .5), new Set()), undefined, "mão ainda sem pontos");
+  assert.deepEqual(matchHands(hands, [point(.75, .52), point(.26, .48)]), ["b", "a"], "a ordem e a etiqueta não contam");
+  assert.deepEqual(matchHands(hands, [point(.78, .5), point(.82, .5)]), [undefined, "b"], "uma só mão perto: fica com a deteção mais próxima");
+  assert.deepEqual(matchHands(hands, [null, point(.2, .5)]), [undefined, "a"], "deteção inválida não se liga");
+  assert.deepEqual(matchHands(new Map([["novo", {}]]), [point(.5, .5)]), [undefined], "mão ainda sem pontos");
+  // duas mãos a andar para o mesmo lado: a primeira deteção está mais perto da
+  // mão da outra; ligar deteção a deteção criava uma terceira mão
+  assert.deepEqual(matchHands(new Map([["a", at(.2)], ["b", at(.45)]]), [point(.34, .5), point(.52, .5)]), ["a", "b"]);
+  assert.deepEqual(matchHands(new Map([["a", at(.2)], ["b", at(.6)]]), [point(.45, .5), point(.61, .5)]), ["a", "b"]);
 });

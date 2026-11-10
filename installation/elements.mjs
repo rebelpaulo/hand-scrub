@@ -1,4 +1,4 @@
-import { createFireActivation, visibleFingertips, electricConnections, nearestHand, TRACKING_GRACE_MS } from "./elements-gestures.mjs";
+import { createFireActivation, visibleFingertips, electricConnections, matchHands, TRACKING_GRACE_MS } from "./elements-gestures.mjs";
 import { oneEuro } from "./smooth.mjs";
 import { createElementEffects } from "./elements-fx.mjs";
 import { roomURL } from "./client.mjs";
@@ -126,9 +126,10 @@ let handCount = 0;
 
 function sample(result, time) {
   const observed = new Set();
+  const matched = matchHands(hands, result.landmarks.map(raw => raw.length === 21 ? raw[9] : null));
   for (const [index, raw] of result.landmarks.entries()) {
     if (raw.length !== 21) continue;
-    const id = nearestHand(hands, raw[9], observed) ?? "h" + handCount++;
+    const id = matched[index] ?? "h" + handCount++;
     observed.add(id);
     if (!hands.has(id)) hands.set(id, { activate: createFireActivation(), seen: -Infinity, active: false });
     const hand = hands.get(id);
