@@ -1005,9 +1005,6 @@ function trackSwipe(lm) {
   // "palma aberta" falhava sempre durante o movimento, por blur): pulso a
   // atravessar ≥22% do ecrã em ≤450ms, claramente na horizontal
   const t = performance.now(), x = lm[0].x, y = lm[0].y;
-  // salto impossível entre dois quadros = a etiqueta das mãos trocou; não é um varrimento
-  const prev = swipeHist[swipeHist.length - 1];
-  if (prev && Math.abs(x - prev.x) > .15) swipeHist.length = 0;
   swipeHist.push({ t, x, y });
   while (swipeHist.length && t - swipeHist[0].t > 450) swipeHist.shift();
   if (swipeHist.length < 4 || t - lastSwipeAt < 1000) return;
@@ -1166,7 +1163,7 @@ function processHands(res) {
     octx.lineWidth = 4; octx.strokeStyle = "rgba(251,113,133,.9)"; octx.stroke();
   } else {
     // drag mode (v1): pinch agarra, arrastar horizontal faz scrub
-    const isPinch = pinch < +thresh.value * (grabbing ? 1.4 : 1);   // histerese: no limiar o arrasto não liga e desliga
+    const isPinch = pinch < +thresh.value;
     const midX = (lm[4].x + lm[8].x) / 2;
     $("openVal").textContent = pinch.toFixed(2);
     octx.strokeStyle = isPinch ? "rgba(251,113,133,.95)" : "rgba(94,234,212,.5)"; octx.stroke();
