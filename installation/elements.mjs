@@ -23,6 +23,7 @@ stage.style.mixBlendMode = "screen";
 canvas.after(stage);
 const engine = reduced.matches ? null : createEngine(stage);
 if (!engine) stage.remove();
+reduced.addEventListener("change", () => location.reload());   // o desenho escolhe-se no arranque: mudar a preferência recarrega
 const effects = engine ? null : createElementEffects(canvas, reduced);
 const glow = engine ? null : attachGlow(canvas, { amount: .85 });
 const FOGO = EFFECTS.find(e => e.id === "fogo");
